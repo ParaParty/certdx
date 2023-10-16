@@ -1,0 +1,19 @@
+# Client will try following servers sequentially
+# Make sure your commonly used server is at the top
+[[Servers]]
+serverUrl = "https://acmserver.lanlanlu.com:19198/1145141919810"
+token = "KFCCrazyThursdayVMe50"
+
+[[Servers]]
+serverUrl = "https://mybackupserver.local:11451/1919810"
+token = "FakeNews!!"
+
+[Certification]
+savePath = "/path/to/directory/which/saves/your/certifications"
+domain = [
+    "mm.lanlanlu.com",
+    "nn.mm.lanlanlu.com",
+]
+# command to reload your services
+# reloadCommands = "systemctl reload nginx"
+reloadCommands = "bash /opt/acme/reload.sh"
