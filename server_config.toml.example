@@ -4,29 +4,41 @@
 # Google test server
 # "https://dv.acme-v02.test-api.pki.goog/directory"
 acmeServer = "https://dv.acme-v02.api.pki.goog/directory"
+retryCount = 5
 
 # Certification will have a life time of certLifeTime + renewTimeLeft
 # If certLifeTime is passed, server will renew this certification
 # Server and client will check certification every renewTimeLeft/4
 certLifeTime = "24h"
 renewTimeLeft = "24h"
+
 # If forceWildcards is true, request b.a.com will return *.a.com
 # request c.b.a.com will return *.b.a.com
 # Make sure acme server can issue wildcard certificates
 forceWildcards = true
 
-[Cloudflare]
-email = ""
-apiKey = ""
-
-[Server]
-port = 19198
-apiPath = "/1145141919810"
-# Domain of this server, server will issue a certification for itself
-# for https api. Left empty name for no tls encrypted http api (deprecated)
-name = "acmserver.lanlanlu.com"
-token = "KFCCrazyThursdayVMe50"
 # Give root domain here
 allowedDomains = [
     "lanlanlu.com",
 ]
+
+[Cloudflare]
+email = ""
+apiKey = ""
+
+[HttpServer]
+port = 19198
+apiPath = "/1145141919810"
+# If secure is false, name and token will be ignored
+secure = true
+# Domain of this server, server will issue a certification for itself
+# for https api. Make sure your acme server can issue this domain.
+name = "acmserver.lanlanlu.com"
+token = "KFCCrazyThursdayVMe50"
+
+# gRpc will be implemented later...
+# [GRpcServer]
+# port = 11451
+# secure = true
+# name = "grpcserver.lanlanlu.com"
+# token = "lanlanlu!!"

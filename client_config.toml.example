@@ -1,19 +1,33 @@
-# Client will try following servers sequentially
-# Make sure your commonly used server is at the top
-[[Servers]]
-serverUrl = "https://acmserver.lanlanlu.com:19198/1145141919810"
+[Server]
+retryCount = 5
+# http or grpc
+# gRpc will be implemented later...
+mode = "http"
+# only take effect in gRpc mode
+# failBackInterval = "10m"
+
+[Http.MainServer]
+serverUrl = "https://acmeserver.lanlanlu.com:19198/1145141919810"
 token = "KFCCrazyThursdayVMe50"
 
-[[Servers]]
-serverUrl = "https://mybackupserver.local:11451/1919810"
-token = "FakeNews!!"
+[Http.StandbyServer]
+serverUrl = "http://mybackupserver.local:11451/1919810"
+
+# [GRpc.MainServer]
+# secure = true
+# server = "grpc.lanlanlu.com:9999"
+# token = "grpcisawsome"
+#
+# [GRpc.StandbyServer]
+# secure = false
+# server = "192.168.1.2:9090"
 
 [Certification]
 savePath = "/path/to/directory/which/saves/your/certifications"
-domain = [
+domains = [
     "mm.lanlanlu.com",
     "nn.mm.lanlanlu.com",
 ]
 # command to reload your services
-# reloadCommands = "systemctl reload nginx"
-reloadCommands = "bash /opt/acme/reload.sh"
+# reloadCommand = "systemctl reload nginx"
+reloadCommand = "bash /opt/acme/reload.sh"
