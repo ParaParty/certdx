@@ -1,21 +1,15 @@
 [ACME]
-# Let's encrypt
-# "acme-v02.api.letsencrypt.org"
-# Google test server
-# "https://dv.acme-v02.test-api.pki.goog/directory"
-acmeServer = "https://dv.acme-v02.api.pki.goog/directory"
+# Email of ACME account registeration
+email = ""
+# Supported provider: google googletest r3 r3test
+provider = "google"
 retryCount = 5
 
 # Certification will have a life time of certLifeTime + renewTimeLeft
 # If certLifeTime is passed, server will renew this certification
 # Server and client will check certification every renewTimeLeft/4
-certLifeTime = "24h"
+certLifeTime = "168h"
 renewTimeLeft = "24h"
-
-# If forceWildcards is true, request b.a.com will return *.a.com
-# request c.b.a.com will return *.b.a.com
-# Make sure acme server can issue wildcard certificates
-forceWildcards = true
 
 # Give root domain here
 allowedDomains = [
@@ -23,22 +17,24 @@ allowedDomains = [
 ]
 
 [Cloudflare]
+# global api key and email
 email = ""
 apiKey = ""
 
 [HttpServer]
-port = 19198
+enabled = true
+listen = ":19198"
 apiPath = "/1145141919810"
-# If secure is false, name and token will be ignored
 secure = true
 # Domain of this server, server will issue a certification for itself
 # for https api. Make sure your acme server can issue this domain.
-name = "acmserver.lanlanlu.com"
+names = ["acmserver.lanlanlu.com", "*.lanlanlu.com"]
+# left empty for no token
 token = "KFCCrazyThursdayVMe50"
 
-# gRpc will be implemented later...
-# [GRpcServer]
-# port = 11451
+# gRPC will be implemented later...
+# [GRPCServer]
+# listen = ":11451"
 # secure = true
 # name = "grpcserver.lanlanlu.com"
 # token = "lanlanlu!!"
