@@ -1,28 +1,26 @@
 package common
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 )
 
-type httpParamResp struct {
-	RenewTimeLeft time.Duration `json:"renewTimeLeft"`
-}
-
 type httpCertReq struct {
 	Domains []string `json:"domains"`
 }
 
 type httpCertResp struct {
-	ValidBefore time.Time `json:"validBefore"`
-	Cert        []byte    `json:"cert"`
-	Key         []byte    `json:"key"`
+	RenewTimeLeft time.Duration `json:"renewTimeLeft"`
+	Cert          []byte        `json:"cert"`
+	Key           []byte        `json:"key"`
 }
 
-func checkAuthorization(r *http.Request) bool {
+func checkHttpAuthorization(r *http.Request) bool {
 	if ServerConfig.HttpServer.Token == "" {
 		return true
 	}
@@ -39,24 +37,12 @@ func checkAuthorization(r *http.Request) bool {
 	return false
 }
 
-func APIHandler(w http.ResponseWriter, r *http.Request) {
-	if checkAuthorization(r) {
+func HttpAPIHandler(w http.ResponseWriter, r *http.Request) {
+	if checkHttpAuthorization(r) {
 		switch r.Method {
-		case "GET":
-			log.Printf("[INF] Http received param request from: %s", r.RemoteAddr)
-			resp, err := json.Marshal(&httpParamResp{
-				RenewTimeLeft: ServerConfig.ACME.RenewTimeLeftDuration,
-			})
-			if err == nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write(resp)
-			} else {
-				http.Error(w, "", http.StatusInternalServerError)
-			}
-			return
 		case "POST":
 			log.Printf("[INF] Http received cert request from: %s", r.RemoteAddr)
-			handleCertReq(&w, r)
+			handleHttpCertReq(&w, r)
 			return
 		default:
 		}
@@ -64,7 +50,7 @@ func APIHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "", http.StatusNotFound)
 }
 
-func handleCertReq(w *http.ResponseWriter, r *http.Request) {
+func handleHttpCertReq(w *http.ResponseWriter, r *http.Request) {
 	var req httpCertReq
 	var resp []byte
 	var cachedCert *ServerCertCacheEntry
@@ -91,9 +77,9 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 
 	cert = cachedCert.Cert()
 	resp, err = json.Marshal(&httpCertResp{
-		ValidBefore: cert.ValidBefore,
-		Cert:        cert.Cert,
-		Key:         cert.Key,
+		RenewTimeLeft: ServerConfig.ACME.RenewTimeLeftDuration,
+		Cert:          cert.Cert,
+		Key:           cert.Key,
 	})
 	if err != nil {
 		goto ERR
@@ -107,4 +93,42 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 ERR:
 	log.Printf("[ERR] Handle http cert request failed: %s", err)
 	http.Error(*w, "", http.StatusInternalServerError)
+}
+
+var client = &http.Client{
+	Timeout: 30 * time.Second,
+}
+
+func HttpGetCert(server *ClientHttpServer, domains []string) (*httpCertResp, error) {
+	body, err := json.Marshal(httpCertReq{Domains: domains})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", server.Url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+
+	if server.Token != "" {
+		req.Header = http.Header{
+			"Authorization": {fmt.Sprintf("Token %s", server.Token)},
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("POST '%s' status: %s", server.Url, resp.Status)
+	}
+
+	var certResp = new(httpCertResp)
+	err = json.NewDecoder(resp.Body).Decode(certResp)
+	if err != nil {
+		return nil, err
+	}
+
+	return certResp, nil
 }

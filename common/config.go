@@ -69,7 +69,7 @@ type ClientConfigT struct {
 	// 	StandbyServer ClientGRPCServer `toml:"StandbyServer"`
 	// } `toml:"GRPC"`
 
-	Certifications ClientCertification `toml:"Certifications"`
+	Certifications []ClientCertification `toml:"Certifications"`
 }
 
 type ClientServerConfig struct {
@@ -79,8 +79,8 @@ type ClientServerConfig struct {
 }
 
 type ClientHttpServer struct {
-	ServerUrl string `toml:"serverUrl"`
-	Token     string `toml:"token"`
+	Url   string `toml:"url"`
+	Token string `toml:"token"`
 }
 
 // type ClientGRPCServer struct {

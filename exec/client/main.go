@@ -52,10 +52,10 @@ func init() {
 
 	config.SetDefault()
 	cfile, err := os.Open(*conf)
-	defer cfile.Close()
 	if err != nil {
 		log.Fatalf("[ERR] Open config file failed: %s", err)
 	}
+	defer cfile.Close()
 	if b, err := io.ReadAll(cfile); err == nil {
 		if err := toml.Unmarshal(b, config); err == nil {
 			log.Println("[INF] Config loaded")
@@ -65,7 +65,27 @@ func init() {
 	} else {
 		log.Fatalf("[ERR] Reading config file failed: %s", err)
 	}
+
+	if config.Http.MainServer.Url == "" {
+		log.Fatalf("[ERR] Main server url should not be empty")
+	}
+
+	if len(config.Certifications) == 0 {
+		log.Fatalf("[ERR] No certification configured")
+	}
+
+	for _, c := range config.Certifications {
+		if len(c.Domains) == 0 || c.Name == "" || c.SavePath == "" {
+			log.Fatalf("[ERR] Wrong certification configuration")
+		}
+	}
 }
 
 func main() {
+	switch config.Server.Mode {
+	case "http":
+		common.ClientHttpMain()
+	default:
+		log.Fatalf("[ERR] Mode %s not supported", config.Server.Mode)
+	}
 }

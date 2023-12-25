@@ -31,29 +31,6 @@ type ServerCertCacheT struct {
 
 var ServerCertCache = &ServerCertCacheT{}
 
-func sameCert(arr1, arr2 []string) bool {
-	if len(arr1) != len(arr2) {
-		return false
-	}
-
-	if len(arr1) == 0 {
-		return true
-	}
-
-Next:
-	for _, i := range arr1 {
-		for _, j := range arr2 {
-			if i == j {
-				continue Next
-			}
-		}
-
-		return false
-	}
-
-	return true
-}
-
 func (s *ServerCertCacheT) GetServerCacheEntry(domains []string) *ServerCertCacheEntry {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -125,6 +102,7 @@ func (c *ServerCertCacheEntry) CertWatchDog() {
 
 	c.Listening.Store(true)
 	for {
+		log.Printf("[INF] Server renew: %v", c.Domains)
 		changed, err := c.Renew(true)
 		if err != nil {
 			log.Printf("[ERR] Failed renew cert %s: %s", c.Domains, err)

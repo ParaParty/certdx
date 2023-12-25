@@ -8,11 +8,11 @@ mode = "http"
 # failBackInterval = "10m"
 
 [Http.MainServer]
-serverUrl = "https://acmeserver.lanlanlu.com:19198/1145141919810"
+url = "https://acmeserver.lanlanlu.com:19198/1145141919810"
 token = "KFCCrazyThursdayVMe50"
 
 [Http.StandbyServer]
-serverUrl = "http://mybackupserver.local:11451/1919810"
+url = "http://mybackupserver.local:11451/1919810"
 
 # [GRPC.MainServer]
 # secure = true

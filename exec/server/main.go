@@ -133,12 +133,14 @@ func serveHttps() {
 }
 
 func main() {
-	http.HandleFunc(config.HttpServer.APIPath, common.APIHandler)
+	if config.HttpServer.Enabled {
+		http.HandleFunc(config.HttpServer.APIPath, common.HttpAPIHandler)
 
-	if !config.HttpServer.Secure {
-		log.Printf("[INF] Http server started")
-		http.ListenAndServe(config.HttpServer.Listen, nil)
-	} else {
-		serveHttps()
+		if !config.HttpServer.Secure {
+			log.Printf("[INF] Http server started")
+			http.ListenAndServe(config.HttpServer.Listen, nil)
+		} else {
+			serveHttps()
+		}
 	}
 }

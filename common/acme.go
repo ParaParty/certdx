@@ -243,23 +243,3 @@ func GetACME() (*ACME, error) {
 
 	return instance, nil
 }
-
-func retry(retryCount int, work func() error) error {
-	var err error
-
-	for i := 0; i < retryCount; i++ {
-		begin := time.Now()
-		err = work()
-		if err == nil {
-			return nil
-		}
-
-		if elapsed := time.Since(begin); elapsed < 5*time.Millisecond {
-			return fmt.Errorf("errored too fast, give up retry. last error is: %w", err)
-		}
-
-		time.Sleep(15 * time.Second)
-	}
-
-	return fmt.Errorf("errored too many times, give up retry. last error is: %w", err)
-}
