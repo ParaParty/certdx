@@ -1,6 +1,10 @@
-package common
+package config
 
-import "time"
+import (
+	"fmt"
+	"path"
+	"time"
+)
 
 type ServerConfigT struct {
 	ACME ACMEConfig `toml:"ACME"`
@@ -96,6 +100,12 @@ type ClientCertification struct {
 	ReloadCommand string   `toml:"reloadCommand"`
 }
 
+func (c *ClientCertification) GetCertAndKeyPath() (cert, key string) {
+	cert = path.Join(c.SavePath, fmt.Sprintf("%s.pem", c.Name))
+	key = path.Join(c.SavePath, fmt.Sprintf("%s.key", c.Name))
+	return
+}
+
 func (c *ClientConfigT) SetDefault() {
 	c.Server = ClientServerConfig{
 		RetryCount:        5,
@@ -103,8 +113,3 @@ func (c *ClientConfigT) SetDefault() {
 		FailBackIntervial: "10m",
 	}
 }
-
-var (
-	ClientConfig = &ClientConfigT{}
-	ServerConfig = &ServerConfigT{}
-)

@@ -1,22 +1,20 @@
-package common
+package client
 
 import (
+	"certdx/pkg/config"
+	"certdx/pkg/types"
+	"certdx/pkg/utils"
+
 	"bytes"
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-func (c *ClientCertification) getCertAndKeyPath() (cert, key string) {
-	cert = path.Join(c.SavePath, fmt.Sprintf("%s.pem", c.Name))
-	key = path.Join(c.SavePath, fmt.Sprintf("%s.key", c.Name))
-	return
-}
+var Config = &config.ClientConfigT{}
 
 func checkFileAndCreate(file string) (exists bool, err error) {
 	exists = false
@@ -44,11 +42,11 @@ func checkFileAndCreate(file string) (exists bool, err error) {
 	return
 }
 
-func requestCert(domains []string) *httpCertResp {
-	var resp *httpCertResp
-	err := retry(ClientConfig.Server.RetryCount, func() error {
+func requestCert(domains []string) *types.HttpCertResp {
+	var resp *types.HttpCertResp
+	err := utils.Retry(Config.Server.RetryCount, func() error {
 		var err error
-		resp, err = HttpGetCert(&ClientConfig.Http.MainServer, domains)
+		resp, err = GetCert(&Config.Http.MainServer, domains)
 		return err
 	})
 	if err == nil {
@@ -56,10 +54,10 @@ func requestCert(domains []string) *httpCertResp {
 	}
 	log.Printf("[WRN] Failed get cert %v from MainServer: %s", domains, err)
 
-	if ClientConfig.Http.StandbyServer.Url != "" {
-		err = retry(ClientConfig.Server.RetryCount, func() error {
+	if Config.Http.StandbyServer.Url != "" {
+		err = utils.Retry(Config.Server.RetryCount, func() error {
 			var err error
-			resp, err = HttpGetCert(&ClientConfig.Http.StandbyServer, domains)
+			resp, err = GetCert(&Config.Http.StandbyServer, domains)
 			return err
 		})
 		if err == nil {
@@ -70,7 +68,7 @@ func requestCert(domains []string) *httpCertResp {
 	return nil
 }
 
-func clientCertWatchDog(cert ClientCertification, onChanged ...func(cert, key []byte, c *ClientCertification)) {
+func certWatchDog(cert config.ClientCertification, onChanged ...func(cert, key []byte, c *config.ClientCertification)) {
 	var currentCert, currentKey []byte
 	sleepTime := 1 * time.Hour // default sleep time
 	for {
@@ -93,10 +91,10 @@ func clientCertWatchDog(cert ClientCertification, onChanged ...func(cert, key []
 	}
 }
 
-func clientWriteCertAndDoCommand(cert, key []byte, c *ClientCertification) {
+func writeCertAndDoCommand(cert, key []byte, c *config.ClientCertification) {
 	var doCommand, ce, ke bool
 
-	certPath, keyPath := c.getCertAndKeyPath()
+	certPath, keyPath := c.GetCertAndKeyPath()
 	ce, err := checkFileAndCreate(certPath)
 	if err != nil {
 		goto ERR
@@ -128,10 +126,10 @@ ERR:
 	log.Printf("[ERR] Failed save cert file: %s", err)
 }
 
-func ClientHttpMain() {
-	for index, c := range ClientConfig.Certifications {
-		go clientCertWatchDog(c, clientWriteCertAndDoCommand)
-		if index != len(ClientConfig.Certifications)-1 {
+func HttpMain() {
+	for index, c := range Config.Certifications {
+		go certWatchDog(c, writeCertAndDoCommand)
+		if index != len(Config.Certifications)-1 {
 			t := time.After(1 * time.Second)
 			<-t
 		}

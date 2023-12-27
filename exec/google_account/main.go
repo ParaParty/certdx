@@ -1,7 +1,8 @@
 package main
 
 import (
-	"certdx/common"
+	"certdx/pkg/server"
+
 	"fmt"
 	"log"
 	"os"
@@ -43,7 +44,7 @@ func main() {
 	if *test {
 		provider = "googletest"
 	}
-	err := common.RegisterAccount(provider, *email, *keyId, *hmac)
+	err := server.RegisterAccount(provider, *email, *keyId, *hmac)
 	if err != nil {
 		log.Printf("[ERR] Failed registering account: %s", err)
 	}

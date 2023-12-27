@@ -1,6 +1,9 @@
-package common
+package server
 
 import (
+	"certdx/pkg/config"
+	"certdx/pkg/utils"
+
 	"log"
 	"strings"
 	"sync"
@@ -30,12 +33,13 @@ type ServerCertCacheT struct {
 }
 
 var ServerCertCache = &ServerCertCacheT{}
+var Config = &config.ServerConfigT{}
 
-func (s *ServerCertCacheT) GetServerCacheEntry(domains []string) *ServerCertCacheEntry {
+func (s *ServerCertCacheT) GetEntry(domains []string) *ServerCertCacheEntry {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	for _, entry := range s.entrys {
-		if sameCert(domains, entry.Domains) {
+		if utils.SameCert(domains, entry.Domains) {
 			return entry
 		}
 	}
@@ -64,7 +68,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 
 	log.Printf("[INF] Renew cert: %v", c.Domains)
 	if !time.Now().Before(c.cert.ValidBefore) {
-		newValidBefore := time.Now().Truncate(1 * time.Minute).Add(ServerConfig.ACME.CertLifeTimeDuration)
+		newValidBefore := time.Now().Truncate(1 * time.Minute).Add(Config.ACME.CertLifeTimeDuration)
 
 		acme, err := GetACME()
 		if err != nil {
@@ -73,9 +77,9 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 
 		var cert, key []byte
 		if retry {
-			cert, key, err = acme.RetryObtain(c.Domains, newValidBefore.Add(ServerConfig.ACME.RenewTimeLeftDuration))
+			cert, key, err = acme.RetryObtain(c.Domains, newValidBefore.Add(Config.ACME.RenewTimeLeftDuration))
 		} else {
-			cert, key, err = acme.Obtain(c.Domains, newValidBefore.Add(ServerConfig.ACME.RenewTimeLeftDuration))
+			cert, key, err = acme.Obtain(c.Domains, newValidBefore.Add(Config.ACME.RenewTimeLeftDuration))
 		}
 		if err != nil {
 			return false, err
@@ -112,7 +116,7 @@ func (c *ServerCertCacheEntry) CertWatchDog() {
 			close(*c.Updated.Swap(&newUpdated))
 		}
 
-		t := time.NewTimer(ServerConfig.ACME.RenewTimeLeftDuration / 4)
+		t := time.NewTimer(Config.ACME.RenewTimeLeftDuration / 4)
 		select {
 		case <-t.C:
 			// Do next check
@@ -128,7 +132,7 @@ func domainsAllowed(domains []string) bool {
 	for _, i := range domains {
 		domainParts := strings.Split(i, ".")
 		tld := strings.Join(domainParts[len(domainParts)-2:], ".")
-		for _, j := range ServerConfig.ACME.AllowedDomains {
+		for _, j := range Config.ACME.AllowedDomains {
 			if tld != j {
 				return false
 			}

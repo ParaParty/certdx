@@ -1,11 +1,11 @@
-package common
+package utils
 
 import (
 	"fmt"
 	"time"
 )
 
-func retry(retryCount int, work func() error) error {
+func Retry(retryCount int, work func() error) error {
 	var err error
 
 	for i := 0; i < retryCount; i++ {
@@ -25,7 +25,7 @@ func retry(retryCount int, work func() error) error {
 	return fmt.Errorf("errored too many times, give up retry. last error is: %w", err)
 }
 
-func sameCert(arr1, arr2 []string) bool {
+func SameCert(arr1, arr2 []string) bool {
 	if len(arr1) != len(arr2) {
 		return false
 	}

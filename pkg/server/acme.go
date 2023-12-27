@@ -1,6 +1,8 @@
-package common
+package server
 
 import (
+	"certdx/pkg/utils"
+
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -49,17 +51,17 @@ func parsePEM(pem []byte) (crypto.PrivateKey, error) {
 }
 
 func InitACMEAccount() error {
-	keyPath, err := GetPrivateKeySavePath(ServerConfig.ACME.Email, ServerConfig.ACME.Provider)
+	keyPath, err := getPrivateKeySavePath(Config.ACME.Email, Config.ACME.Provider)
 	if err != nil {
 		return err
 	}
 
 	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
-		if isACMEProviderGoogle(ServerConfig.ACME.Provider) {
+		if isACMEProviderGoogle(Config.ACME.Provider) {
 			return fmt.Errorf("auto register google cloud acme accout has not been implemented now, please manually register it")
 		}
 
-		if err := RegisterAccount(ServerConfig.ACME.Provider, ServerConfig.ACME.Email, "", ""); err != nil {
+		if err := RegisterAccount(Config.ACME.Provider, Config.ACME.Email, "", ""); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -91,7 +93,7 @@ func (u *MyUser) GetPrivateKey() crypto.PrivateKey {
 	return u.Key
 }
 
-func GetPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
+func getPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
 	saveDir, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -110,7 +112,7 @@ func GetPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
 }
 
 func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
-	keyPath, err := GetPrivateKeySavePath(Email, ACMEProvider)
+	keyPath, err := getPrivateKeySavePath(Email, ACMEProvider)
 	if err != nil {
 		return err
 	}
@@ -170,7 +172,7 @@ type ACME struct {
 }
 
 func (a *ACME) GetEmail() string {
-	return ServerConfig.Cloudflare.Email
+	return Config.Cloudflare.Email
 }
 func (a *ACME) GetRegistration() *registration.Resource {
 	return a.Registration
@@ -197,7 +199,7 @@ func (a *ACME) Obtain(domains []string, deadline time.Time) (fullchain, key []by
 }
 
 func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key []byte, err error) {
-	err = retry(ServerConfig.ACME.RetryCount,
+	err = utils.Retry(Config.ACME.RetryCount,
 		func() error {
 			fullchain, key, err = a.Obtain(domains, deadline)
 			return err
@@ -208,10 +210,10 @@ func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key
 
 func GetACME() (*ACME, error) {
 	instance := &ACME{
-		needNotAfter: isACMEProviderGoogle(ServerConfig.ACME.Provider),
+		needNotAfter: isACMEProviderGoogle(Config.ACME.Provider),
 	}
 	config := lego.NewConfig(instance)
-	config.CADirURL = acmeProvidersMap[ServerConfig.ACME.Provider]
+	config.CADirURL = acmeProvidersMap[Config.ACME.Provider]
 	config.Certificate.KeyType = certcrypto.EC256
 
 	var err error
@@ -221,8 +223,8 @@ func GetACME() (*ACME, error) {
 	}
 
 	dns, err := cloudflare.NewDNSProviderConfig(&cloudflare.Config{
-		AuthEmail:          ServerConfig.Cloudflare.Email,
-		AuthKey:            ServerConfig.Cloudflare.APIKey,
+		AuthEmail:          Config.Cloudflare.Email,
+		AuthKey:            Config.Cloudflare.APIKey,
 		TTL:                120,
 		PropagationTimeout: 30 * time.Second,
 		PollingInterval:    2 * time.Second,

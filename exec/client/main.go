@@ -1,7 +1,8 @@
 package main
 
 import (
-	"certdx/common"
+	"certdx/pkg/client"
+
 	"fmt"
 	"io"
 	"log"
@@ -23,7 +24,7 @@ var (
 	conf     = flag.StringP("conf", "c", "./client.toml", "Config file path")
 )
 
-var config = common.ClientConfig
+var config = client.Config
 
 func init() {
 	log.SetOutput(os.Stderr)
@@ -84,7 +85,7 @@ func init() {
 func main() {
 	switch config.Server.Mode {
 	case "http":
-		common.ClientHttpMain()
+		client.HttpMain()
 	default:
 		log.Fatalf("[ERR] Mode %s not supported", config.Server.Mode)
 	}

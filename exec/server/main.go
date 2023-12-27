@@ -1,7 +1,7 @@
 package main
 
 import (
-	"certdx/common"
+	"certdx/pkg/server"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -23,12 +23,12 @@ var (
 	pLogPath = flag.StringP("log", "l", "", "Log file path")
 	help     = flag.BoolP("help", "h", false, "Print help")
 	version  = flag.BoolP("version", "v", false, "Print version")
-	conf     = flag.StringP("conf", "c", "./server.toml", "Config file path")
+	pConf    = flag.StringP("conf", "c", "./server.toml", "Config file path")
 )
 
 var (
-	config    = common.ServerConfig
-	certCache = common.ServerCertCache
+	config    = server.Config
+	certCache = server.ServerCertCache
 )
 
 func init() {
@@ -57,7 +57,7 @@ func init() {
 	}
 
 	config.SetDefault()
-	cfile, err := os.Open(*conf)
+	cfile, err := os.Open(*pConf)
 	if err != nil {
 		log.Fatalf("[ERR] Open config file failed: %s", err)
 	}
@@ -72,7 +72,7 @@ func init() {
 		log.Fatalf("[ERR] Reading config file failed: %s", err)
 	}
 
-	if !common.ACMEProviderSupported(config.ACME.Provider) {
+	if !server.ACMEProviderSupported(config.ACME.Provider) {
 		log.Fatalf("[ERR] ACME provider not supported: %s", config.ACME.Provider)
 	}
 
@@ -95,13 +95,13 @@ func init() {
 		log.Fatalln("[ERR] Invalid config")
 	}
 
-	if err := common.InitACMEAccount(); err != nil {
+	if err := server.InitACMEAccount(); err != nil {
 		log.Fatalf("[ERR] Failed init ACME account: %s", err)
 	}
 }
 
 func serveHttps() {
-	entry := certCache.GetServerCacheEntry(config.HttpServer.Names)
+	entry := certCache.GetEntry(config.HttpServer.Names)
 	// when starting up, no cert is listening, just start a watch dog anyway
 	go entry.CertWatchDog()
 	<-*entry.Updated.Load()
@@ -134,7 +134,7 @@ func serveHttps() {
 
 func main() {
 	if config.HttpServer.Enabled {
-		http.HandleFunc(config.HttpServer.APIPath, common.HttpAPIHandler)
+		http.HandleFunc(config.HttpServer.APIPath, server.APIHandler)
 
 		if !config.HttpServer.Secure {
 			log.Printf("[INF] Http server started")
