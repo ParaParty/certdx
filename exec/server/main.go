@@ -1,13 +1,13 @@
 package main
 
 import (
-	"certdx/pkg/server"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"pkg.para.party/certdx/pkg/server"
 	"time"
 
 	"github.com/BurntSushi/toml"

@@ -1,8 +1,8 @@
 package client
 
 import (
-	"certdx/pkg/config"
-	"certdx/pkg/types"
+	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/types"
 
 	"bytes"
 	"encoding/json"

@@ -1,4 +1,4 @@
-module certdx
+module pkg.para.party/certdx
 
 go 1.21.0
 
@@ -7,10 +7,10 @@ replace github.com/go-acme/lego/v4 v4.9.0 => github.com/tongyuantongyu/lego/v4 v
 require (
 	github.com/BurntSushi/toml v1.3.2
 	github.com/go-acme/lego/v4 v4.9.0
+	github.com/spf13/pflag v1.0.5
 )
 
 require (
-	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cenkalti/backoff/v4 v4.1.3 // indirect
 	github.com/cloudflare/cloudflare-go v0.49.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
@@ -18,7 +18,6 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.1 // indirect
 	github.com/miekg/dns v1.1.50 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
 	golang.org/x/crypto v0.0.0-20220331220935-ae2d96664a29 // indirect
 	golang.org/x/mod v0.4.2 // indirect
 	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect

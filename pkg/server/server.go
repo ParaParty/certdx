@@ -1,8 +1,8 @@
 package server
 
 import (
-	"certdx/pkg/config"
-	"certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/utils"
 
 	"log"
 	"strings"

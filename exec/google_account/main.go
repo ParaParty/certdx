@@ -1,7 +1,7 @@
 package main
 
 import (
-	"certdx/pkg/server"
+	"pkg.para.party/certdx/pkg/server"
 
 	"fmt"
 	"log"

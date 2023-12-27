@@ -1,7 +1,7 @@
 package server
 
 import (
-	"certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/utils"
 
 	"crypto"
 	"crypto/ecdsa"

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"certdx/pkg/client"
+	"pkg.para.party/certdx/pkg/client"
 
 	"fmt"
 	"io"

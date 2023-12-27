@@ -1,7 +1,7 @@
 package server
 
 import (
-	"certdx/pkg/types"
+	"pkg.para.party/certdx/pkg/types"
 
 	"encoding/json"
 	"log"

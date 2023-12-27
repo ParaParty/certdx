@@ -1,9 +1,9 @@
 package client
 
 import (
-	"certdx/pkg/config"
-	"certdx/pkg/types"
-	"certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/types"
+	"pkg.para.party/certdx/pkg/utils"
 
 	"bytes"
 	"log"
