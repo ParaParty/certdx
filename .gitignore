@@ -22,3 +22,6 @@ go.work
 
 # Config file
 *.toml
+
+# Release files
+release/certdx_*
