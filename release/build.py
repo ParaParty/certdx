@@ -1,4 +1,3 @@
-import os
 import subprocess
 import datetime
 
@@ -17,9 +16,9 @@ t = [['linux', 'amd64'],
      ['windows', 'amd64'],
 ]
 
-exec = [['server',         'server'],
-        ['client',         'client'],
-        ['google_account', 'google_account'],
+exec = [['server',         'exec/server'],
+        ['client',         'exec/client'],
+        ['google_account', 'exec/google_account'],
 ]
 
 for o, a in t:
@@ -30,7 +29,7 @@ for o, a in t:
             f'''go build -ldflags="-s -w '''
             f'''-X main.buildCommit={commitId} -X \'main.buildDate={time}\'" '''
             f'''-o {dir}/{e}{".exe" if o == "windows" else ""} '''
-            f'''../exec/{s}''', shell=True
+            f'''../{s}''', shell=True
         )
     subprocess.run(f"zip -r {dir}.zip {dir}", shell=True)
     subprocess.run(f"rm -r {dir}", shell=True)

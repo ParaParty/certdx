@@ -1,0 +1,14 @@
+[Unit]
+Description=Certdx server
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/certdx
+ExecStart=/opt/certdx/server --conf /opt/certdx/server.toml --log /tmp/certdx-server.log
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
