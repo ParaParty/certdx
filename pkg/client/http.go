@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var client = &http.Client{
+var HttpClient = &http.Client{
 	Timeout: 30 * time.Second,
 }
 
@@ -32,7 +32,7 @@ func GetCert(server *config.ClientHttpServer, domains []string) (*types.HttpCert
 		}
 	}
 
-	resp, err := client.Do(req)
+	resp, err := HttpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

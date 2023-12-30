@@ -68,7 +68,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 
 	log.Printf("[INF] Renew cert: %v", c.Domains)
 	if !time.Now().Before(c.cert.ValidBefore) {
-		newValidBefore := time.Now().Truncate(1 * time.Minute).Add(Config.ACME.CertLifeTimeDuration)
+		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(Config.ACME.CertLifeTimeDuration)
 
 		acme, err := GetACME()
 		if err != nil {

@@ -125,7 +125,7 @@ func serveHttps() {
 
 		go func() {
 			log.Printf("[INF] Https server started")
-			err := server.ListenAndServe()
+			err := server.ListenAndServeTLS("", "")
 			log.Printf("[INF] Https server stopped: %s", err)
 		}()
 		<-*entry.Updated.Load()
@@ -135,7 +135,7 @@ func serveHttps() {
 
 func main() {
 	if config.HttpServer.Enabled {
-		http.HandleFunc(config.HttpServer.APIPath, server.APIHandler)
+		http.HandleFunc("/", server.APIHandler)
 
 		if !config.HttpServer.Secure {
 			log.Printf("[INF] Http server started")

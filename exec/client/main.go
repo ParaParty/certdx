@@ -3,9 +3,11 @@ package main
 import (
 	"pkg.para.party/certdx/pkg/client"
 
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -18,6 +20,7 @@ var (
 )
 
 var (
+	test     = flag.BoolP("test", "t", false, "Testing not verify server certification")
 	pLogPath = flag.StringP("log", "l", "", "Log file path")
 	help     = flag.BoolP("help", "h", false, "Print help")
 	version  = flag.BoolP("version", "v", false, "Print version")
@@ -38,6 +41,14 @@ func init() {
 	if *version {
 		fmt.Printf("Certdx client %s, built at %s\n", buildCommit, buildDate)
 		os.Exit(0)
+	}
+
+	if *test {
+		client.HttpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		}
 	}
 
 	if *pLogPath != "" {

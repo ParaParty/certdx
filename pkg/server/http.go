@@ -10,12 +10,14 @@ import (
 )
 
 func APIHandler(w http.ResponseWriter, r *http.Request) {
-	if checkAuthorization(r) {
+	if r.URL.Path == Config.HttpServer.APIPath {
 		switch r.Method {
 		case "POST":
-			log.Printf("[INF] Http received cert request from: %s", r.RemoteAddr)
-			handleCertReq(&w, r)
-			return
+			if checkAuthorization(r) {
+				log.Printf("[INF] Http received cert request from: %s", r.RemoteAddr)
+				handleCertReq(&w, r)
+				return
+			}
 		default:
 		}
 	}
