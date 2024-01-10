@@ -1,10 +1,10 @@
 package server
 
 import (
+	"log"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/utils"
-
-	"log"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -132,10 +132,8 @@ func domainsAllowed(domains []string) bool {
 	for _, i := range domains {
 		domainParts := strings.Split(i, ".")
 		tld := strings.Join(domainParts[len(domainParts)-2:], ".")
-		for _, j := range Config.ACME.AllowedDomains {
-			if tld != j {
-				return false
-			}
+		if !slices.Contains(Config.ACME.AllowedDomains, tld) {
+			return false
 		}
 	}
 	return true
