@@ -7,36 +7,35 @@ import (
 )
 
 type ServerConfigT struct {
-	ACME ACMEConfig `toml:"ACME"`
+	ACME ACMEConfig `toml:"ACME" json:"acme,omitempty"`
 
 	Cloudflare struct {
-		Email  string `toml:"email"`
-		APIKey string `toml:"apiKey"`
-	} `toml:"Cloudflare"`
+		Email  string `toml:"email" json:"email,omitempty"`
+		APIKey string `toml:"apiKey" json:"api_key,omitempty"`
+	} `toml:"Cloudflare" json:"cloudflare,omitempty"`
 
-	HttpServer HttpServerConfig `toml:"HttpServer"`
+	HttpServer HttpServerConfig `toml:"HttpServer" json:"http_server,omitempty"`
 }
 
 type ACMEConfig struct {
-	Email         string `toml:"email"`
-	Provider      string `toml:"provider"`
-	RetryCount    int    `toml:"retryCount"`
-	CertLifeTime  string `toml:"certLifeTime"`
-	RenewTimeLeft string `toml:"renewTimeLeft"`
+	Email          string   `toml:"email" json:"email,omitempty"`
+	Provider       string   `toml:"provider" json:"provider,omitempty"`
+	RetryCount     int      `toml:"retryCount" json:"retry_count,omitempty"`
+	CertLifeTime   string   `toml:"certLifeTime" json:"cert_life_time,omitempty"`
+	RenewTimeLeft  string   `toml:"renewTimeLeft" json:"renew_time_left,omitempty"`
+	AllowedDomains []string `toml:"allowedDomains" json:"allowed_domains,omitempty"`
 
-	AllowedDomains []string `toml:"allowedDomains"`
-
-	CertLifeTimeDuration  time.Duration `toml:"-"`
-	RenewTimeLeftDuration time.Duration `toml:"-"`
+	CertLifeTimeDuration  time.Duration `toml:"-" json:"-"`
+	RenewTimeLeftDuration time.Duration `toml:"-" json:"-"`
 }
 
 type HttpServerConfig struct {
-	Enabled bool     `toml:"enabled"`
-	Listen  string   `toml:"listen"`
-	APIPath string   `toml:"apiPath"`
-	Secure  bool     `toml:"secure"`
-	Names   []string `toml:"names"`
-	Token   string   `toml:"token"`
+	Enabled bool     `toml:"enabled" json:"enabled,omitempty"`
+	Listen  string   `toml:"listen" json:"listen,omitempty"`
+	APIPath string   `toml:"apiPath" json:"api_path,omitempty"`
+	Secure  bool     `toml:"secure" json:"secure,omitempty"`
+	Names   []string `toml:"names" json:"names,omitempty"`
+	Token   string   `toml:"token" json:"token,omitempty"`
 }
 
 // type GRPCServerConfig struct {
@@ -61,30 +60,30 @@ func (c *ServerConfigT) SetDefault() {
 }
 
 type ClientConfigT struct {
-	Server ClientServerConfig `toml:"Server"`
+	Server ClientServerConfig `toml:"Server" json:"server,omitempty"`
 
 	Http struct {
-		MainServer    ClientHttpServer `toml:"MainServer"`
-		StandbyServer ClientHttpServer `toml:"StandbyServer"`
-	} `toml:"Http"`
+		MainServer    ClientHttpServer `toml:"MainServer" json:"main_server,omitempty"`
+		StandbyServer ClientHttpServer `toml:"StandbyServer" json:"standby_server,omitempty"`
+	} `toml:"Http" json:"http,omitempty"`
 
 	// GRPC struct {
 	// 	MainServer    ClientGRPCServer `toml:"MainServer"`
 	// 	StandbyServer ClientGRPCServer `toml:"StandbyServer"`
 	// } `toml:"GRPC"`
 
-	Certifications []ClientCertification `toml:"Certifications"`
+	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
 }
 
 type ClientServerConfig struct {
-	RetryCount        int    `toml:"retryCount"`
-	Mode              string `toml:"mode"`
-	FailBackIntervial string `toml:"failBackIntervial"`
+	RetryCount        int    `toml:"retryCount" json:"retry_count,omitempty"`
+	Mode              string `toml:"mode" json:"mode,omitempty"`
+	FailBackIntervial string `toml:"failBackIntervial" json:"fail_back_intervial,omitempty"`
 }
 
 type ClientHttpServer struct {
-	Url   string `toml:"url"`
-	Token string `toml:"token"`
+	Url   string `toml:"url" json:"url,omitempty"`
+	Token string `toml:"token" json:"token,omitempty"`
 }
 
 // type ClientGRPCServer struct {
@@ -94,10 +93,10 @@ type ClientHttpServer struct {
 // }
 
 type ClientCertification struct {
-	Name          string   `toml:"name"`
-	SavePath      string   `toml:"savePath"`
-	Domains       []string `toml:"domains"`
-	ReloadCommand string   `toml:"reloadCommand"`
+	Name          string   `toml:"name" json:"name,omitempty"`
+	SavePath      string   `toml:"savePath" json:"save_path,omitempty"`
+	Domains       []string `toml:"domains" json:"domains,omitempty"`
+	ReloadCommand string   `toml:"reloadCommand" json:"reload_command,omitempty"`
 }
 
 func (c *ClientCertification) GetCertAndKeyPath() (cert, key string) {

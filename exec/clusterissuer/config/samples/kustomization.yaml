@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- certdx.para.party_v1beta1_certdxclusterissuer.yaml
+#+kubebuilder:scaffold:manifestskustomizesamples

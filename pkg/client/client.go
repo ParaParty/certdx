@@ -14,7 +14,19 @@ import (
 	"time"
 )
 
-var Config = &config.ClientConfigT{}
+type CertDXClientDaemon struct {
+	Config    *config.ClientConfigT
+	ClientOpt []CertDXHttpClientOption
+}
+
+func MakeCertDXClientDaemon() *CertDXClientDaemon {
+	ret := &CertDXClientDaemon{
+		Config:    &config.ClientConfigT{},
+		ClientOpt: make([]CertDXHttpClientOption, 0),
+	}
+	ret.Config.SetDefault()
+	return ret
+}
 
 func checkFileAndCreate(file string) (exists bool, err error) {
 	exists = false
@@ -42,11 +54,12 @@ func checkFileAndCreate(file string) (exists bool, err error) {
 	return
 }
 
-func requestCert(domains []string) *types.HttpCertResp {
+func (r *CertDXClientDaemon) requestCert(domains []string) *types.HttpCertResp {
 	var resp *types.HttpCertResp
-	err := utils.Retry(Config.Server.RetryCount, func() error {
+	err := utils.Retry(r.Config.Server.RetryCount, func() error {
+		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
 		var err error
-		resp, err = GetCert(&Config.Http.MainServer, domains)
+		resp, err = certdxClient.GetCert(domains)
 		return err
 	})
 	if err == nil {
@@ -54,10 +67,11 @@ func requestCert(domains []string) *types.HttpCertResp {
 	}
 	log.Printf("[WRN] Failed get cert %v from MainServer: %s", domains, err)
 
-	if Config.Http.StandbyServer.Url != "" {
-		err = utils.Retry(Config.Server.RetryCount, func() error {
+	if r.Config.Http.StandbyServer.Url != "" {
+		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
+		err = utils.Retry(r.Config.Server.RetryCount, func() error {
 			var err error
-			resp, err = GetCert(&Config.Http.StandbyServer, domains)
+			resp, err = certdxClient.GetCert(domains)
 			return err
 		})
 		if err == nil {
@@ -68,12 +82,12 @@ func requestCert(domains []string) *types.HttpCertResp {
 	return nil
 }
 
-func certWatchDog(cert config.ClientCertification, onChanged ...func(cert, key []byte, c *config.ClientCertification)) {
+func (r *CertDXClientDaemon) certWatchDog(cert config.ClientCertification, onChanged ...func(cert, key []byte, c *config.ClientCertification)) {
 	var currentCert, currentKey []byte
 	sleepTime := 1 * time.Hour // default sleep time
 	for {
 		log.Printf("[INF] Request cert %v", cert.Domains)
-		resp := requestCert(cert.Domains)
+		resp := r.requestCert(cert.Domains)
 		if resp != nil {
 			sleepTime = resp.RenewTimeLeft / 4
 			if !bytes.Equal(currentCert, resp.Cert) || !bytes.Equal(currentKey, resp.Key) {
@@ -126,10 +140,10 @@ ERR:
 	log.Printf("[ERR] Failed save cert file: %s", err)
 }
 
-func HttpMain() {
-	for index, c := range Config.Certifications {
-		go certWatchDog(c, writeCertAndDoCommand)
-		if index != len(Config.Certifications)-1 {
+func (r *CertDXClientDaemon) HttpMain() {
+	for index, c := range r.Config.Certifications {
+		go r.certWatchDog(c, writeCertAndDoCommand)
+		if index != len(r.Config.Certifications)-1 {
 			t := time.After(1 * time.Second)
 			<-t
 		}

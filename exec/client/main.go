@@ -1,14 +1,11 @@
 package main
 
 import (
-	"pkg.para.party/certdx/pkg/client"
-
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
+	"pkg.para.party/certdx/pkg/client"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
@@ -27,11 +24,12 @@ var (
 	conf     = flag.StringP("conf", "c", "./client.toml", "Config file path")
 )
 
-var config = client.Config
+var certDXDaemon *client.CertDXClientDaemon
 
 func init() {
 	log.SetOutput(os.Stderr)
 	flag.Parse()
+	certDXDaemon = client.MakeCertDXClientDaemon()
 
 	if *help {
 		flag.PrintDefaults()
@@ -44,11 +42,7 @@ func init() {
 	}
 
 	if *test {
-		client.HttpClient.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		}
+		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
 	}
 
 	if *pLogPath != "" {
@@ -62,14 +56,13 @@ func init() {
 		log.SetOutput(mw)
 	}
 
-	config.SetDefault()
 	cfile, err := os.Open(*conf)
 	if err != nil {
 		log.Fatalf("[ERR] Open config file failed: %s", err)
 	}
 	defer cfile.Close()
 	if b, err := io.ReadAll(cfile); err == nil {
-		if err := toml.Unmarshal(b, config); err == nil {
+		if err := toml.Unmarshal(b, certDXDaemon.Config); err == nil {
 			log.Println("[INF] Config loaded")
 		} else {
 			log.Fatalf("[ERR] Unmarshaling config failed: %s", err)
@@ -78,15 +71,15 @@ func init() {
 		log.Fatalf("[ERR] Reading config file failed: %s", err)
 	}
 
-	if config.Http.MainServer.Url == "" {
+	if certDXDaemon.Config.Http.MainServer.Url == "" {
 		log.Fatalf("[ERR] Main server url should not be empty")
 	}
 
-	if len(config.Certifications) == 0 {
+	if len(certDXDaemon.Config.Certifications) == 0 {
 		log.Fatalf("[ERR] No certification configured")
 	}
 
-	for _, c := range config.Certifications {
+	for _, c := range certDXDaemon.Config.Certifications {
 		if len(c.Domains) == 0 || c.Name == "" || c.SavePath == "" {
 			log.Fatalf("[ERR] Wrong certification configuration")
 		}
@@ -94,10 +87,10 @@ func init() {
 }
 
 func main() {
-	switch config.Server.Mode {
+	switch certDXDaemon.Config.Server.Mode {
 	case "http":
-		client.HttpMain()
+		certDXDaemon.HttpMain()
 	default:
-		log.Fatalf("[ERR] Mode %s not supported", config.Server.Mode)
+		log.Fatalf("[ERR] Mode %s not supported", certDXDaemon.Config.Server.Mode)
 	}
 }

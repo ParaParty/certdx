@@ -1,0 +1,27 @@
+# permissions for end users to view certdxclusterissuers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: certdxclusterissuer-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: clusterissuer
+    app.kubernetes.io/part-of: clusterissuer
+    app.kubernetes.io/managed-by: kustomize
+  name: certdxclusterissuer-viewer-role
+rules:
+- apiGroups:
+  - certdx.para.party
+  resources:
+  - certdxclusterissuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - certdx.para.party
+  resources:
+  - certdxclusterissuers/status
+  verbs:
+  - get

@@ -25,3 +25,5 @@ go.work
 
 # Release files
 release/certdx_*
+
+.idea
