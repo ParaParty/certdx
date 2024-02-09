@@ -9,4 +9,6 @@ metadata:
     app.kubernetes.io/created-by: clusterissuer
   name: certdxclusterissuer-sample
 spec:
-  # TODO(user): Add fields here
+  url: "https://example.com/certdx"
+  token: "let-the-bass-kick"
+  insecure: true
