@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -163,7 +162,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 	if !c.cert.IsValid() {
 		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(Config.ACME.CertLifeTimeDuration)
 
-		acme, err := GetACME()
+		acme, err := MakeACME()
 		if err != nil {
 			return false, err
 		}
@@ -227,11 +226,21 @@ func (c *ServerCertCacheEntry) CertWatchDog() {
 	}
 }
 
+func isSubdomain(domain string, allowedDomains []string) bool {
+	for _, allowedDomain := range allowedDomains {
+		if allowedDomain == domain {
+			return true
+		}
+		if strings.HasSuffix(domain, "."+allowedDomain) {
+			return true
+		}
+	}
+	return false
+}
+
 func domainsAllowed(domains []string) bool {
 	for _, i := range domains {
-		domainParts := strings.Split(i, ".")
-		tld := strings.Join(domainParts[len(domainParts)-2:], ".")
-		if !slices.Contains(Config.ACME.AllowedDomains, tld) {
+		if !isSubdomain(i, Config.ACME.AllowedDomains) {
 			return false
 		}
 	}

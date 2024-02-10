@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"io"
 	"crypto/tls"
 	"encoding/json"
 	"log"
@@ -50,12 +52,16 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
+		if err == io.EOF {
+			err = fmt.Errorf("no body")
+		}
 		goto ERR
 	}
 
 	if !domainsAllowed(req.Domains) {
 		log.Printf("[WRN] Requested domains not allowed: %v", req.Domains)
-		http.Error(*w, "Domains not allowed", http.StatusForbidden)
+		(*w).Header().Set("Content-Type", "application/json")
+		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
 		return
 	}
 

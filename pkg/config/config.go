@@ -2,17 +2,47 @@ package config
 
 import (
 	"fmt"
+	"google.golang.org/appengine"
 	"path"
 	"time"
 )
 
+const (
+	DnsProviderTypeCloudflare   string = "cloudflare"
+	DnsProviderTypeTencentCloud string = "tencentcloud"
+)
+
+type DnsProvider struct {
+	Type                                  string `toml:"type" json:"type,omitempty"`
+	DisableCompletePropagationRequirement bool   `toml:"disableCompletePropagationRequirement" json:"disable_complete_propagation_requirement,omitempty"`
+
+	// cloudflare
+	Email  string `toml:"email" json:"email,omitempty"`
+	APIKey string `toml:"apiKey" json:"api_key,omitempty"`
+
+	// tencentcloud
+	SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
+	SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
+}
+
+func (p DnsProvider) Validate() error {
+	switch p.Type {
+	case DnsProviderTypeCloudflare:
+		if p.Email == "" || p.APIKey == "" {
+			return fmt.Errorf("DnsProvider Cloudflare: empty email or key")
+		}
+	case DnsProviderTypeTencentCloud:
+		if p.SecretID == "" || p.SecretKey == "" {
+			return fmt.Errorf("DnsProvider TencentCloud: empty email or key")
+		}
+	}
+	return nil
+}
+
 type ServerConfigT struct {
 	ACME ACMEConfig `toml:"ACME" json:"acme,omitempty"`
 
-	Cloudflare struct {
-		Email  string `toml:"email" json:"email,omitempty"`
-		APIKey string `toml:"apiKey" json:"api_key,omitempty"`
-	} `toml:"Cloudflare" json:"cloudflare,omitempty"`
+	DnsProvider DnsProvider `toml:"DnsProvider" json:"dns_provider,omitempty"`
 
 	HttpServer HttpServerConfig `toml:"HttpServer" json:"http_server,omitempty"`
 }
@@ -29,6 +59,13 @@ type ACMEConfig struct {
 	RenewTimeLeftDuration time.Duration `toml:"-" json:"-"`
 }
 
+func (c ACMEConfig) Validate() error {
+	if len(c.AllowedDomains) == 0 {
+		return fmt.Errorf("AllowedDomains is empty")
+	}
+	return nil
+}
+
 type HttpServerConfig struct {
 	Enabled bool     `toml:"enabled" json:"enabled,omitempty"`
 	Listen  string   `toml:"listen" json:"listen,omitempty"`
@@ -36,6 +73,13 @@ type HttpServerConfig struct {
 	Secure  bool     `toml:"secure" json:"secure,omitempty"`
 	Names   []string `toml:"names" json:"names,omitempty"`
 	Token   string   `toml:"token" json:"token,omitempty"`
+}
+
+func (c HttpServerConfig) Validate() error {
+	if c.Secure && len(c.Names) == 0 {
+		return fmt.Errorf("secure http server with no name")
+	}
+	return nil
 }
 
 // type GRPCServerConfig struct {
@@ -57,6 +101,27 @@ func (c *ServerConfigT) SetDefault() {
 		APIPath: "/",
 		Secure:  false,
 	}
+}
+
+func (c *ServerConfigT) Validate() error {
+	ret := appengine.MultiError{}
+
+	if err := c.DnsProvider.Validate(); err != nil {
+		ret = append(ret, err)
+	}
+
+	if err := c.ACME.Validate(); err != nil {
+		ret = append(ret, err)
+	}
+
+	if err := c.HttpServer.Validate(); err != nil {
+		ret = append(ret, err)
+	}
+
+	if len(ret) > 0 {
+		return ret
+	}
+	return nil
 }
 
 type ClientConfigT struct {

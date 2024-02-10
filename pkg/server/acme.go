@@ -18,7 +18,6 @@ import (
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/lego"
-	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 	"github.com/go-acme/lego/v4/registration"
 )
 
@@ -153,7 +152,7 @@ type ACME struct {
 }
 
 func (a *ACME) GetEmail() string {
-	return Config.Cloudflare.Email
+	return Config.ACME.Email
 }
 func (a *ACME) GetRegistration() *registration.Resource {
 	return a.Registration
@@ -168,7 +167,7 @@ func (a *ACME) Obtain(domains []string, deadline time.Time) (fullchain, key []by
 		Bundle:  true,
 	}
 	if a.needNotAfter {
-		request.NotAfter = deadline.Format(time.RFC3339)
+		request.NotAfter = deadline
 	}
 
 	certificates, err := a.Client.Certificate.Obtain(request)
@@ -189,7 +188,7 @@ func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key
 	return
 }
 
-func GetACME() (*ACME, error) {
+func MakeACME() (*ACME, error) {
 	instance := &ACME{
 		needNotAfter: isACMEProviderGoogle(Config.ACME.Provider),
 	}
@@ -203,20 +202,9 @@ func GetACME() (*ACME, error) {
 		return nil, fmt.Errorf("unexpected error constructing acme client: %w", err)
 	}
 
-	dns, err := cloudflare.NewDNSProviderConfig(&cloudflare.Config{
-		AuthEmail:          Config.Cloudflare.Email,
-		AuthKey:            Config.Cloudflare.APIKey,
-		TTL:                120,
-		PropagationTimeout: 30 * time.Second,
-		PollingInterval:    2 * time.Second,
-		HTTPClient:         config.HTTPClient,
-	})
+	err = SetChallenger(config, instance, Config.DnsProvider)
 	if err != nil {
-		return nil, fmt.Errorf("unexpected error constructing cloudflare dns client: %w", err)
-	}
-
-	if err := instance.Client.Challenge.SetDNS01Provider(dns); err != nil {
-		return nil, fmt.Errorf("unexpected error setting up dns verification: %w", err)
+		return nil, err
 	}
 
 	instance.Registration, err = instance.Client.Registration.ResolveAccountByKey()
