@@ -1,18 +1,15 @@
 package main
 
 import (
-	"pkg.para.party/certdx/pkg/server"
-
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/server"
 )
 
 var (
@@ -27,10 +24,7 @@ var (
 	pConf    = flag.StringP("conf", "c", "./server.toml", "Config file path")
 )
 
-var (
-	config    = server.Config
-	certCache = server.ServerCertCache
-)
+var config = server.Config
 
 func init() {
 	log.SetOutput(os.Stderr)
@@ -99,49 +93,14 @@ func init() {
 	if err := server.InitACMEAccount(); err != nil {
 		log.Fatalf("[ERR] Failed init ACME account: %s", err)
 	}
-}
 
-func serveHttps() {
-	entry := certCache.GetEntry(config.HttpServer.Names)
-	// when starting up, no cert is listening, just start a watch dog anyway
-	go entry.CertWatchDog()
-	<-*entry.Updated.Load()
-
-	for {
-		cert := entry.Cert()
-		certificate, err := tls.X509KeyPair(cert.Cert, cert.Key)
-		if err != nil {
-			log.Fatalf("[ERR] Failed to load cert: %s", err)
-		}
-
-		server := http.Server{
-			Addr: config.HttpServer.Listen,
-		}
-
-		server.TLSConfig = &tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{certificate},
-		}
-
-		go func() {
-			log.Printf("[INF] Https server started")
-			err := server.ListenAndServeTLS("", "")
-			log.Printf("[INF] Https server stopped: %s", err)
-		}()
-		<-*entry.Updated.Load()
-		server.Close()
+	if err := server.InitCache(); err != nil {
+		log.Fatalf("[ERR] Failed init server cache: %s", err)
 	}
 }
 
 func main() {
 	if config.HttpServer.Enabled {
-		http.HandleFunc("/", server.APIHandler)
-
-		if !config.HttpServer.Secure {
-			log.Printf("[INF] Http server started")
-			http.ListenAndServe(config.HttpServer.Listen, nil)
-		} else {
-			serveHttps()
-		}
+		server.HttpSrv()
 	}
 }

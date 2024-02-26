@@ -5,10 +5,10 @@ import (
 	"io"
 	"log"
 	"os"
-	"pkg.para.party/certdx/pkg/client"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/client"
 )
 
 var (
