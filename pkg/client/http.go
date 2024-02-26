@@ -1,16 +1,16 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
-	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/types"
-	"time"
-
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
+
+	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/types"
 )
 
 type CertDXHttpClient struct {

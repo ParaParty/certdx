@@ -8,6 +8,6 @@ type HttpCertReq struct {
 
 type HttpCertResp struct {
 	RenewTimeLeft time.Duration `json:"renewTimeLeft"`
-	Cert          []byte        `json:"cert"`
+	FullChain     []byte        `json:"fullchain"`
 	Key           []byte        `json:"key"`
 }

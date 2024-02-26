@@ -1,10 +1,6 @@
 package client
 
 import (
-	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/types"
-	"pkg.para.party/certdx/pkg/utils"
-
 	"bytes"
 	"log"
 	"os"
@@ -12,12 +8,18 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/types"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 type CertDXClientDaemon struct {
 	Config    *config.ClientConfigT
 	ClientOpt []CertDXHttpClientOption
 }
+
+type certUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
 
 func MakeCertDXClientDaemon() *CertDXClientDaemon {
 	ret := &CertDXClientDaemon{
@@ -82,19 +84,19 @@ func (r *CertDXClientDaemon) requestCert(domains []string) *types.HttpCertResp {
 	return nil
 }
 
-func (r *CertDXClientDaemon) certWatchDog(cert config.ClientCertification, onChanged ...func(cert, key []byte, c *config.ClientCertification)) {
-	var currentCert, currentKey []byte
+func (r *CertDXClientDaemon) certWatchDog(cert config.ClientCertification, onChanged ...certUpdateHandler) {
+	var currentFullChain, currentKey []byte
 	sleepTime := 1 * time.Hour // default sleep time
 	for {
 		log.Printf("[INF] Request cert %v", cert.Domains)
 		resp := r.requestCert(cert.Domains)
 		if resp != nil {
 			sleepTime = resp.RenewTimeLeft / 4
-			if !bytes.Equal(currentCert, resp.Cert) || !bytes.Equal(currentKey, resp.Key) {
+			if !bytes.Equal(currentFullChain, resp.FullChain) || !bytes.Equal(currentKey, resp.Key) {
 				log.Printf("[INF] Notify cert %v changed", cert.Domains)
-				currentCert, currentKey = resp.Cert, resp.Key
+				currentFullChain, currentKey = resp.FullChain, resp.Key
 				for _, handleFunc := range onChanged {
-					handleFunc(resp.Cert, resp.Key, &cert)
+					handleFunc(resp.FullChain, resp.Key, &cert)
 				}
 			} else {
 				log.Printf("[INF] Cert %v not changed", cert.Domains)
@@ -105,10 +107,10 @@ func (r *CertDXClientDaemon) certWatchDog(cert config.ClientCertification, onCha
 	}
 }
 
-func writeCertAndDoCommand(cert, key []byte, c *config.ClientCertification) {
+func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification) {
 	var doCommand, ce, ke bool
 
-	certPath, keyPath := c.GetCertAndKeyPath()
+	certPath, keyPath := c.GetFullChainAndKeyPath()
 	ce, err := checkFileAndCreate(certPath)
 	if err != nil {
 		goto ERR
@@ -120,7 +122,7 @@ func writeCertAndDoCommand(cert, key []byte, c *config.ClientCertification) {
 	// if cert file is firstly created, don't do reload command
 	doCommand = ce && ke
 
-	err = os.WriteFile(certPath, cert, 0o777)
+	err = os.WriteFile(certPath, fullchain, 0o777)
 	if err != nil {
 		goto ERR
 	}

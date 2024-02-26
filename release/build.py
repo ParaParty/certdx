@@ -25,7 +25,7 @@ for o, a in t:
     dir = f'certdx_{o}_{a}'
     for e, s in exec:
         subprocess.run(
-            f'''env GOOS="{o}" GOARCH="{a}" CGO_ENABLED=0'''
+            f'''env GOOS="{o}" GOARCH="{a}" CGO_ENABLED=0 '''
             f'''go build -ldflags="-s -w '''
             f'''-X main.buildCommit={commitId} -X \'main.buildDate={time}\'" '''
             f'''-o {dir}/{e}{".exe" if o == "windows" else ""} '''

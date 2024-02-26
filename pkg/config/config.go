@@ -99,8 +99,8 @@ type ClientCertification struct {
 	ReloadCommand string   `toml:"reloadCommand" json:"reload_command,omitempty"`
 }
 
-func (c *ClientCertification) GetCertAndKeyPath() (cert, key string) {
-	cert = path.Join(c.SavePath, fmt.Sprintf("%s.pem", c.Name))
+func (c *ClientCertification) GetFullChainAndKeyPath() (fullchain, key string) {
+	fullchain = path.Join(c.SavePath, fmt.Sprintf("%s.pem", c.Name))
 	key = path.Join(c.SavePath, fmt.Sprintf("%s.key", c.Name))
 	return
 }

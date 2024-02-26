@@ -12,7 +12,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -91,24 +90,6 @@ func (u *MyUser) GetRegistration() *registration.Resource {
 }
 func (u *MyUser) GetPrivateKey() crypto.PrivateKey {
 	return u.Key
-}
-
-func getPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
-	saveDir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	saveDir = path.Join(saveDir, "private")
-	keyName := fmt.Sprintf("%s_%s.key", email, ACMEProvider)
-
-	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
-		err := os.Mkdir(saveDir, 0o600)
-		if err != nil {
-			return "", fmt.Errorf("cannot create path: %s to save account key", saveDir)
-		}
-	}
-
-	return path.Join(saveDir, keyName), nil
 }
 
 func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
