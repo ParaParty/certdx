@@ -83,11 +83,8 @@ func init() {
 	}
 	config.ACME.RenewTimeLeftDuration = d
 
-	if config.Cloudflare.APIKey == "" || config.Cloudflare.Email == "" ||
-		len(config.ACME.AllowedDomains) == 0 || (config.HttpServer.Secure &&
-		len(config.HttpServer.Names) == 0) {
-
-		log.Fatalln("[ERR] Invalid config")
+	if err = config.Validate(); err != nil {
+		log.Fatalf("[ERR] Invalid config, %v\n", err)
 	}
 
 	if err := server.InitACMEAccount(); err != nil {
