@@ -16,10 +16,16 @@ allowedDomains = [
     "lanlanlu.com",
 ]
 
-[Cloudflare]
+[DnsProvider]
+type = "cloudflare"
+disableCompletePropagationRequirement = false
 # global api key and email
 email = ""
 apiKey = ""
+# or you can use tencent cloud
+# type = "tencent"
+# secretID = ""
+# SecretKey = ""
 
 [HttpServer]
 enabled = true
