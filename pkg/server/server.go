@@ -64,7 +64,6 @@ func InitCache() error {
 	if err := loadCacheFile(); err != nil {
 		return err
 	}
-	log.Printf("[INF] Previous cache loaded.")
 
 	go func() {
 		for fe := range UpdateCacheFileChan {
@@ -103,6 +102,7 @@ func loadCacheFile() error {
 		}
 	}
 
+	log.Printf("[INF] Previous cache loaded.")
 	return nil
 }
 
