@@ -91,9 +91,7 @@ func init() {
 		log.Fatalf("[ERR] Failed init ACME account: %s", err)
 	}
 
-	if err := server.InitCache(); err != nil {
-		log.Fatalf("[ERR] Failed init server cache: %s", err)
-	}
+	server.InitCache()
 }
 
 func main() {

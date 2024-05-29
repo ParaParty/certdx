@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/utils"
 )
 
 type CertT struct {
@@ -25,7 +24,11 @@ type ServerCacheFileEntry struct {
 	Cert    CertT    `json:"cert"`
 }
 
-type ServerCacheFile []*ServerCacheFileEntry
+type ServerCacheFile struct {
+	path    string
+	entries map[string]*ServerCacheFileEntry
+	update  chan *ServerCacheFileEntry
+}
 
 type ServerCertCacheEntry struct {
 	domains []string
@@ -38,46 +41,32 @@ type ServerCertCacheEntry struct {
 }
 
 type ServerCertCacheT struct {
-	entrys []*ServerCertCacheEntry
-	mutex  sync.Mutex
+	entries map[string]*ServerCertCacheEntry
+	mutex   sync.Mutex
 }
 
-var serverCacheFile = ServerCacheFile{}
-var ServerCertCache = ServerCertCacheT{}
+var serverCacheFile = ServerCacheFile{
+	entries: make(map[string]*ServerCacheFileEntry),
+	update:  make(chan *ServerCacheFileEntry, 10),
+}
+var ServerCertCache = ServerCertCacheT{
+	entries: make(map[string]*ServerCertCacheEntry),
+}
 var Config = &config.ServerConfigT{}
-var UpdateCacheFileChan = make(chan *ServerCacheFileEntry, 1)
 
 func (c *CertT) IsValid() bool {
 	return time.Now().Before(c.ValidBefore)
 }
 
-func (s *ServerCacheFile) GetIndex(domains []string) int {
-	for index, fe := range *s {
-		if utils.SameCert(fe.Domains, domains) {
-			return index
-		}
-	}
-	return -1
-}
-
-func InitCache() error {
-	if err := loadCacheFile(); err != nil {
-		return err
+func InitCache() {
+	if err := serverCacheFile.loadCacheFile(); err != nil {
+		log.Printf("[WRN] Failed to load cache file: %s", err)
 	}
 
-	go func() {
-		for fe := range UpdateCacheFileChan {
-			log.Printf("[INF] Update domains cache to file")
-			if err := writeCacheFile(fe); err != nil {
-				log.Printf("[WRN] Update domains cache to file failed: %s", err)
-			}
-		}
-	}()
-
-	return nil
+	go serverCacheFile.listenUpdate()
 }
 
-func loadCacheFile() error {
+func (s *ServerCacheFile) loadCacheFile() error {
 	cachePath, exist := getCacheSavePath()
 	if !exist {
 		return nil
@@ -88,39 +77,38 @@ func loadCacheFile() error {
 		return fmt.Errorf("open cache file failed: %w", err)
 	}
 
-	err = json.Unmarshal(cfile, &serverCacheFile)
+	entries := make(map[string]*ServerCacheFileEntry)
+	err = json.Unmarshal(cfile, &entries)
 	if err != nil {
 		return fmt.Errorf("unmarshal cache file failed: %w", err)
 	}
 
-	for _, cache := range serverCacheFile {
+	ServerCertCache.mutex.Lock()
+	for _, cache := range entries {
 		if cache.Cert.IsValid() {
-			entry := ServerCertCache.GetEntry(cache.Domains)
+			s.entries[domainsAsKey(cache.Domains)] = cache
+
+			entry := ServerCertCache.getEntryNoLock(cache.Domains)
 			entry.mutex.Lock()
 			entry.cert = cache.Cert
 			entry.mutex.Unlock()
 		}
 	}
+	ServerCertCache.mutex.Unlock()
 
 	log.Printf("[INF] Previous cache loaded.")
 	return nil
 }
 
-func writeCacheFile(fe *ServerCacheFileEntry) error {
-	index := serverCacheFile.GetIndex(fe.Domains)
-	if index == -1 {
-		serverCacheFile = append(serverCacheFile, fe)
-	} else {
-		serverCacheFile[index] = fe
-	}
+func (s *ServerCacheFile) writeCacheFile(fe *ServerCacheFileEntry) error {
+	s.entries[domainsAsKey(fe.Domains)] = fe
 
-	jsonBytes, err := json.Marshal(serverCacheFile)
+	jsonBytes, err := json.Marshal(s.entries)
 	if err != nil {
 		return fmt.Errorf("failed marshal cache file: %w", err)
 	}
 
-	cachePath, _ := getCacheSavePath()
-	err = os.WriteFile(cachePath, jsonBytes, 0o600)
+	err = os.WriteFile(s.path, jsonBytes, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed write cache file: %w", err)
 	}
@@ -128,16 +116,30 @@ func writeCacheFile(fe *ServerCacheFileEntry) error {
 	return nil
 }
 
-func (s *ServerCertCacheT) GetEntry(domains []string) *ServerCertCacheEntry {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	for _, entry := range s.entrys {
-		if utils.SameCert(domains, entry.domains) {
-			return entry
+func (s *ServerCacheFile) listenUpdate() {
+	cachePath, _ := getCacheSavePath()
+	serverCacheFile.path = cachePath
+
+	for fe := range s.update {
+		log.Printf("[INF] Update domains cache to file")
+		if err := s.writeCacheFile(fe); err != nil {
+			log.Printf("[WRN] Update domains cache to file failed: %s", err)
 		}
 	}
+}
 
-	entry := &ServerCertCacheEntry{
+func domainsAsKey(domains []string) string {
+	return strings.Join(domains, "&_&")
+}
+
+func (s *ServerCertCacheT) getEntryNoLock(domains []string) *ServerCertCacheEntry {
+	entryKey := domainsAsKey(domains)
+	entry, ok := s.entries[entryKey]
+	if ok {
+		return entry
+	}
+
+	entry = &ServerCertCacheEntry{
 		domains: domains,
 	}
 	entry.Listening.Store(false)
@@ -145,8 +147,15 @@ func (s *ServerCertCacheT) GetEntry(domains []string) *ServerCertCacheEntry {
 	entry.Updated.Store(&updated)
 	stop := make(chan struct{})
 	entry.Stop.Store(&stop)
-	s.entrys = append(s.entrys, entry)
+
+	s.entries[entryKey] = entry
 	return entry
+}
+
+func (s *ServerCertCacheT) GetEntry(domains []string) *ServerCertCacheEntry {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.getEntryNoLock(domains)
 }
 
 func (c *ServerCertCacheEntry) Cert() CertT {
@@ -185,7 +194,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 		}
 		c.cert = newCert
 
-		UpdateCacheFileChan <- &ServerCacheFileEntry{
+		serverCacheFile.update <- &ServerCacheFileEntry{
 			Domains: c.domains,
 			Cert:    newCert,
 		}
