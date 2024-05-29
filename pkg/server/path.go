@@ -17,8 +17,10 @@ func getPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
 	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
 		err := os.Mkdir(saveDir, 0o600)
 		if err != nil {
-			return "", fmt.Errorf("cannot create path: %s to save account key", saveDir)
+			return "", fmt.Errorf("cannot create path: %s to save account key: %w", saveDir, err)
 		}
+	} else if err != nil {
+		return "", err
 	}
 
 	return path.Join(saveDir, keyName), nil
@@ -33,6 +35,8 @@ func getCacheSavePath() (cachePath string, exist bool) {
 	cacheFile := path.Join(saveDir, "cache.json")
 	if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
 		return cacheFile, false
+	} else if err != nil {
+		return "", false
 	}
 
 	return cacheFile, true
