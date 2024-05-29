@@ -6,19 +6,19 @@ subprocess.run("rm -r ./certdx_*", shell=True)
 commitId = subprocess.run("git rev-parse --short HEAD", shell=True, capture_output=True)
 commitId = commitId.stdout.decode().strip()
 
-time = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+time = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d %H:%M')
 
-t = [['linux', 'amd64'],
-     ['linux', 'arm'],
-     ['linux', 'arm64'],
-     ['linux', 'mips'],
-     ['linux', 'mipsle'],
+t = [['linux',   'amd64'],
+     ['linux',   'arm'],
+     ['linux',   'arm64'],
+     ['linux',   'mips'],
+     ['linux',   'mipsle'],
      ['windows', 'amd64'],
 ]
 
-exec = [['server',         'exec/server'],
-        ['client',         'exec/client'],
-        ['google_account', 'exec/google_account'],
+exec = [['server', 'exec/server'],
+        ['client', 'exec/client'],
+        ['tools',  'exec/tools'],
 ]
 
 for o, a in t:

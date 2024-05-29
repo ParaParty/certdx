@@ -25,9 +25,13 @@ go.work
 
 # Release files
 release/certdx_*
+/tools
+/server
+/client
 
 .idea
 
 *.service.toml
 *_config.service.toml
-private/
+/private
+/cert
