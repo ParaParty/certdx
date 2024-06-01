@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ type CertT struct {
 	FullChain   []byte    `json:"fullChain"`
 	Key         []byte    `json:"key"`
 	ValidBefore time.Time `json:"validBefore"`
+	RenewAt     time.Time `json:"renewAt"`
 }
 
 type ServerCacheFileEntry struct {
@@ -35,7 +37,7 @@ type ServerCertCacheEntry struct {
 	cert    CertT
 	mutex   sync.Mutex
 
-	Listening atomic.Bool
+	Listening atomic.Uint64
 	Updated   atomic.Pointer[chan struct{}]
 	Stop      atomic.Pointer[chan struct{}]
 }
@@ -142,7 +144,6 @@ func (s *ServerCertCacheT) getEntryNoLock(domains []string) *ServerCertCacheEntr
 	entry = &ServerCertCacheEntry{
 		domains: domains,
 	}
-	entry.Listening.Store(false)
 	updated := make(chan struct{})
 	entry.Updated.Store(&updated)
 	stop := make(chan struct{})
@@ -188,9 +189,10 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 		}
 
 		newCert := CertT{
-			ValidBefore: newValidBefore,
 			FullChain:   fullchain,
 			Key:         key,
+			ValidBefore: newValidBefore,
+			RenewAt:     time.Now(),
 		}
 		c.cert = newCert
 
@@ -207,12 +209,10 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 	return false, nil
 }
 
-func (c *ServerCertCacheEntry) CertWatchDog() {
-	if c.Listening.Load() {
-		return
-	}
+func (c *ServerCertCacheEntry) certWatchDog() {
+	log.Printf("[INF] start cert watch dog for: %v", c.domains)
+	defer log.Printf("[INF] stop cert watch dog for: %v", c.domains)
 
-	c.Listening.Store(true)
 	for {
 		log.Printf("[INF] Server renew: %v", c.domains)
 		changed, err := c.Renew(true)
@@ -220,7 +220,7 @@ func (c *ServerCertCacheEntry) CertWatchDog() {
 			log.Printf("[ERR] Failed renew cert %s: %s", c.domains, err)
 		} else if changed {
 			newUpdated := make(chan struct{})
-			log.Printf("[INF] Notify cert %s updated", c.domains)
+			log.Printf("[INF] Notify cert %v updated", c.domains)
 			close(*c.Updated.Swap(&newUpdated))
 		}
 
@@ -230,10 +230,25 @@ func (c *ServerCertCacheEntry) CertWatchDog() {
 			// Do next check
 		case <-*c.Stop.Load():
 			t.Stop()
-			c.Listening.Store(false)
 			return
 		}
 	}
+}
+
+func (c *ServerCertCacheEntry) Subscrib() {
+	if c.Listening.Add(1) == 1 {
+		go c.certWatchDog()
+	}
+}
+
+func (c *ServerCertCacheEntry) Release() {
+	if c.Listening.Add(math.MaxUint64) == 0 {
+		*c.Stop.Load() <- struct{}{}
+	}
+}
+
+func (c *ServerCertCacheEntry) IsSubcribing() bool {
+	return c.Listening.Load() != 0
 }
 
 func isSubdomain(domain string, allowedDomains []string) bool {

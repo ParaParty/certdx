@@ -142,7 +142,9 @@ func generateSubjectKeyID(pub crypto.PublicKey) ([]byte, error) {
 	return hash[:], nil
 }
 
-func makeCert(PEMPath, keyPath, organization, commonName string, domains []string) error {
+func makeCert(PEMPath, keyPath, organization, commonName string,
+	domains []string, extKeyUseage []x509.ExtKeyUsage) error {
+
 	counterPath, err := utils.GetCACounterPath()
 	if err != nil {
 		return err
@@ -173,7 +175,7 @@ func makeCert(PEMPath, keyPath, organization, commonName string, domains []strin
 		DNSNames:     domains,
 		NotBefore:    time.Now().Truncate(1 * time.Hour),
 		NotAfter:     time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC),
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage:  extKeyUseage,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 	}
 
@@ -222,7 +224,7 @@ func MakeServerCert(organization, commonName string, domains []string) error {
 	if err != nil {
 		return err
 	}
-	return makeCert(servPEMPath, servKeyPath, organization, commonName, domains)
+	return makeCert(servPEMPath, servKeyPath, organization, commonName, domains, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
 }
 
 func MakeClientCert(name, organization, commonName string, domains []string) error {
@@ -230,5 +232,5 @@ func MakeClientCert(name, organization, commonName string, domains []string) err
 	if err != nil {
 		return err
 	}
-	return makeCert(clientPEMPath, clientKeyPath, organization, commonName, domains)
+	return makeCert(clientPEMPath, clientKeyPath, organization, commonName, domains, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 }

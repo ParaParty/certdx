@@ -5,8 +5,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"pkg.para.party/certdx/pkg/config"
@@ -150,6 +152,9 @@ func (r *CertDXClientDaemon) HttpMain() {
 			<-t
 		}
 	}
-	blockingChan := make(chan struct{})
+	blockingChan := make(chan os.Signal, 1)
+	signal.Notify(blockingChan, syscall.SIGINT, syscall.SIGTERM)
+
 	<-blockingChan
+	log.Println("[INF] Stopping client")
 }
