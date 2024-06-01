@@ -14,7 +14,7 @@ func makeServer() {
 
 		srvDomains      = srvCMD.StringSliceP("dns-names", "d", []string{}, "CertDX grpc server certificate dns names, combine multiple names with \",\"")
 		srvOrganization = srvCMD.StringP("organization", "o", "CertDX Private", "Subject Organization")
-		srvCommonName   = srvCMD.StringP("common-name", "c", "CertDX Service", "Subject Common Name")
+		srvCommonName   = srvCMD.StringP("common-name", "c", "CertDX Secret Discovery Service", "Subject Common Name")
 		srvHelp         = srvCMD.BoolP("help", "h", false, "Print help")
 	)
 	srvCMD.Parse(os.Args[2:])

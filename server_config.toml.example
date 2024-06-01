@@ -38,9 +38,7 @@ names = ["acmserver.lanlanlu.com", "*.lanlanlu.com"]
 # left empty for no token
 token = "KFCCrazyThursdayVMe50"
 
-# gRPC will be implemented later...
-# [GRPCServer]
-# listen = ":11451"
-# secure = true
-# name = "grpcserver.lanlanlu.com"
-# token = "lanlanlu!!"
+[gRPCSDSServer]
+enabled = true
+listen = ":11451"
+names = ["grpcserver.lanlanlu.com"]

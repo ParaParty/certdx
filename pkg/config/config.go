@@ -2,9 +2,10 @@ package config
 
 import (
 	"fmt"
-	"google.golang.org/appengine"
 	"path"
 	"time"
+
+	"google.golang.org/appengine"
 )
 
 const (
@@ -25,15 +26,15 @@ type DnsProvider struct {
 	SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
 }
 
-func (p DnsProvider) Validate() error {
+func (p *DnsProvider) Validate() error {
 	switch p.Type {
 	case DnsProviderTypeCloudflare:
 		if p.Email == "" || p.APIKey == "" {
-			return fmt.Errorf("DnsProvider Cloudflare: empty email or key")
+			return fmt.Errorf("DnsProvider Cloudflare: empty Email or APIKey")
 		}
 	case DnsProviderTypeTencentCloud:
 		if p.SecretID == "" || p.SecretKey == "" {
-			return fmt.Errorf("DnsProvider TencentCloud: empty email or key")
+			return fmt.Errorf("DnsProvider TencentCloud: empty SecretID or SecretKey")
 		}
 	}
 	return nil
@@ -44,7 +45,8 @@ type ServerConfigT struct {
 
 	DnsProvider DnsProvider `toml:"DnsProvider" json:"dns_provider,omitempty"`
 
-	HttpServer HttpServerConfig `toml:"HttpServer" json:"http_server,omitempty"`
+	HttpServer    HttpServerConfig `toml:"HttpServer" json:"http_server,omitempty"`
+	GRPCSDSServer GRPCServerConfig `toml:"gRPCSDSServer" json:"grpc_sds_server,omitempty"`
 }
 
 type ACMEConfig struct {
@@ -59,7 +61,7 @@ type ACMEConfig struct {
 	RenewTimeLeftDuration time.Duration `toml:"-" json:"-"`
 }
 
-func (c ACMEConfig) Validate() error {
+func (c *ACMEConfig) Validate() error {
 	if len(c.AllowedDomains) == 0 {
 		return fmt.Errorf("AllowedDomains is empty")
 	}
@@ -75,19 +77,33 @@ type HttpServerConfig struct {
 	Token   string   `toml:"token" json:"token,omitempty"`
 }
 
-func (c HttpServerConfig) Validate() error {
+func (c *HttpServerConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+
 	if c.Secure && len(c.Names) == 0 {
 		return fmt.Errorf("secure http server with no name")
 	}
 	return nil
 }
 
-// type GRPCServerConfig struct {
-// 	Listen string `toml:"listen"`
-// 	Secure bool   `toml:"secure"`
-// 	Name   string `toml:"name"`
-// 	Token  string `toml:"token"`
-// }
+type GRPCServerConfig struct {
+	Enabled bool     `toml:"enabled" json:"enabled,omitempty"`
+	Listen  string   `toml:"listen" json:"listen,omitempty"`
+	Names   []string `toml:"names" json:"names,omitempty"`
+}
+
+func (c *GRPCServerConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+
+	if len(c.Names) == 0 {
+		return fmt.Errorf("no grpc server name")
+	}
+	return nil
+}
 
 func (c *ServerConfigT) SetDefault() {
 	c.ACME = ACMEConfig{
@@ -100,6 +116,10 @@ func (c *ServerConfigT) SetDefault() {
 		Listen:  ":10001",
 		APIPath: "/",
 		Secure:  false,
+	}
+
+	c.GRPCSDSServer = GRPCServerConfig{
+		Listen: ":10002",
 	}
 }
 
@@ -118,6 +138,10 @@ func (c *ServerConfigT) Validate() error {
 		ret = append(ret, err)
 	}
 
+	if err := c.GRPCSDSServer.Validate(); err != nil {
+		ret = append(ret, err)
+	}
+
 	if len(ret) > 0 {
 		return ret
 	}
@@ -132,11 +156,6 @@ type ClientConfigT struct {
 		StandbyServer ClientHttpServer `toml:"StandbyServer" json:"standby_server,omitempty"`
 	} `toml:"Http" json:"http,omitempty"`
 
-	// GRPC struct {
-	// 	MainServer    ClientGRPCServer `toml:"MainServer"`
-	// 	StandbyServer ClientGRPCServer `toml:"StandbyServer"`
-	// } `toml:"GRPC"`
-
 	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
 }
 
@@ -150,12 +169,6 @@ type ClientHttpServer struct {
 	Url   string `toml:"url" json:"url,omitempty"`
 	Token string `toml:"token" json:"token,omitempty"`
 }
-
-// type ClientGRPCServer struct {
-// 	Secure bool   `toml:"secure"`
-// 	Server string `toml:"server"`
-// 	Token  string `toml:"token"`
-// }
 
 type ClientCertification struct {
 	Name          string   `toml:"name" json:"name,omitempty"`

@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -96,6 +98,25 @@ func init() {
 
 func main() {
 	if config.HttpServer.Enabled {
-		server.HttpSrv()
+		go server.HttpSrv()
+	}
+
+	stopSDS := make(chan struct{}, 1)
+	if config.GRPCSDSServer.Enabled {
+		go server.SDSSrv(stopSDS)
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	<-stop
+
+	go func() {
+		<-stop
+		log.Fatalln("[ERR] Fast dying...")
+	}()
+
+	if config.GRPCSDSServer.Enabled {
+		stopSDS <- struct{}{}
 	}
 }

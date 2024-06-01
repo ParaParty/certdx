@@ -15,7 +15,7 @@ func getPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
 	keyName := fmt.Sprintf("%s_%s.key", email, ACMEProvider)
 
 	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
-		err := os.Mkdir(saveDir, 0o600)
+		err := os.Mkdir(saveDir, 0o755)
 		if err != nil {
 			return "", fmt.Errorf("cannot create path: %s to save account key: %w", saveDir, err)
 		}

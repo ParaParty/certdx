@@ -34,4 +34,5 @@ release/certdx_*
 *.service.toml
 *_config.service.toml
 /private
-/cert
+/sds
+cache.json

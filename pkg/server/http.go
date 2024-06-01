@@ -1,10 +1,10 @@
 package server
 
 import (
-	"fmt"
-	"io"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -66,7 +66,7 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	}
 
 	cachedCert = ServerCertCache.GetEntry(req.Domains)
-	if !cachedCert.Listening.Load() {
+	if !cachedCert.IsSubcribing() {
 		_, err = cachedCert.Renew(false)
 		if err != nil {
 			goto ERR
@@ -98,8 +98,7 @@ func serveHttps() {
 	cert_ := entry.Cert()
 	certValid := cert_.IsValid()
 
-	// when starting up, no cert is listening, just start a watch dog anyway
-	go entry.CertWatchDog()
+	entry.Subscrib()
 
 	if !certValid {
 		<-*entry.Updated.Load()
@@ -136,7 +135,8 @@ func HttpSrv() {
 
 	if !Config.HttpServer.Secure {
 		log.Printf("[INF] Http server started")
-		http.ListenAndServe(Config.HttpServer.Listen, nil)
+		err := http.ListenAndServe(Config.HttpServer.Listen, nil)
+		log.Printf("[INF] Http server stopped: %s", err)
 	} else {
 		serveHttps()
 	}

@@ -124,15 +124,26 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 		return fmt.Errorf("failed constructing acme client: %w", err)
 	}
 
-	var eabOptions = registration.RegisterEABOptions{
-		TermsOfServiceAgreed: true,
-		Kid:                  Kid,
-		HmacEncoded:          Hmac,
-	}
-	myUser.Registration, err = client.Registration.RegisterWithExternalAccountBinding(eabOptions)
-	if err != nil {
-		os.Remove(keyPath)
-		return fmt.Errorf("failed register: %s", err)
+	if Hmac != "" && Kid != "" {
+		var eabOptions = registration.RegisterEABOptions{
+			TermsOfServiceAgreed: true,
+			Kid:                  Kid,
+			HmacEncoded:          Hmac,
+		}
+		myUser.Registration, err = client.Registration.RegisterWithExternalAccountBinding(eabOptions)
+		if err != nil {
+			os.Remove(keyPath)
+			return fmt.Errorf("failed register: %s", err)
+		}
+	} else {
+		var regOptions = registration.RegisterOptions{
+			TermsOfServiceAgreed: true,
+		}
+		myUser.Registration, err = client.Registration.Register(regOptions)
+		if err != nil {
+			os.Remove(keyPath)
+			return fmt.Errorf("failed register: %s", err)
+		}
 	}
 
 	reg, err := json.Marshal(myUser.Registration)

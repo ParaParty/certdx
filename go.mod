@@ -7,19 +7,16 @@ require (
 	github.com/go-acme/lego/v4 v4.16.1
 	github.com/spf13/pflag v1.0.5
 	google.golang.org/appengine v1.6.8
-)
-
-require (
-	github.com/cncf/xds/go v0.0.0-20240318125728-8a4994d93e50 // indirect
-	github.com/envoyproxy/protoc-gen-validate v1.0.4 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240318140521-94a12d6c2237 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237 // indirect
+	google.golang.org/grpc v1.64.0
+	google.golang.org/protobuf v1.34.1
 )
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cloudflare/cloudflare-go v0.96.0 // indirect
+	github.com/cncf/xds/go v0.0.0-20240318125728-8a4994d93e50 // indirect
 	github.com/envoyproxy/go-control-plane v0.12.0
+	github.com/envoyproxy/protoc-gen-validate v1.0.4 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.2 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
@@ -37,6 +34,6 @@ require (
 	golang.org/x/text v0.15.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.21.0 // indirect
-	google.golang.org/grpc v1.64.0
-	google.golang.org/protobuf v1.34.1 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240318140521-94a12d6c2237 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237 // indirect
 )
