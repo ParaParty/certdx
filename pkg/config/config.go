@@ -36,6 +36,8 @@ func (p *DnsProvider) Validate() error {
 		if p.SecretID == "" || p.SecretKey == "" {
 			return fmt.Errorf("DnsProvider TencentCloud: empty SecretID or SecretKey")
 		}
+	default:
+		return fmt.Errorf("unknown DnsProvider: %s", p.Type)
 	}
 	return nil
 }
