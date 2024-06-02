@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"time"
 )
@@ -16,10 +17,11 @@ func Retry(retryCount int, work func() error) error {
 			return nil
 		}
 
-		if elapsed := time.Since(begin); elapsed < 5*time.Millisecond {
+		if elapsed := time.Since(begin); elapsed < time.Second {
 			return fmt.Errorf("errored too fast, give up retry. last error is: %w", err)
 		}
 
+		log.Printf("[WRN] Retry %d/%d errored: %s", i+1, retryCount, err)
 		time.Sleep(15 * time.Second)
 	}
 
