@@ -158,6 +158,11 @@ type ClientConfigT struct {
 		StandbyServer ClientHttpServer `toml:"StandbyServer" json:"standby_server,omitempty"`
 	} `toml:"Http" json:"http,omitempty"`
 
+	GRPC struct {
+		MainServer    ClientGRPCServer `toml:"MainServer" json:"main_server,omitempty"`
+		StandbyServer ClientGRPCServer `toml:"StandbyServer" json:"standby_server,omitempty"`
+	} `toml:"GRPC" json:"GRPC,omitempty"`
+
 	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
 }
 
@@ -165,11 +170,20 @@ type ClientServerConfig struct {
 	RetryCount        int    `toml:"retryCount" json:"retry_count,omitempty"`
 	Mode              string `toml:"mode" json:"mode,omitempty"`
 	FailBackIntervial string `toml:"failBackIntervial" json:"fail_back_intervial,omitempty"`
+
+	FailBackDuration time.Duration `toml:"-" json:"-"`
 }
 
 type ClientHttpServer struct {
 	Url   string `toml:"url" json:"url,omitempty"`
 	Token string `toml:"token" json:"token,omitempty"`
+}
+
+type ClientGRPCServer struct {
+	Server      string `toml:"server" json:"server,omitempty"`
+	CA          string `toml:"ca" json:"ca,omitempty"`
+	Certificate string `toml:"certificate" json:"certificate,omitempty"`
+	Key         string `toml:"key" json:"key,omitempty"`
 }
 
 type ClientCertification struct {

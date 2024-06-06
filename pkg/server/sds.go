@@ -52,7 +52,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 					return
 				}
 			case <-ctx.Done():
-				log.Printf("[INF] Message receiver stopped due to ctx done: %s\n", ctx.Err())
+				log.Printf("[INF] Message sender stopped due to ctx done: %s", ctx.Err())
 				return
 			}
 		}
@@ -148,7 +148,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 		log.Printf("[ERR] Stream end due to errored: %s", err)
 		return err
 	case <-sds.kill:
-		log.Printf("stream end due to explicit kill.")
+		log.Printf("[INF] Stream end due to explicit kill.")
 		return fmt.Errorf("server closed")
 	}
 }
@@ -251,7 +251,7 @@ func getTLSConfig() *tls.Config {
 
 	capool := x509.NewCertPool()
 	if !capool.AppendCertsFromPEM(caPEM) {
-		log.Panicf("Invalid ca cert")
+		log.Fatalf("[ERR] Invalid ca cert")
 	}
 
 	return &tls.Config{

@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
@@ -17,7 +18,7 @@ var (
 )
 
 var (
-	test     = flag.BoolP("test", "t", false, "Testing not verify server certification")
+	test     = flag.BoolP("test", "t", false, "Testing not verify http server certification")
 	pLogPath = flag.StringP("log", "l", "", "Log file path")
 	help     = flag.BoolP("help", "h", false, "Print help")
 	version  = flag.BoolP("version", "v", false, "Print version")
@@ -71,8 +72,9 @@ func init() {
 		log.Fatalf("[ERR] Reading config file failed: %s", err)
 	}
 
-	if certDXDaemon.Config.Http.MainServer.Url == "" {
-		log.Fatalf("[ERR] Main server url should not be empty")
+	certDXDaemon.Config.Server.FailBackDuration, err = time.ParseDuration(certDXDaemon.Config.Server.FailBackIntervial)
+	if err != nil {
+		log.Fatalf("[ERR] Failed to parse interval")
 	}
 
 	if len(certDXDaemon.Config.Certifications) == 0 {
@@ -89,7 +91,15 @@ func init() {
 func main() {
 	switch certDXDaemon.Config.Server.Mode {
 	case "http":
+		if certDXDaemon.Config.Http.MainServer.Url == "" {
+			log.Fatalf("[ERR] Http main server url should not be empty")
+		}
 		certDXDaemon.HttpMain()
+	case "grpc":
+		if certDXDaemon.Config.GRPC.MainServer.Server == "" {
+			log.Fatalf("[ERR] GRPC main server url should not be empty")
+		}
+		certDXDaemon.GRPCMain()
 	default:
 		log.Fatalf("[ERR] Mode %s not supported", certDXDaemon.Config.Server.Mode)
 	}
