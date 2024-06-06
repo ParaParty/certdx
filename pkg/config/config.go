@@ -167,9 +167,9 @@ type ClientConfigT struct {
 }
 
 type ClientServerConfig struct {
-	RetryCount        int    `toml:"retryCount" json:"retry_count,omitempty"`
-	Mode              string `toml:"mode" json:"mode,omitempty"`
-	FailBackIntervial string `toml:"failBackIntervial" json:"fail_back_intervial,omitempty"`
+	RetryCount       int    `toml:"retryCount" json:"retry_count,omitempty"`
+	Mode             string `toml:"mode" json:"mode,omitempty"`
+	FailBackInterval string `toml:"failBackInterval" json:"fail_back_interval,omitempty"`
 
 	FailBackDuration time.Duration `toml:"-" json:"-"`
 }
@@ -201,8 +201,8 @@ func (c *ClientCertification) GetFullChainAndKeyPath() (fullchain, key string) {
 
 func (c *ClientConfigT) SetDefault() {
 	c.Server = ClientServerConfig{
-		RetryCount:        5,
-		Mode:              "http",
-		FailBackIntervial: "10m",
+		RetryCount:       5,
+		Mode:             "http",
+		FailBackInterval: "10m",
 	}
 }

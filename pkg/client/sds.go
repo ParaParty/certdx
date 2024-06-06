@@ -87,6 +87,12 @@ func (c *CertDXgRPCClient) getTLSConfig() *tls.Config {
 }
 
 func (c *CertDXgRPCClient) Stream() error {
+	select {
+	case <-c.Kill:
+		return &killed{Err: "stream killed"}
+	default:
+	}
+
 	c.Running.Store(true)
 	conn, err := grpc.NewClient(c.server.Server,
 		grpc.WithTransportCredentials(c.tlsCred),
