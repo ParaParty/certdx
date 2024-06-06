@@ -210,6 +210,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 
 			if standByExists && !standByClient.Running.Load() {
 				go func() {
+					retryCount := 0
 					for {
 						log.Println("[INF] Starting gRPC standby stream")
 						err := standByClient.Stream()
@@ -217,6 +218,12 @@ func (r *CertDXClientDaemon) GRPCMain() {
 						if _, ok := err.(*killed); ok {
 							return
 						}
+						retryCount += 1
+						if retryCount < r.Config.Server.RetryCount {
+							continue
+						}
+						log.Printf("[INF] Will try standby server after %s", r.Config.Server.FailBackInterval)
+						<-time.After(r.Config.Server.FailBackDuration)
 					}
 				}()
 
@@ -226,7 +233,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 			}
 
 			retryCount = 0
-			log.Printf("[INF] Will try main server after %s", r.Config.Server.FailBackIntervial)
+			log.Printf("[INF] Will try main server after %s", r.Config.Server.FailBackInterval)
 			select {
 			case <-time.After(r.Config.Server.FailBackDuration):
 				continue
