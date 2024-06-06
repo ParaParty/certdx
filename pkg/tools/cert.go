@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"time"
 
@@ -163,6 +164,14 @@ func makeCert(PEMPath, keyPath, organization, commonName string,
 	}
 	caKey := *pcaKey
 
+	ipAddresses := []net.IP{}
+	for _, domain := range domains {
+		addr := net.ParseIP(domain)
+		if addr != nil {
+			ipAddresses = append(ipAddresses, addr)
+		}
+	}
+
 	SubjectOrganization := []string{organization}
 	Subject := pkix.Name{
 		Organization: SubjectOrganization,
@@ -173,6 +182,7 @@ func makeCert(PEMPath, keyPath, organization, commonName string,
 		SerialNumber: &counter,
 		Subject:      Subject,
 		DNSNames:     domains,
+		IPAddresses:  ipAddresses,
 		NotBefore:    time.Now().Truncate(1 * time.Hour),
 		NotAfter:     time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC),
 		ExtKeyUsage:  extKeyUseage,
