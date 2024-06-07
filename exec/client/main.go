@@ -18,7 +18,7 @@ var (
 )
 
 var (
-	test     = flag.BoolP("test", "t", false, "Testing not verify http server certification")
+	test     = flag.BoolP("test", "t", false, "Test mode: skip http server certificate verification")
 	pLogPath = flag.StringP("log", "l", "", "Log file path")
 	help     = flag.BoolP("help", "h", false, "Print help")
 	version  = flag.BoolP("version", "v", false, "Print version")
