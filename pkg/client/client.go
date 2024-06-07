@@ -222,8 +222,8 @@ func (r *CertDXClientDaemon) GRPCMain() {
 						if retryCount < r.Config.Server.RetryCount {
 							continue
 						}
-						log.Printf("[INF] Will try standby server after %s", r.Config.Server.FailBackInterval)
-						<-time.After(r.Config.Server.FailBackDuration)
+						log.Printf("[INF] Will reconnect standby server after %s", r.Config.Server.ReconnectInterval)
+						<-time.After(r.Config.Server.ReconnectDuration)
 					}
 				}()
 
@@ -233,9 +233,9 @@ func (r *CertDXClientDaemon) GRPCMain() {
 			}
 
 			retryCount = 0
-			log.Printf("[INF] Will try main server after %s", r.Config.Server.FailBackInterval)
+			log.Printf("[INF] Will reconnect main server after %s", r.Config.Server.ReconnectInterval)
 			select {
-			case <-time.After(r.Config.Server.FailBackDuration):
+			case <-time.After(r.Config.Server.ReconnectDuration):
 				continue
 			case <-kill:
 				return

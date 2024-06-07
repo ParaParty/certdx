@@ -3,9 +3,11 @@ retryCount = 5
 # http or grpc
 # gRPC will be implemented later...
 mode = "http"
-# only take effect in gRPC mode. If client is using standby server,
-# will try main server every failBackInterval
-failBackInterval = "10m"
+# only take effect in gRPC mode. If client lost connection from
+# main server or standby server, will reconnect to server every
+# reconnectInterval. Also, if client fallback to standby server,
+# will retry connect to main server every reconnectInterval.
+reconnectInterval = "10m"
 
 [Http.MainServer]
 url = "https://acmeserver.lanlanlu.com:19198/1145141919810"

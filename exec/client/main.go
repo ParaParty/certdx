@@ -72,7 +72,7 @@ func init() {
 		log.Fatalf("[ERR] Reading config file failed: %s", err)
 	}
 
-	certDXDaemon.Config.Server.FailBackDuration, err = time.ParseDuration(certDXDaemon.Config.Server.FailBackInterval)
+	certDXDaemon.Config.Server.ReconnectDuration, err = time.ParseDuration(certDXDaemon.Config.Server.ReconnectInterval)
 	if err != nil {
 		log.Fatalf("[ERR] Failed to parse interval: %s", err)
 	}
