@@ -65,7 +65,7 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cachedCert = ServerCertCache.GetEntry(req.Domains)
+	cachedCert = serverCertCache.GetEntry(req.Domains)
 	if !cachedCert.IsSubcribing() {
 		_, err = cachedCert.Renew(false)
 		if err != nil {
@@ -94,13 +94,12 @@ ERR:
 }
 
 func serveHttps() {
-	entry := ServerCertCache.GetEntry(Config.HttpServer.Names)
+	entry := serverCertCache.GetEntry(Config.HttpServer.Names)
 	cert_ := entry.Cert()
-	certValid := cert_.IsValid()
 
-	entry.Subscrib()
+	entry.Subscribe()
 
-	if !certValid {
+	if !cert_.IsValid() {
 		<-*entry.Updated.Load()
 	}
 

@@ -131,19 +131,15 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 			HmacEncoded:          Hmac,
 		}
 		myUser.Registration, err = client.Registration.RegisterWithExternalAccountBinding(eabOptions)
-		if err != nil {
-			os.Remove(keyPath)
-			return fmt.Errorf("failed register: %s", err)
-		}
 	} else {
 		var regOptions = registration.RegisterOptions{
 			TermsOfServiceAgreed: true,
 		}
 		myUser.Registration, err = client.Registration.Register(regOptions)
-		if err != nil {
-			os.Remove(keyPath)
-			return fmt.Errorf("failed register: %s", err)
-		}
+	}
+	if err != nil {
+		os.Remove(keyPath)
+		return fmt.Errorf("failed register: %s", err)
 	}
 
 	reg, err := json.Marshal(myUser.Registration)

@@ -51,7 +51,7 @@ var serverCacheFile = ServerCacheFile{
 	entries: make(map[string]*ServerCacheFileEntry),
 	update:  make(chan *ServerCacheFileEntry, 10),
 }
-var ServerCertCache = ServerCertCacheT{
+var serverCertCache = ServerCertCacheT{
 	entries: make(map[string]*ServerCertCacheEntry),
 }
 var Config = &config.ServerConfigT{}
@@ -85,18 +85,18 @@ func (s *ServerCacheFile) loadCacheFile() error {
 		return fmt.Errorf("unmarshal cache file failed: %w", err)
 	}
 
-	ServerCertCache.mutex.Lock()
+	serverCertCache.mutex.Lock()
 	for _, cache := range entries {
 		if cache.Cert.IsValid() {
 			s.entries[domainsAsKey(cache.Domains)] = cache
 
-			entry := ServerCertCache.getEntryNoLock(cache.Domains)
+			entry := serverCertCache.getEntryNoLock(cache.Domains)
 			entry.mutex.Lock()
 			entry.cert = cache.Cert
 			entry.mutex.Unlock()
 		}
 	}
-	ServerCertCache.mutex.Unlock()
+	serverCertCache.mutex.Unlock()
 
 	log.Printf("[INF] Previous cache loaded.")
 	return nil
@@ -235,7 +235,7 @@ func (c *ServerCertCacheEntry) certWatchDog() {
 	}
 }
 
-func (c *ServerCertCacheEntry) Subscrib() {
+func (c *ServerCertCacheEntry) Subscribe() {
 	if c.Listening.Add(1) == 1 {
 		go c.certWatchDog()
 	}
