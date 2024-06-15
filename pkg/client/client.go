@@ -200,10 +200,12 @@ func (r *CertDXClientDaemon) GRPCMain() {
 				if time.Now().Before(startTime.Add(5 * time.Minute)) {
 					retryCount += 1
 				} else {
+					retryCount = 0
 					continue
 				}
 			}
 
+			log.Printf("[INF] Current main server retry count: %d", retryCount)
 			if retryCount < r.Config.Server.RetryCount {
 				continue
 			}
@@ -218,7 +220,12 @@ func (r *CertDXClientDaemon) GRPCMain() {
 						if _, ok := err.(*killed); ok {
 							return
 						}
-						retryCount += 1
+						if time.Now().Before(startTime.Add(5 * time.Minute)) {
+							retryCount += 1
+						} else {
+							retryCount = 0
+							continue
+						}
 						if retryCount < r.Config.Server.RetryCount {
 							continue
 						}
