@@ -1,6 +1,7 @@
 package server
 
 import (
+	"pkg.para.party/certdx/pkg/server/google"
 	"pkg.para.party/certdx/pkg/utils"
 
 	"crypto"
@@ -55,11 +56,19 @@ func InitACMEAccount() error {
 	}
 
 	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+		kid := ""
+		hmac := ""
+
 		if isACMEProviderGoogle(Config.ACME.Provider) {
-			return fmt.Errorf("auto register google cloud acme accout has not been implemented now, please manually register it")
+			account, err := google.CreateExternalAccountKeyRequest(Config.ACME)
+			if err != nil {
+				return fmt.Errorf("failed to register google ca: %v", err)
+			}
+			kid = account.KeyId
+			hmac = account.HmacEncoded
 		}
 
-		if err := RegisterAccount(Config.ACME.Provider, Config.ACME.Email, "", ""); err != nil {
+		if err := RegisterAccount(Config.ACME.Provider, Config.ACME.Email, kid, hmac); err != nil {
 			return err
 		}
 	} else if err != nil {

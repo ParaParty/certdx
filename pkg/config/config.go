@@ -17,9 +17,13 @@ type DnsProvider struct {
 	Type                                  string `toml:"type" json:"type,omitempty"`
 	DisableCompletePropagationRequirement bool   `toml:"disableCompletePropagationRequirement" json:"disable_complete_propagation_requirement,omitempty"`
 
-	// cloudflare
+	// cloudflare global
 	Email  string `toml:"email" json:"email,omitempty"`
 	APIKey string `toml:"apiKey" json:"api_key,omitempty"`
+
+	// cloudflare zone
+	AuthToken string `toml:"authToken" json:"auth_token,omitempty"`
+	ZoneToken string `toml:"zoneToken" json:"zone_token,omitempty"`
 
 	// tencentcloud
 	SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
@@ -29,7 +33,7 @@ type DnsProvider struct {
 func (p *DnsProvider) Validate() error {
 	switch p.Type {
 	case DnsProviderTypeCloudflare:
-		if p.Email == "" || p.APIKey == "" {
+		if (p.Email == "" || p.APIKey == "") && (p.AuthToken == "" || p.ZoneToken == "") {
 			return fmt.Errorf("DnsProvider Cloudflare: empty Email or APIKey")
 		}
 	case DnsProviderTypeTencentCloud:
@@ -51,6 +55,11 @@ type ServerConfigT struct {
 	GRPCSDSServer GRPCServerConfig `toml:"gRPCSDSServer" json:"grpc_sds_server,omitempty"`
 }
 
+type GoogleCloudInfo struct {
+	Project    string            `toml:"project" json:"project"`
+	Credential map[string]string `toml:"credential" json:"credential"`
+}
+
 type ACMEConfig struct {
 	Email          string   `toml:"email" json:"email,omitempty"`
 	Provider       string   `toml:"provider" json:"provider,omitempty"`
@@ -58,6 +67,8 @@ type ACMEConfig struct {
 	CertLifeTime   string   `toml:"certLifeTime" json:"cert_life_time,omitempty"`
 	RenewTimeLeft  string   `toml:"renewTimeLeft" json:"renew_time_left,omitempty"`
 	AllowedDomains []string `toml:"allowedDomains" json:"allowed_domains,omitempty"`
+
+	GoogleCloudInfo GoogleCloudInfo `toml:"googleCloudInfo" json:"google_cloud_info,omitempty"`
 
 	CertLifeTimeDuration  time.Duration `toml:"-" json:"-"`
 	RenewTimeLeftDuration time.Duration `toml:"-" json:"-"`
