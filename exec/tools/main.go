@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 var (
@@ -22,6 +23,7 @@ var (
 
 func main() {
 	rootCMD.Parse(os.Args[1:])
+	logging.LogInit("")
 
 	if *version {
 		fmt.Printf("Certdx tools %s, built at %s\n", buildCommit, buildDate)

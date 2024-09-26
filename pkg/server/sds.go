@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/types/known/anypb"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/utils"
 )
 
@@ -35,7 +35,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 	peerInfo, _ := peer.FromContext(ctx)
 	peer := peerInfo.Addr.String()
 
-	log.Printf("[INF] New gRPC connection from: %s", peer)
+	logging.Info("New gRPC connection from: %s", peer)
 
 	dispatch := map[string]chan *discoveryv3.DiscoveryRequest{}
 	errChan := make(chan error)
@@ -52,7 +52,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 					return
 				}
 			case <-ctx.Done():
-				log.Printf("[INF] Message sender stopped due to ctx done: %s", ctx.Err())
+				logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
 				return
 			}
 		}
@@ -65,7 +65,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 		for {
 			select {
 			case <-ctx.Done():
-				log.Printf("[INF] Message dispatcher stopped due to ctx done: %s", ctx.Err())
+				logging.Debug("Message dispatcher stopped due to ctx done: %s", ctx.Err())
 				return
 			default:
 			}
@@ -129,7 +129,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 			}
 
 			for name, domains := range packRequests {
-				log.Printf("[INF] Handling pack %s with domains %v in response to %s", name, domains, peer)
+				logging.Info("Handling pack %s with domains %v in response to %s", name, domains, peer)
 
 				entry := serverCertCache.GetEntry(domains)
 
@@ -142,13 +142,13 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 
 	select {
 	case <-ctx.Done():
-		log.Printf("[INF] Stream end due to ctx Done: %s", ctx.Err())
+		logging.Debug("Stream end due to ctx Done: %s", ctx.Err())
 		return ctx.Err()
 	case err := <-errChan:
-		log.Printf("[ERR] Stream end due to errored: %s", err)
+		logging.Error("Stream end due to errored: %s", err)
 		return err
 	case <-sds.kill:
-		log.Printf("[INF] Stream end due to explicit kill.")
+		logging.Debug("Stream end due to explicit kill.")
 		return fmt.Errorf("server closed")
 	}
 }
@@ -187,7 +187,7 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCert
 		})
 
 		if err != nil {
-			log.Panicf("[ERR] Unexpected error constructing response: %s", err)
+			logging.Panic("Unexpected error constructing response, err: %s", err)
 		}
 
 		version := cert.RenewAt.Format(time.RFC3339)
@@ -199,28 +199,28 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCert
 			Resources:   []*anypb.Any{secret},
 		}:
 		case <-ctx.Done():
-			log.Printf("[ERR] Message sender stopped due to ctx done: %s", ctx.Err())
+			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
 		}
 
-		log.Printf("[INF] Offered cert %v version %s to %s", entry.domains, version, peer)
+		logging.Info("Offered cert %v version %s to %s", entry.domains, version, peer)
 
 		select {
 		case ack := <-req:
 			if ack.VersionInfo == version {
-				log.Printf("Cert pack %s version %s deployed at %s", name, version, peer)
+				logging.Info("Cert pack %s version %s deployed at %s", name, version, peer)
 			} else {
 				err := ack.ErrorDetail
-				log.Printf("Cert version %s rejected by %s at %s: %d(%s)",
+				logging.Warn("Cert version %s rejected by %s at %s: %d(%s)",
 					version, name, peer,
 					err.Code, err.Message)
 			}
 		case <-ctx.Done():
-			log.Printf("[ERR] Message sender stopped due to ctx done: %s", ctx.Err())
+			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
 		}
 
 		select {
 		case <-ctx.Done():
-			log.Printf("[ERR] Message sender stopped due to ctx done: %s", ctx.Err())
+			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
 			return
 		case <-*entry.Updated.Load():
 			// continue
@@ -231,26 +231,26 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCert
 func getTLSConfig() *tls.Config {
 	srvCertPath, srvKeyPath, err := utils.GetSDSServerCertPath()
 	if err != nil {
-		log.Fatalf("[ERR] %s", err)
+		logging.Fatal("err: %s", err)
 	}
 
 	cert, err := tls.LoadX509KeyPair(srvCertPath, srvKeyPath)
 	if err != nil {
-		log.Fatalf("[ERR] Invalid sds server cert %s", err)
+		logging.Fatal("Invalid sds server cert, err: %s", err)
 	}
 
 	caPEMPath, _, err := utils.GetSDSCAPath()
 	if err != nil {
-		log.Fatalf("[ERR] %s", err)
+		logging.Fatal("%s", err)
 	}
 	caPEM, err := os.ReadFile(caPEMPath)
 	if err != nil {
-		log.Fatalf("[ERR] %s", err)
+		logging.Fatal("err: %s", err)
 	}
 
 	capool := x509.NewCertPool()
 	if !capool.AppendCertsFromPEM(caPEM) {
-		log.Fatalf("[ERR] Invalid ca cert")
+		logging.Fatal("Invalid ca cert")
 	}
 
 	return &tls.Config{
@@ -266,10 +266,10 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 	if p, ok := peer.FromContext(ctx); ok {
 		if mtls, ok := p.AuthInfo.(credentials.TLSInfo); ok {
 			if len(mtls.State.PeerCertificates) > 1 {
-				log.Printf("[ERR] Client %s providing multiple client certificate.", p.Addr.String())
+				logging.Error("Client %s providing multiple client certificate.", p.Addr.String())
 			}
 			for _, item := range mtls.State.PeerCertificates {
-				log.Printf("[INF] Client `%s` from %s.", item.Subject.CommonName, p.Addr.String())
+				logging.Info("Client `%s` from %s.", item.Subject.CommonName, p.Addr.String())
 			}
 		}
 	}
@@ -298,11 +298,11 @@ func SDSSrv(stop chan struct{}) {
 	go func() {
 		l, err := net.Listen("tcp", Config.GRPCSDSServer.Listen)
 		if err != nil {
-			log.Fatalf("[ERR] Failed listen at %s: %s", Config.GRPCSDSServer.Listen, err)
+			logging.Fatal("Failed to listen at %s, err: %s", Config.GRPCSDSServer.Listen, err)
 		}
-		log.Printf("[INF] SDS server started")
+		logging.Info("SDS server started")
 		if err := server.Serve(l); err != nil {
-			log.Fatalf("[ERR] %s", err)
+			logging.Fatal("%s", err)
 		}
 	}()
 
@@ -310,5 +310,5 @@ func SDSSrv(stop chan struct{}) {
 
 	close(sds.kill)
 	server.GracefulStop()
-	log.Println("[INF] SDS Stopped.")
+	logging.Info("SDS Stopped")
 }

@@ -160,7 +160,7 @@ func makeCert(PEMPath, keyPath, organization, commonName string,
 
 	caPEM, pcaKey, err := loadCA()
 	if err != nil {
-		return fmt.Errorf("failed load CA: %w", err)
+		return fmt.Errorf("failed to load CA: %w", err)
 	}
 	caKey := *pcaKey
 

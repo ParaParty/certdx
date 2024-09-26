@@ -3,13 +3,13 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/client"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 var (
@@ -23,13 +23,16 @@ var (
 	help     = flag.BoolP("help", "h", false, "Print help")
 	version  = flag.BoolP("version", "v", false, "Print version")
 	conf     = flag.StringP("conf", "c", "./client.toml", "Config file path")
+	pDebug   = flag.BoolP("debug", "d", false, "Enable debug log")
 )
 
 var certDXDaemon *client.CertDXClientDaemon
 
 func init() {
-	log.SetOutput(os.Stderr)
 	flag.Parse()
+	logging.LogInit(*pLogPath)
+	logging.SetDebug(*pDebug)
+
 	certDXDaemon = client.MakeCertDXClientDaemon()
 
 	if *help {
@@ -46,44 +49,33 @@ func init() {
 		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
 	}
 
-	if *pLogPath != "" {
-		logFile, err := os.OpenFile(*pLogPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
-		if err != nil {
-			log.Printf("[ERR] Failed to open log file %s : %s", *pLogPath, err)
-			os.Exit(1)
-		}
-		log.Printf("[INF] Log to file: %s", *pLogPath)
-		mw := io.MultiWriter(os.Stderr, logFile)
-		log.SetOutput(mw)
-	}
-
 	cfile, err := os.Open(*conf)
 	if err != nil {
-		log.Fatalf("[ERR] Open config file failed: %s", err)
+		logging.Fatal("Open config file failed, err: %s", err)
 	}
 	defer cfile.Close()
 	if b, err := io.ReadAll(cfile); err == nil {
 		if err := toml.Unmarshal(b, certDXDaemon.Config); err == nil {
-			log.Println("[INF] Config loaded")
+			logging.Info("Config loaded")
 		} else {
-			log.Fatalf("[ERR] Unmarshaling config failed: %s", err)
+			logging.Fatal("Unmarshaling config failed, err: %s", err)
 		}
 	} else {
-		log.Fatalf("[ERR] Reading config file failed: %s", err)
+		logging.Fatal("Reading config file failed, err: %s", err)
 	}
 
 	certDXDaemon.Config.Server.ReconnectDuration, err = time.ParseDuration(certDXDaemon.Config.Server.ReconnectInterval)
 	if err != nil {
-		log.Fatalf("[ERR] Failed to parse interval: %s", err)
+		logging.Fatal("Failed to parse interval, err: %s", err)
 	}
 
 	if len(certDXDaemon.Config.Certifications) == 0 {
-		log.Fatalf("[ERR] No certification configured")
+		logging.Fatal("No certification configured")
 	}
 
 	for _, c := range certDXDaemon.Config.Certifications {
 		if len(c.Domains) == 0 || c.Name == "" || c.SavePath == "" {
-			log.Fatalf("[ERR] Wrong certification configuration")
+			logging.Fatal("Wrong certification configuration")
 		}
 	}
 }
@@ -92,15 +84,15 @@ func main() {
 	switch certDXDaemon.Config.Server.Mode {
 	case "http":
 		if certDXDaemon.Config.Http.MainServer.Url == "" {
-			log.Fatalf("[ERR] Http main server url should not be empty")
+			logging.Fatal("Http main server url should not be empty")
 		}
 		certDXDaemon.HttpMain()
 	case "grpc":
 		if certDXDaemon.Config.GRPC.MainServer.Server == "" {
-			log.Fatalf("[ERR] GRPC main server url should not be empty")
+			logging.Fatal("GRPC main server url should not be empty")
 		}
 		certDXDaemon.GRPCMain()
 	default:
-		log.Fatalf("[ERR] Mode %s not supported", certDXDaemon.Config.Server.Mode)
+		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Server.Mode)
 	}
 }

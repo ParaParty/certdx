@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
 	"os"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 type CertT struct {
@@ -62,7 +62,7 @@ func (c *CertT) IsValid() bool {
 
 func InitCache() {
 	if err := serverCacheFile.loadCacheFile(); err != nil {
-		log.Printf("[WRN] Failed to load cache file: %s", err)
+		logging.Warn("Failed to load cache file, err: %s", err)
 	}
 
 	go serverCacheFile.listenUpdate()
@@ -76,13 +76,13 @@ func (s *ServerCacheFile) loadCacheFile() error {
 
 	cfile, err := os.ReadFile(cachePath)
 	if err != nil {
-		return fmt.Errorf("open cache file failed: %w", err)
+		return fmt.Errorf("opening cache file failed: %w", err)
 	}
 
 	entries := make(map[string]*ServerCacheFileEntry)
 	err = json.Unmarshal(cfile, &entries)
 	if err != nil {
-		return fmt.Errorf("unmarshal cache file failed: %w", err)
+		return fmt.Errorf("unmarshaling cache file failed: %w", err)
 	}
 
 	serverCertCache.mutex.Lock()
@@ -98,7 +98,7 @@ func (s *ServerCacheFile) loadCacheFile() error {
 	}
 	serverCertCache.mutex.Unlock()
 
-	log.Printf("[INF] Previous cache loaded.")
+	logging.Info("Previous cache loaded.")
 	return nil
 }
 
@@ -107,12 +107,12 @@ func (s *ServerCacheFile) writeCacheFile(fe *ServerCacheFileEntry) error {
 
 	jsonBytes, err := json.Marshal(s.entries)
 	if err != nil {
-		return fmt.Errorf("failed marshal cache file: %w", err)
+		return fmt.Errorf("failed to marshal cache file: %w", err)
 	}
 
 	err = os.WriteFile(s.path, jsonBytes, 0o600)
 	if err != nil {
-		return fmt.Errorf("failed write cache file: %w", err)
+		return fmt.Errorf("failed to write cache file: %w", err)
 	}
 
 	return nil
@@ -123,9 +123,9 @@ func (s *ServerCacheFile) listenUpdate() {
 	serverCacheFile.path = cachePath
 
 	for fe := range s.update {
-		log.Printf("[INF] Update domains cache to file")
+		logging.Info("Update domains cache to file")
 		if err := s.writeCacheFile(fe); err != nil {
-			log.Printf("[WRN] Update domains cache to file failed: %s", err)
+			logging.Warn("Update domains cache to file failed, err: %s", err)
 		}
 	}
 }
@@ -169,7 +169,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	log.Printf("[INF] Renew cert: %v", c.domains)
+	logging.Info("Renew cert: %v", c.domains)
 	if !c.cert.IsValid() {
 		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(Config.ACME.CertLifeTimeDuration)
 
@@ -201,26 +201,26 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 			Cert:    newCert,
 		}
 
-		log.Printf("[INF] Obtained cert: %v", c.domains)
+		logging.Info("Obtained cert: %v", c.domains)
 		return true, nil
 	}
 
-	log.Printf("[INF] Cert: %v not expired", c.domains)
+	logging.Info("Cert: %v not expired", c.domains)
 	return false, nil
 }
 
 func (c *ServerCertCacheEntry) certWatchDog() {
-	log.Printf("[INF] start cert watch dog for: %v", c.domains)
-	defer log.Printf("[INF] stop cert watch dog for: %v", c.domains)
+	logging.Info("Starting cert watch dog for: %v", c.domains)
+	defer logging.Info("Cert watch dog for: %v stopped", c.domains)
 
 	for {
-		log.Printf("[INF] Server renew: %v", c.domains)
+		logging.Info("Server renew: %v", c.domains)
 		changed, err := c.Renew(true)
 		if err != nil {
-			log.Printf("[ERR] Failed renew cert %s: %s", c.domains, err)
+			logging.Error("Failed to renew cert %s: %s", c.domains, err)
 		} else if changed {
 			newUpdated := make(chan struct{})
-			log.Printf("[INF] Notify cert %v updated", c.domains)
+			logging.Notice("Notify cert %v updated", c.domains)
 			close(*c.Updated.Swap(&newUpdated))
 		}
 
