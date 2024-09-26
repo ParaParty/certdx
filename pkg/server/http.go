@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/types"
 )
 
@@ -17,7 +17,7 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
 			if checkAuthorization(r) {
-				log.Printf("[INF] Http received cert request from: %s", r.RemoteAddr)
+				logging.Info("Http received cert request from: %s", r.RemoteAddr)
 				handleCertReq(&w, r)
 				return
 			}
@@ -40,7 +40,7 @@ func checkAuthorization(r *http.Request) bool {
 		}
 	}
 
-	log.Printf("[WRN] Not authorized request from: %s", r.RemoteAddr)
+	logging.Warn("Not authorized request from: %s", r.RemoteAddr)
 	return false
 }
 
@@ -59,7 +59,7 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	}
 
 	if !domainsAllowed(req.Domains) {
-		log.Printf("[WRN] Requested domains not allowed: %v", req.Domains)
+		logging.Warn("Requested domains not allowed: %v", req.Domains)
 		(*w).Header().Set("Content-Type", "application/json")
 		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
 		return
@@ -85,11 +85,11 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 
 	(*w).Header().Set("Content-Type", "application/json")
 	(*w).Write(resp)
-	log.Printf("[INF] Http sent cert: %v to: %s", cachedCert.domains, r.RemoteAddr)
+	logging.Info("Http sent cert: %v to: %s", cachedCert.domains, r.RemoteAddr)
 	return
 
 ERR:
-	log.Printf("[ERR] Handle http cert request failed: %s", err)
+	logging.Error("Handle http cert request failed, err: %s", err)
 	http.Error(*w, "", http.StatusInternalServerError)
 }
 
@@ -107,7 +107,7 @@ func serveHttps() {
 		cert := entry.Cert()
 		certificate, err := tls.X509KeyPair(cert.FullChain, cert.Key)
 		if err != nil {
-			log.Fatalf("[ERR] Failed to load cert: %s", err)
+			logging.Fatal("Failed to load cert, err: %s", err)
 		}
 
 		server := http.Server{
@@ -120,9 +120,9 @@ func serveHttps() {
 		}
 
 		go func() {
-			log.Printf("[INF] Https server started")
+			logging.Info("Https server started")
 			err := server.ListenAndServeTLS("", "")
-			log.Printf("[INF] Https server stopped: %s", err)
+			logging.Info("Https server stopped: %s", err)
 		}()
 		<-*entry.Updated.Load()
 		server.Close()
@@ -133,9 +133,9 @@ func HttpSrv() {
 	http.HandleFunc("/", apiHandler)
 
 	if !Config.HttpServer.Secure {
-		log.Printf("[INF] Http server started")
+		logging.Info("Http server started")
 		err := http.ListenAndServe(Config.HttpServer.Listen, nil)
-		log.Printf("[INF] Http server stopped: %s", err)
+		logging.Info("Http server stopped: %s", err)
 	} else {
 		serveHttps()
 	}

@@ -2,9 +2,10 @@ package utils
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"time"
+
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 func Retry(retryCount int, work func() error) error {
@@ -21,7 +22,7 @@ func Retry(retryCount int, work func() error) error {
 			return fmt.Errorf("errored too fast, give up retry. last error is: %w", err)
 		}
 
-		log.Printf("[WRN] Retry %d/%d errored: %s", i+1, retryCount, err)
+		logging.Warn("Retry %d/%d errored, err: %s", i+1, retryCount, err)
 		time.Sleep(15 * time.Second)
 	}
 

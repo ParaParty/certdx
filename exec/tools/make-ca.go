@@ -1,10 +1,10 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -25,6 +25,6 @@ func makeCA() {
 
 	err := tools.MakeCA(*caOrganization, *caCommonName)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatal("err: %s", err)
 	}
 }

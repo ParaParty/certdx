@@ -1,10 +1,10 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/server"
 )
 
@@ -26,7 +26,7 @@ func registerGoogleAccount() {
 	}
 
 	if *email == "" || *keyId == "" || *hmac == "" {
-		log.Fatal("[ERR] Email, kid and hmac are required")
+		logging.Fatal("Email, kid and hmac are required")
 	}
 	provider := "google"
 	if *testAccount {
@@ -34,6 +34,6 @@ func registerGoogleAccount() {
 	}
 	err := server.RegisterAccount(provider, *email, *keyId, *hmac)
 	if err != nil {
-		log.Printf("[ERR] Failed registering account: %s", err)
+		logging.Fatal("Failed registering account, err: %s", err)
 	}
 }

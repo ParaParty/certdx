@@ -1,13 +1,13 @@
 package client
 
 import (
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 type certUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
@@ -65,10 +65,10 @@ func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification)
 		args := strings.Fields(c.ReloadCommand)
 		err := exec.Command(args[0], args[1:]...).Run()
 		if err != nil {
-			log.Printf("[ERR] Failed executing command %s: %s", c.ReloadCommand, err)
+			logging.Error("Failed executing command %s, err: %s", c.ReloadCommand, err)
 		}
 	}
 	return
 ERR:
-	log.Printf("[ERR] Failed save cert file: %s", err)
+	logging.Error("Failed to save cert file, err: %s", err)
 }

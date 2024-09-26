@@ -1,10 +1,10 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -25,11 +25,11 @@ func makeServer() {
 	}
 
 	if len(*srvDomains) == 0 {
-		log.Fatal("[ERR] domains are required")
+		logging.Fatal("domains are required")
 	}
 
 	err := tools.MakeServerCert(*srvOrganization, *srvCommonName, *srvDomains)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatal("err: %s", err)
 	}
 }

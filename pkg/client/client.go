@@ -2,7 +2,6 @@ package client
 
 import (
 	"bytes"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/types"
 	"pkg.para.party/certdx/pkg/utils"
 )
@@ -45,14 +45,14 @@ func (c *watchingCert) watch(wg *sync.WaitGroup) {
 			return
 		case newCert := <-c.UpdateChan:
 			if !bytes.Equal(c.Data.Fullchain, newCert.Fullchain) || !bytes.Equal(c.Data.Key, newCert.Key) {
-				log.Printf("[INF] Notify cert %v changed", newCert.Domains)
+				logging.Notice("Notify cert %v changed", newCert.Domains)
 				c.Data.Fullchain = newCert.Fullchain
 				c.Data.Key = newCert.Key
 				for _, handleFunc := range c.UpdateHandlers {
 					handleFunc(c.Data.Fullchain, c.Data.Key, &c.Config)
 				}
 			} else {
-				log.Printf("[INF] Cert %v not changed", newCert.Domains)
+				logging.Info("Cert %v not changed", newCert.Domains)
 			}
 		}
 	}
@@ -102,7 +102,7 @@ func (r *CertDXClientDaemon) requestCert(domains []string) *types.HttpCertResp {
 	if err == nil {
 		return resp
 	}
-	log.Printf("[WRN] Failed get cert %v from MainServer: %s", domains, err)
+	logging.Warn("Failed to get cert %v from MainServer, err: %s", domains, err)
 
 	if r.Config.Http.StandbyServer.Url != "" {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
@@ -114,7 +114,7 @@ func (r *CertDXClientDaemon) requestCert(domains []string) *types.HttpCertResp {
 		if err == nil {
 			return resp
 		}
-		log.Printf("[WRN] Failed get cert %v from StandbyServer: %s", domains, err)
+		logging.Warn("Failed to get cert %v from StandbyServer, err: %s", domains, err)
 	}
 	return nil
 }
@@ -122,11 +122,11 @@ func (r *CertDXClientDaemon) requestCert(domains []string) *types.HttpCertResp {
 func (r *CertDXClientDaemon) certWatchDog(cert *watchingCert) {
 	sleepTime := 1 * time.Hour // default sleep time
 	for {
-		log.Printf("[INF] Request cert %v", cert.Config.Domains)
+		logging.Info("Requesting cert %v", cert.Config.Domains)
 		resp := r.requestCert(cert.Config.Domains)
 		if resp != nil {
 			if resp.Err != "" {
-				log.Printf("[WRN] Failed request cert: %s", resp.Err)
+				logging.Error("Failed to request cert, err: %s", resp.Err)
 			} else {
 				sleepTime = resp.RenewTimeLeft / 4
 				cert.UpdateChan <- certData{
@@ -135,6 +135,8 @@ func (r *CertDXClientDaemon) certWatchDog(cert *watchingCert) {
 					Key:       resp.Key,
 				}
 			}
+		} else {
+			logging.Error("Failed to request cert, retry next round.")
 		}
 		t := time.After(sleepTime)
 		select {
@@ -163,10 +165,10 @@ func (r *CertDXClientDaemon) HttpMain() {
 	<-stop
 	go func() {
 		<-stop
-		log.Fatalln("[ERR] Fast dying...")
+		logging.Fatal("Fast dying...")
 	}()
 
-	log.Println("[INF] Stopping Http client")
+	logging.Info("Stopping Http client")
 	r.stop()
 	r.wg.Wait()
 }
@@ -188,11 +190,11 @@ func (r *CertDXClientDaemon) GRPCMain() {
 		defer r.wg.Done()
 		retryCount := 0
 		for {
-			log.Println("[INF] Starting gRPC main stream")
+			logging.Info("Starting gRPC main stream")
 			startTime := time.Now()
 			err := mainClient.Stream()
 			if err != nil {
-				log.Printf("[INF] gRPC main stream stopped: %s", err)
+				logging.Info("gRPC main stream stopped: %s", err)
 				if _, ok := err.(*killed); ok {
 					return
 				}
@@ -205,7 +207,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 				}
 			}
 
-			log.Printf("[INF] Current main server retry count: %d", retryCount)
+			logging.Info("Current main server retry count: %d", retryCount)
 			if retryCount < r.Config.Server.RetryCount {
 				continue
 			}
@@ -214,9 +216,9 @@ func (r *CertDXClientDaemon) GRPCMain() {
 				go func() {
 					retryCount := 0
 					for {
-						log.Println("[INF] Starting gRPC standby stream")
+						logging.Info("Starting gRPC standby stream")
 						err := standByClient.Stream()
-						log.Printf("[INF] gRPC standby stream stopped: %s", err)
+						logging.Info("gRPC standby stream stopped: %s", err)
 						if _, ok := err.(*killed); ok {
 							return
 						}
@@ -229,7 +231,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 						if retryCount < r.Config.Server.RetryCount {
 							continue
 						}
-						log.Printf("[INF] Will reconnect standby server after %s", r.Config.Server.ReconnectInterval)
+						logging.Info("Will reconnect standby server after %s", r.Config.Server.ReconnectInterval)
 						<-time.After(r.Config.Server.ReconnectDuration)
 					}
 				}()
@@ -240,7 +242,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 			}
 
 			retryCount = 0
-			log.Printf("[INF] Will reconnect main server after %s", r.Config.Server.ReconnectInterval)
+			logging.Info("Will reconnect main server after %s", r.Config.Server.ReconnectInterval)
 			select {
 			case <-time.After(r.Config.Server.ReconnectDuration):
 				continue
@@ -256,10 +258,10 @@ func (r *CertDXClientDaemon) GRPCMain() {
 	<-stop
 	go func() {
 		<-stop
-		log.Fatalln("[ERR] Fast dying...")
+		logging.Fatal("Fast dying...")
 	}()
 
-	log.Println("[INF] Stopping gRPC client")
+	logging.Info("Stopping gRPC client")
 	r.stop()
 	kill <- struct{}{}
 	mainClient.Kill <- struct{}{}

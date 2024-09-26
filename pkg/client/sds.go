@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
 	"os"
 	"sync/atomic"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 const typeUrl = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret"
@@ -65,17 +65,17 @@ func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs []*watchingCert
 func (c *CertDXgRPCClient) getTLSConfig() *tls.Config {
 	cert, err := tls.LoadX509KeyPair(c.server.Certificate, c.server.Key)
 	if err != nil {
-		log.Fatalf("[ERR] Invalid gRPC client cert: %s", err)
+		logging.Fatal("Invalid gRPC client cert, err: %s", err)
 	}
 
 	caPEM, err := os.ReadFile(c.server.CA)
 	if err != nil {
-		log.Fatalf("[ERR] %s", err)
+		logging.Fatal("err: %s", err)
 	}
 
 	capool := x509.NewCertPool()
 	if !capool.AppendCertsFromPEM(caPEM) {
-		log.Fatalf("[ERR] Invalid ca cert")
+		logging.Fatal("Invalid ca cert")
 	}
 
 	return &tls.Config{
@@ -131,7 +131,7 @@ func (c *CertDXgRPCClient) Stream() error {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Printf("[INF] Receiving goroutine stopped due to ctx done: %s", ctx.Err())
+				logging.Debug("Receiving goroutine stopped due to ctx done: %s", ctx.Err())
 				return
 			default:
 			}
@@ -208,7 +208,7 @@ func (c *CertDXgRPCClient) Stream() error {
 					return
 				}
 			case <-ctx.Done():
-				log.Printf("[INF] Message sender stopped due to ctx done: %s", ctx.Err())
+				logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
 				return
 			}
 		}
@@ -216,13 +216,13 @@ func (c *CertDXgRPCClient) Stream() error {
 
 	select {
 	case <-ctx.Done():
-		log.Printf("[INF] Stream end due to ctx Done: %s", ctx.Err())
+		logging.Debug("Stream end due to ctx Done: %s", ctx.Err())
 		return ctx.Err()
 	case err := <-errChan:
-		log.Printf("[ERR] Stream end due to errored: %s", err)
+		logging.Error("Stream end due to errored: %s", err)
 		return err
 	case <-c.Kill:
-		log.Printf("[INF] Stream end due to explicit kill.")
+		logging.Debug("Stream end due to explicit kill.")
 		return &killed{Err: "stream killed"}
 	}
 }
@@ -251,7 +251,7 @@ func (c *CertDXgRPCClient) handleCert(ctx context.Context, cert *watchingCert,
 				ResourceNames: []string{cert.Config.Name},
 			}
 		case <-ctx.Done():
-			log.Printf("[ERR] handler stopped due to ctx done: %s", ctx.Err())
+			logging.Debug("handler stopped due to ctx done: %s", ctx.Err())
 			return
 		}
 	}

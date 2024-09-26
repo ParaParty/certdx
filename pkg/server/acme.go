@@ -139,13 +139,13 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 	}
 	if err != nil {
 		os.Remove(keyPath)
-		return fmt.Errorf("failed register: %s", err)
+		return fmt.Errorf("failed to register: %s", err)
 	}
 
 	reg, err := json.Marshal(myUser.Registration)
 	if err != nil {
 		os.Remove(keyPath)
-		return fmt.Errorf("failed marshal registration: %w", err)
+		return fmt.Errorf("failed marshaling registration: %w", err)
 	}
 
 	fmt.Println(string(reg))

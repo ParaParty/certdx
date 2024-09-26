@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -27,7 +27,7 @@ func makeClient() {
 	}
 
 	if *clientName == "" {
-		log.Fatal("[ERR] client name is required")
+		logging.Fatal("client name is required")
 	}
 
 	if *clientCommonName == "CertDX Client: {name}" {
@@ -36,6 +36,6 @@ func makeClient() {
 
 	err := tools.MakeClientCert(*clientName, *clientOrganization, *clientCommonName, *clientDomains)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatal("err: %s", err)
 	}
 }
