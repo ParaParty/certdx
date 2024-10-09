@@ -13,7 +13,7 @@ renewTimeLeft = "24h"
 
 # Give root domain here
 allowedDomains = [
-    "lanlanlu.com",
+    "example.com",
 ]
 
 [DnsProvider]
@@ -34,11 +34,11 @@ apiPath = "/1145141919810"
 secure = true
 # Domain of this server, server will issue a certification for itself
 # for https api. Make sure your acme server can issue this domain.
-names = ["acmserver.lanlanlu.com", "*.lanlanlu.com"]
+names = ["acmserver.example.com", "*.example.com"]
 # left empty for no token
 token = "KFCCrazyThursdayVMe50"
 
 [gRPCSDSServer]
 enabled = true
 listen = ":11451"
-names = ["grpcserver.lanlanlu.com"]
+names = ["grpcserver.example.com"]

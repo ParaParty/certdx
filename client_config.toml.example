@@ -10,14 +10,14 @@ mode = "http"
 reconnectInterval = "10m"
 
 [Http.MainServer]
-url = "https://acmeserver.lanlanlu.com:19198/1145141919810"
+url = "https://acmeserver.example.com:19198/1145141919810"
 token = "KFCCrazyThursdayVMe50"
 
 [Http.StandbyServer]
 url = "http://mybackupserver.local:11451/1919810"
 
 [GRPC.MainServer]
-server = "grpc.lanlanlu.com:9999"
+server = "grpc.example.com:9999"
 ca = "/path/to/grpc/mtls/ca.pem"
 certificate = "/path/to/grpc/mtls/client/cert.pem"
 key = "/path/to/grpc/mtls/client/private.key"
@@ -33,8 +33,8 @@ name = "certFileNameToSave"
 savePath = "/path/to/directory/which/saves/your/certifications"
 # will save cert and key file at savePath/name.pem and savePath/name.key
 domains = [
-    "*.lanlanlu.com",
-    "*.mm.lanlanlu.com",
+    "*.example.com",
+    "*.mm.example.com",
 ]
 # command to reload your services
 # reloadCommand = "systemctl reload nginx"

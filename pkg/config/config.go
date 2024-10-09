@@ -115,13 +115,15 @@ func (c *ServerConfigT) SetDefault() {
 	}
 
 	c.HttpServer = HttpServerConfig{
+		Enabled: false,
 		Listen:  ":10001",
 		APIPath: "/",
 		Secure:  false,
 	}
 
 	c.GRPCSDSServer = GRPCServerConfig{
-		Listen: ":10002",
+		Enabled: false,
+		Listen:  ":10002",
 	}
 }
 
