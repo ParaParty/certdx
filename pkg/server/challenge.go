@@ -51,6 +51,20 @@ func getChallenger(legoCfg *lego.Config, p config.DnsProvider) (string, challeng
 }
 
 func makeCloudflareProvider(legoCfg *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
+	// zone token
+	if p.ZoneToken != "" && p.AuthToken != "" {
+		cloudflareConfig := cloudflare.NewDefaultConfig()
+		cloudflareConfig.ZoneToken = p.ZoneToken
+		cloudflareConfig.AuthToken = p.AuthToken
+		cloudflareDnsProvider, err := cloudflare.NewDNSProviderConfig(cloudflareConfig)
+		if err != nil {
+			return ChallengeTypeDns01, nil, err
+		}
+
+		return ChallengeTypeDns01, cloudflareDnsProvider, err
+	}
+
+	// global token
 	c, err := cloudflare.NewDNSProviderConfig(&cloudflare.Config{
 		AuthEmail:          p.Email,
 		AuthKey:            p.APIKey,

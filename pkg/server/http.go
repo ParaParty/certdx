@@ -17,7 +17,8 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
 			if checkAuthorization(r) {
-				logging.Info("Http received cert request from: %s", r.RemoteAddr)
+				xff := r.Header.Get("X-Forwarded-For")
+				logging.Info("Http received cert request from: %s, xff: %s", r.RemoteAddr, xff)
 				handleCertReq(&w, r)
 				return
 			}
@@ -40,7 +41,8 @@ func checkAuthorization(r *http.Request) bool {
 		}
 	}
 
-	logging.Warn("Not authorized request from: %s", r.RemoteAddr)
+	xff := r.Header.Get("X-Forwarded-For")
+	logging.Warn("Not authorized request from: %s, xff: %s", r.RemoteAddr, xff)
 	return false
 }
 
