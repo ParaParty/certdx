@@ -4,6 +4,7 @@ email = ""
 # Supported provider: google googletest r3 r3test
 provider = "google"
 retryCount = 5
+challengeType = "http"
 
 # Certification will have a life time of certLifeTime + renewTimeLeft
 # If certLifeTime is passed, server will renew this certification
@@ -48,6 +49,16 @@ apiKey = ""
 # type = "tencent"
 # secretID = ""
 # SecretKey = ""
+
+[HttpProvider]
+type = "s3"
+[HttpProvider.S3]
+region = "ap-beijing"
+bucket = "cos-1000000000"
+accessKeyId = "xxxxxxxxxx"
+accessKeySecret = "xxxxxxxx"
+sessionToken = ""
+url = "https://cos.ap-beijing.myqcloud.com"
 
 [HttpServer]
 enabled = true
