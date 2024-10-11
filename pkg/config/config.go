@@ -11,6 +11,13 @@ import (
 const (
 	DnsProviderTypeCloudflare   string = "cloudflare"
 	DnsProviderTypeTencentCloud string = "tencentcloud"
+	HttpProviderTypeS3          string = "s3"
+	HttpProviderTypeLocal       string = "local"
+)
+
+const (
+	ChallengeTypeDns01  string = "dns"
+	ChallengeTypeHttp01 string = "http"
 )
 
 type DnsProvider struct {
@@ -46,10 +53,44 @@ func (p *DnsProvider) Validate() error {
 	return nil
 }
 
+type S3Client struct {
+	Region          string `toml:"region" json:"region,omitempty"`
+	Bucket          string `toml:"bucket" json:"bucket,omitempty"`
+	PartitionID     string `toml:"partitionId" json:"partition_id,omitempty"`
+	URL             string `toml:"url" json:"url,omitempty"`
+	AccessKeyId     string `toml:"accessKeyId" json:"access_key_id,omitempty"`
+	AccessKeySecret string `toml:"accessKeySecret" json:"access_key_secret,omitempty"`
+	SessionToken    string `toml:"sessionToken" json:"session_token,omitempty"`
+}
+
+type HttpProvider struct {
+	Type string `toml:"type" json:"type,omitempty"`
+
+	S3    *S3Client `toml:"S3" json:"s3,omitempty"`
+	Local *string   `toml:"local" json:"local,omitempty"`
+}
+
+func (p *HttpProvider) Validate() error {
+	switch p.Type {
+	case HttpProviderTypeS3:
+		if p.S3 == nil {
+			return fmt.Errorf("HttpProvider S3: empty S3")
+		}
+	case HttpProviderTypeLocal:
+		if p.Local == nil {
+			return fmt.Errorf("HttpProvider Local: empty Local")
+		}
+	default:
+		return fmt.Errorf("unknown HttpProvider: %s", p.Type)
+	}
+	return nil
+}
+
 type ServerConfigT struct {
 	ACME ACMEConfig `toml:"ACME" json:"acme,omitempty"`
 
-	DnsProvider DnsProvider `toml:"DnsProvider" json:"dns_provider,omitempty"`
+	DnsProvider  *DnsProvider  `toml:"DnsProvider" json:"dns_provider,omitempty"`
+	HttpProvider *HttpProvider `toml:"HttpProvider" json:"http_provider,omitempty"`
 
 	HttpServer    HttpServerConfig `toml:"HttpServer" json:"http_server,omitempty"`
 	GRPCSDSServer GRPCServerConfig `toml:"gRPCSDSServer" json:"grpc_sds_server,omitempty"`
@@ -61,6 +102,7 @@ type GoogleCloudInfo struct {
 }
 
 type ACMEConfig struct {
+	ChallengeType  string   `toml:"challengeType" json:"challenge_type,omitempty"`
 	Email          string   `toml:"email" json:"email,omitempty"`
 	Provider       string   `toml:"provider" json:"provider,omitempty"`
 	RetryCount     int      `toml:"retryCount" json:"retry_count,omitempty"`
@@ -141,8 +183,16 @@ func (c *ServerConfigT) SetDefault() {
 func (c *ServerConfigT) Validate() error {
 	ret := appengine.MultiError{}
 
-	if err := c.DnsProvider.Validate(); err != nil {
-		ret = append(ret, err)
+	if c.DnsProvider != nil {
+		if err := c.DnsProvider.Validate(); err != nil {
+			ret = append(ret, err)
+		}
+	}
+
+	if c.HttpProvider != nil {
+		if err := c.HttpProvider.Validate(); err != nil {
+			ret = append(ret, err)
+		}
 	}
 
 	if err := c.ACME.Validate(); err != nil {

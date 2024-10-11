@@ -218,7 +218,7 @@ func MakeACME() (*ACME, error) {
 		return nil, fmt.Errorf("unexpected error constructing acme client: %w", err)
 	}
 
-	err = SetChallenger(config, instance, Config.DnsProvider)
+	err = SetChallenger(config, instance, Config)
 	if err != nil {
 		return nil, err
 	}
