@@ -60,7 +60,7 @@ func InitACMEAccount() error {
 		hmac := ""
 
 		if isACMEProviderGoogle(Config.ACME.Provider) {
-			account, err := google.CreateExternalAccountKeyRequest(Config.ACME)
+			account, err := google.CreateExternalAccountKeyRequest(Config.GoogleCloudCredential)
 			if err != nil {
 				return fmt.Errorf("failed to register google ca: %v", err)
 			}

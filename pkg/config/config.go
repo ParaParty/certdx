@@ -86,19 +86,18 @@ func (p *HttpProvider) Validate() error {
 	return nil
 }
 
+type GoogleCloudCredential map[string]string
+
 type ServerConfigT struct {
 	ACME ACMEConfig `toml:"ACME" json:"acme,omitempty"`
+
+	GoogleCloudCredential GoogleCloudCredential `toml:"GoogleCloudCredential" json:"google_cloud_credential,omitempty"`
 
 	DnsProvider  *DnsProvider  `toml:"DnsProvider" json:"dns_provider,omitempty"`
 	HttpProvider *HttpProvider `toml:"HttpProvider" json:"http_provider,omitempty"`
 
 	HttpServer    HttpServerConfig `toml:"HttpServer" json:"http_server,omitempty"`
 	GRPCSDSServer GRPCServerConfig `toml:"gRPCSDSServer" json:"grpc_sds_server,omitempty"`
-}
-
-type GoogleCloudInfo struct {
-	Project    string            `toml:"project" json:"project"`
-	Credential map[string]string `toml:"credential" json:"credential"`
 }
 
 type ACMEConfig struct {
@@ -109,8 +108,6 @@ type ACMEConfig struct {
 	CertLifeTime   string   `toml:"certLifeTime" json:"cert_life_time,omitempty"`
 	RenewTimeLeft  string   `toml:"renewTimeLeft" json:"renew_time_left,omitempty"`
 	AllowedDomains []string `toml:"allowedDomains" json:"allowed_domains,omitempty"`
-
-	GoogleCloudInfo GoogleCloudInfo `toml:"googleCloudInfo" json:"google_cloud_info,omitempty"`
 
 	CertLifeTimeDuration  time.Duration `toml:"-" json:"-"`
 	RenewTimeLeftDuration time.Duration `toml:"-" json:"-"`

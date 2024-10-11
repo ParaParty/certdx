@@ -17,10 +17,8 @@ allowedDomains = [
     "example.com",
 ]
 
-[ACME.googleCloudInfo]
-project = "lanlanlu"
-
-[ACME.googleCloudInfo.credential]
+# Google cloud credential, for registering google acme account
+[GoogleCloudCredential]
 type = "service_account"
 project_id = "lanlanlu"
 private_key_id = "0123456789012345678901234567890123456789"
