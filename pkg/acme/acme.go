@@ -1,7 +1,8 @@
-package server
+package acme
 
 import (
-	"pkg.para.party/certdx/pkg/server/google"
+	"pkg.para.party/certdx/pkg/acme/google"
+	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/utils"
 
 	"crypto"
@@ -49,8 +50,8 @@ func parsePEM(pem []byte) (crypto.PrivateKey, error) {
 	return key, nil
 }
 
-func InitACMEAccount() error {
-	keyPath, err := getPrivateKeySavePath(Config.ACME.Email, Config.ACME.Provider)
+func InitACMEAccount(c *config.ServerConfigT) error {
+	keyPath, err := utils.GetACMEPrivateKeySavePath(c.ACME.Email, c.ACME.Provider)
 	if err != nil {
 		return err
 	}
@@ -59,8 +60,8 @@ func InitACMEAccount() error {
 		kid := ""
 		hmac := ""
 
-		if isACMEProviderGoogle(Config.ACME.Provider) {
-			account, err := google.CreateExternalAccountKeyRequest(Config.GoogleCloudCredential)
+		if isACMEProviderGoogle(c.ACME.Provider) {
+			account, err := google.CreateExternalAccountKeyRequest(c.GoogleCloudCredential)
 			if err != nil {
 				return fmt.Errorf("failed to register google ca: %v", err)
 			}
@@ -68,7 +69,7 @@ func InitACMEAccount() error {
 			hmac = account.HmacEncoded
 		}
 
-		if err := RegisterAccount(Config.ACME.Provider, Config.ACME.Email, kid, hmac); err != nil {
+		if err := RegisterAccount(c.ACME.Provider, c.ACME.Email, kid, hmac); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -101,7 +102,7 @@ func (u *MyUser) GetPrivateKey() crypto.PrivateKey {
 }
 
 func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
-	keyPath, err := getPrivateKeySavePath(Email, ACMEProvider)
+	keyPath, err := utils.GetACMEPrivateKeySavePath(Email, ACMEProvider)
 	if err != nil {
 		return err
 	}
@@ -164,11 +165,13 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 type ACME struct {
 	Registration *registration.Resource
 	Client       *lego.Client
+	email        string
+	retry        int
 	needNotAfter bool
 }
 
 func (a *ACME) GetEmail() string {
-	return Config.ACME.Email
+	return a.email
 }
 func (a *ACME) GetRegistration() *registration.Resource {
 	return a.Registration
@@ -195,7 +198,7 @@ func (a *ACME) Obtain(domains []string, deadline time.Time) (fullchain, key []by
 }
 
 func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key []byte, err error) {
-	err = utils.Retry(Config.ACME.RetryCount,
+	err = utils.Retry(a.retry,
 		func() error {
 			fullchain, key, err = a.Obtain(domains, deadline)
 			return err
@@ -204,12 +207,12 @@ func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key
 	return
 }
 
-func MakeACME() (*ACME, error) {
+func MakeACME(c *config.ServerConfigT) (*ACME, error) {
 	instance := &ACME{
-		needNotAfter: isACMEProviderGoogle(Config.ACME.Provider),
+		needNotAfter: isACMEProviderGoogle(c.ACME.Provider),
 	}
 	config := lego.NewConfig(instance)
-	config.CADirURL = acmeProvidersMap[Config.ACME.Provider]
+	config.CADirURL = acmeProvidersMap[c.ACME.Provider]
 	config.Certificate.KeyType = certcrypto.EC256
 
 	var err error
@@ -218,7 +221,7 @@ func MakeACME() (*ACME, error) {
 		return nil, fmt.Errorf("unexpected error constructing acme client: %w", err)
 	}
 
-	err = SetChallenger(config, instance, Config)
+	err = SetChallenger(config, instance, c)
 	if err != nil {
 		return nil, err
 	}

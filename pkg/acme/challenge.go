@@ -1,4 +1,4 @@
-package server
+package acme
 
 import (
 	"fmt"
@@ -9,16 +9,16 @@ import (
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 	"github.com/go-acme/lego/v4/providers/dns/tencentcloud"
+	"pkg.para.party/certdx/pkg/acme/http/s3"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/provider/http/s3"
 )
 
 func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfigT) error {
-	tpy, clg, err := getChallenger(legoCfg, p)
+	typ, clg, err := getChallenger(legoCfg, p)
 	if err != nil {
 		return fmt.Errorf("unexpected error constructing cloudflare dns client: %w", err)
 	}
-	switch tpy {
+	switch typ {
 	case config.ChallengeTypeDns01:
 		opt := make([]dns01.ChallengeOption, 0)
 
@@ -34,7 +34,7 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfigT
 			return fmt.Errorf("unexpected error setting up http challenge: %w", err)
 		}
 	default:
-		return fmt.Errorf("unknown provider: type %v", tpy)
+		return fmt.Errorf("unknown provider: type %v", typ)
 	}
 
 	return nil

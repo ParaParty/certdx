@@ -8,8 +8,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsS3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"pkg.para.party/certdx/pkg/acme/http/s3"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/provider/http/s3"
 )
 
 func TestS3(t *testing.T) {

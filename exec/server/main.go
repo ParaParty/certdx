@@ -10,6 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/server"
 )
@@ -60,7 +61,7 @@ func init() {
 		logging.Fatal("Reading config file failed, err: %s", err)
 	}
 
-	if !server.ACMEProviderSupported(config.ACME.Provider) {
+	if !acme.ACMEProviderSupported(config.ACME.Provider) {
 		logging.Fatal("ACME provider not supported: %s", config.ACME.Provider)
 	}
 
@@ -80,7 +81,7 @@ func init() {
 		logging.Fatal("Invalid config, err: %v", err)
 	}
 
-	if err := server.InitACMEAccount(); err != nil {
+	if err := acme.InitACMEAccount(config); err != nil {
 		logging.Fatal("Failed to init ACME account, err: %s", err)
 	}
 
