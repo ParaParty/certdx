@@ -4,8 +4,8 @@ import (
 	"os"
 
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/server"
 )
 
 func registerGoogleAccount() {
@@ -32,7 +32,7 @@ func registerGoogleAccount() {
 	if *testAccount {
 		provider = "googletest"
 	}
-	err := server.RegisterAccount(provider, *email, *keyId, *hmac)
+	err := acme.RegisterAccount(provider, *email, *keyId, *hmac)
 	if err != nil {
 		logging.Fatal("Failed registering account, err: %s", err)
 	}

@@ -10,8 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 type CertT struct {
@@ -69,7 +71,7 @@ func InitCache() {
 }
 
 func (s *ServerCacheFile) loadCacheFile() error {
-	cachePath, exist := getCacheSavePath()
+	cachePath, exist := utils.GetServerCacheSavePath()
 	if !exist {
 		return nil
 	}
@@ -119,7 +121,7 @@ func (s *ServerCacheFile) writeCacheFile(fe *ServerCacheFileEntry) error {
 }
 
 func (s *ServerCacheFile) listenUpdate() {
-	cachePath, _ := getCacheSavePath()
+	cachePath, _ := utils.GetServerCacheSavePath()
 	serverCacheFile.path = cachePath
 
 	for fe := range s.update {
@@ -173,7 +175,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 	if !c.cert.IsValid() {
 		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(Config.ACME.CertLifeTimeDuration)
 
-		acme, err := MakeACME()
+		acme, err := acme.MakeACME(Config)
 		if err != nil {
 			return false, err
 		}
