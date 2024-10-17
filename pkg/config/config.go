@@ -76,10 +76,10 @@ func (p *HttpProvider) Validate() error {
 		if p.S3 == nil {
 			return fmt.Errorf("HttpProvider S3: empty S3")
 		}
-	case HttpProviderTypeLocal:
-		if p.Local == nil {
-			return fmt.Errorf("HttpProvider Local: empty Local")
-		}
+	// case HttpProviderTypeLocal:
+	// 	if p.Local == nil {
+	// 		return fmt.Errorf("HttpProvider Local: empty Local")
+	// 	}
 	default:
 		return fmt.Errorf("unknown HttpProvider: %s", p.Type)
 	}
@@ -117,6 +117,15 @@ func (c *ACMEConfig) Validate() error {
 	if len(c.AllowedDomains) == 0 {
 		return fmt.Errorf("AllowedDomains is empty")
 	}
+
+	if c.ChallengeType == "" {
+		return fmt.Errorf("challenge type is empty")
+	}
+
+	if c.ChallengeType != ChallengeTypeDns01 && c.ChallengeType != ChallengeTypeHttp01 {
+		return fmt.Errorf("challenge type: %s not supported", c.ChallengeType)
+	}
+
 	return nil
 }
 
@@ -180,20 +189,28 @@ func (c *ServerConfigT) SetDefault() {
 func (c *ServerConfigT) Validate() error {
 	ret := appengine.MultiError{}
 
-	if c.DnsProvider != nil {
-		if err := c.DnsProvider.Validate(); err != nil {
-			ret = append(ret, err)
-		}
-	}
-
-	if c.HttpProvider != nil {
-		if err := c.HttpProvider.Validate(); err != nil {
-			ret = append(ret, err)
-		}
-	}
-
 	if err := c.ACME.Validate(); err != nil {
 		ret = append(ret, err)
+	}
+
+	switch c.ACME.ChallengeType {
+	case ChallengeTypeDns01:
+		if c.DnsProvider != nil {
+			if err := c.DnsProvider.Validate(); err != nil {
+				ret = append(ret, err)
+			}
+		} else {
+			ret = append(ret, fmt.Errorf("no dns provider"))
+		}
+	case ChallengeTypeHttp01:
+		if c.HttpProvider != nil {
+			if err := c.HttpProvider.Validate(); err != nil {
+				ret = append(ret, err)
+			}
+		} else {
+			ret = append(ret, fmt.Errorf("no http provider"))
+		}
+	default:
 	}
 
 	if err := c.HttpServer.Validate(); err != nil {
