@@ -17,8 +17,12 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
 			if checkAuthorization(r) {
-				xff := r.Header.Get("X-Forwarded-For")
-				logging.Info("Http received cert request from: %s, xff: %s", r.RemoteAddr, xff)
+				logstr := fmt.Sprintf("Http received cert request from: %s", r.RemoteAddr)
+				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+					logstr = fmt.Sprintf("%s, xff: %s", logstr, xff)
+				}
+				logging.Info(logstr)
+
 				handleCertReq(&w, r)
 				return
 			}
