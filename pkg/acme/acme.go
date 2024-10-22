@@ -209,6 +209,7 @@ func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key
 
 func MakeACME(c *config.ServerConfigT) (*ACME, error) {
 	instance := &ACME{
+		retry: c.ACME.RetryCount,
 		needNotAfter: isACMEProviderGoogle(c.ACME.Provider),
 	}
 	config := lego.NewConfig(instance)

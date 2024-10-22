@@ -11,7 +11,8 @@ import (
 func Retry(retryCount int, work func() error) error {
 	var err error
 
-	for i := 0; i < retryCount; i++ {
+	i := 0
+	for {
 		begin := time.Now()
 		err = work()
 		if err == nil {
@@ -22,7 +23,13 @@ func Retry(retryCount int, work func() error) error {
 			return fmt.Errorf("errored too fast, give up retry. last error is: %w", err)
 		}
 
-		logging.Warn("Retry %d/%d errored, err: %s", i+1, retryCount, err)
+		logging.Warn("Retry %d/%d errored, err: %s", i, retryCount, err)
+
+		if i < retryCount {
+			break
+		}
+
+		i++
 		time.Sleep(15 * time.Second)
 	}
 
