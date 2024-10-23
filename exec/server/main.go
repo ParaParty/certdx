@@ -81,8 +81,8 @@ func init() {
 		logging.Fatal("Invalid config, err: %v", err)
 	}
 
-	if err := acme.InitACMEAccount(config); err != nil {
-		logging.Fatal("Failed to init ACME account, err: %s", err)
+	if err := acme.InitACME(config); err != nil {
+		logging.Fatal("Failed to init ACME client, err: %s", err)
 	}
 
 	server.InitCache()

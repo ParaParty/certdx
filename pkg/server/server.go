@@ -175,12 +175,10 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 	if !c.cert.IsValid() {
 		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(Config.ACME.CertLifeTimeDuration)
 
-		acme, err := acme.MakeACME(Config)
-		if err != nil {
-			return false, err
-		}
+		acme := acme.GetACME()
 
 		var fullchain, key []byte
+		var err error
 		if retry {
 			fullchain, key, err = acme.RetryObtain(c.domains, newValidBefore.Add(Config.ACME.RenewTimeLeftDuration))
 		} else {
