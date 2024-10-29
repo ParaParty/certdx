@@ -209,6 +209,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 
 			logging.Info("Current main server retry count: %d", retryCount)
 			if retryCount < r.Config.Server.RetryCount {
+				time.Sleep(15 * time.Second)
 				continue
 			}
 
@@ -229,6 +230,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 							continue
 						}
 						if retryCount < r.Config.Server.RetryCount {
+							time.Sleep(15 * time.Second)
 							continue
 						}
 						logging.Info("Will reconnect standby server after %s", r.Config.Server.ReconnectInterval)
