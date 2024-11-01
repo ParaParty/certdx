@@ -215,6 +215,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 
 			if standByExists && !standByClient.Running.Load() {
 				go func() {
+					startTime := time.Now()
 					retryCount := 0
 					for {
 						logging.Info("Starting gRPC standby stream")
@@ -229,10 +230,12 @@ func (r *CertDXClientDaemon) GRPCMain() {
 							retryCount = 0
 							continue
 						}
+						logging.Info("Current standby server retry count: %d", retryCount)
 						if retryCount < r.Config.Server.RetryCount {
 							time.Sleep(15 * time.Second)
 							continue
 						}
+						retryCount = 0
 						logging.Info("Will reconnect standby server after %s", r.Config.Server.ReconnectInterval)
 						<-time.After(r.Config.Server.ReconnectDuration)
 					}
