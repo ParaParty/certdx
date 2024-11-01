@@ -140,17 +140,20 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 		}
 	}()
 
+	var err error
 	select {
 	case <-ctx.Done():
-		logging.Debug("Stream end due to ctx Done: %s", ctx.Err())
-		return ctx.Err()
-	case err := <-errChan:
+		err = ctx.Err()
+		logging.Debug("Stream end due to ctx Done: %s", err)
+	case err = <-errChan:
 		logging.Error("Stream end due to errored: %s", err)
-		return err
 	case <-sds.kill:
 		logging.Debug("Stream end due to explicit kill.")
-		return fmt.Errorf("server closed")
+		err = fmt.Errorf("server closed")
 	}
+
+	logging.Info("gRPC connection from %s closed", peer)
+	return err
 }
 
 func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCertCacheEntry,
