@@ -67,12 +67,37 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 	return ret
 }
 
+func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertification) (fullchan, key []byte, err error) {
+	fullchanPath, keyPath := c.GetFullChainAndKeyPath()
+	if utils.FileExists(fullchanPath) && utils.FileExists(keyPath) {
+		fullchan, err = os.ReadFile(fullchanPath)
+		if err != nil {
+			return
+		}
+
+		key, err = os.ReadFile(keyPath)
+		if err != nil {
+			return
+		}
+	} else {
+		err = os.ErrNotExist
+	}
+	return
+}
+
 func (r *CertDXClientDaemon) init() {
 	for _, c := range r.Config.Certifications {
+		cd := certData{
+			Domains: c.Domains,
+		}
+
+		fullchan, key, err := r.loadSavedCert(&c)
+		if err == nil {
+			cd.Fullchain, cd.Key = fullchan, key
+		}
+
 		cert := &watchingCert{
-			Data: certData{
-				Domains: c.Domains,
-			},
+			Data:           cd,
 			Config:         c,
 			UpdateHandlers: []certUpdateHandler{writeCertAndDoCommand},
 			UpdateChan:     make(chan certData, 1),
