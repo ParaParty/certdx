@@ -25,7 +25,7 @@ func Retry(retryCount int, work func() error) error {
 
 		logging.Warn("Retry %d/%d errored, err: %s", i, retryCount, err)
 
-		if i < retryCount {
+		if i > retryCount {
 			break
 		}
 
