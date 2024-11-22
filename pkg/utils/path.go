@@ -88,18 +88,12 @@ func GetACMEPrivateKeySavePath(email string, ACMEProvider string) (string, error
 	return path.Join(saveDir, keyName), nil
 }
 
-func GetServerCacheSavePath() (cachePath string, exist bool) {
+func GetServerCacheSavePath() string {
 	saveDir, err := os.Getwd()
 	if err != nil {
-		return "", false
+		return "cache.json"
 	}
 
 	cacheFile := path.Join(saveDir, "cache.json")
-	if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
-		return cacheFile, false
-	} else if err != nil {
-		return "", false
-	}
-
-	return cacheFile, true
+	return cacheFile
 }

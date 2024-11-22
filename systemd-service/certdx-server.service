@@ -6,7 +6,7 @@ After=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/certdx
-ExecStart=/opt/certdx/server --conf /opt/certdx/server.toml --log /tmp/certdx-server.log
+ExecStart=/opt/certdx/certdx_server --conf /opt/certdx/config/server_config.toml --log /tmp/certdx-server.log
 Restart=always
 RestartSec=3
 

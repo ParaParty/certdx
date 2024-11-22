@@ -49,17 +49,18 @@ type ServerCertCacheT struct {
 	mutex   sync.Mutex
 }
 
-var serverCacheFile = ServerCacheFile{
-	entries: make(map[string]*ServerCacheFileEntry),
-	update:  make(chan *ServerCacheFileEntry, 10),
-}
-var serverCertCache = ServerCertCacheT{
-	entries: make(map[string]*ServerCertCacheEntry),
-}
+var serverCacheFile = MakeServerCacheFile()
+var serverCertCache = makeServerCertCache()
 var Config = &config.ServerConfigT{}
 
 func (c *CertT) IsValid() bool {
 	return time.Now().Before(c.ValidBefore)
+}
+
+func makeServerCertCache() ServerCertCacheT {
+	return ServerCertCacheT{
+		entries: make(map[string]*ServerCertCacheEntry),
+	}
 }
 
 func InitCache() {
@@ -70,32 +71,54 @@ func InitCache() {
 	go serverCacheFile.listenUpdate()
 }
 
-func (s *ServerCacheFile) loadCacheFile() error {
-	cachePath, exist := utils.GetServerCacheSavePath()
+func MakeServerCacheFile() ServerCacheFile {
+	cachePath := utils.GetServerCacheSavePath()
+
+	return ServerCacheFile{
+		path:    cachePath,
+		entries: make(map[string]*ServerCacheFileEntry),
+		update:  make(chan *ServerCacheFileEntry, 10),
+	}
+}
+
+func (s *ServerCacheFile) ReadCacheFile() error {
+	exist := utils.FileExists(s.path)
 	if !exist {
-		return nil
+		return os.ErrNotExist
 	}
 
-	cfile, err := os.ReadFile(cachePath)
+	cfile, err := os.ReadFile(s.path)
 	if err != nil {
 		return fmt.Errorf("opening cache file failed: %w", err)
 	}
 
-	entries := make(map[string]*ServerCacheFileEntry)
-	err = json.Unmarshal(cfile, &entries)
+	err = json.Unmarshal(cfile, &s.entries)
 	if err != nil {
 		return fmt.Errorf("unmarshaling cache file failed: %w", err)
 	}
 
-	serverCertCache.mutex.Lock()
-	for _, cache := range entries {
-		if cache.Cert.IsValid() {
-			s.entries[domainsAsKey(cache.Domains)] = cache
+	return nil
+}
 
+func (s *ServerCacheFile) loadCacheFile() error {
+	err := s.ReadCacheFile()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	serverCertCache.mutex.Lock()
+	for key, cache := range s.entries {
+		if cache.Cert.IsValid() {
 			entry := serverCertCache.getEntryNoLock(cache.Domains)
 			entry.mutex.Lock()
 			entry.cert = cache.Cert
 			entry.mutex.Unlock()
+		} else {
+			delete(s.entries, key)
 		}
 	}
 	serverCertCache.mutex.Unlock()
@@ -104,9 +127,7 @@ func (s *ServerCacheFile) loadCacheFile() error {
 	return nil
 }
 
-func (s *ServerCacheFile) writeCacheFile(fe *ServerCacheFileEntry) error {
-	s.entries[domainsAsKey(fe.Domains)] = fe
-
+func (s *ServerCacheFile) writeCacheFile() error {
 	jsonBytes, err := json.Marshal(s.entries)
 	if err != nil {
 		return fmt.Errorf("failed to marshal cache file: %w", err)
@@ -120,13 +141,22 @@ func (s *ServerCacheFile) writeCacheFile(fe *ServerCacheFileEntry) error {
 	return nil
 }
 
-func (s *ServerCacheFile) listenUpdate() {
-	cachePath, _ := utils.GetServerCacheSavePath()
-	serverCacheFile.path = cachePath
+func (s *ServerCacheFile) updateCacheFileEntry(fe *ServerCacheFileEntry) error {
+	s.entries[domainsAsKey(fe.Domains)] = fe
 
+	return s.writeCacheFile()
+}
+
+func (s *ServerCacheFile) PrintCertInfo() {
+	for _, cert := range s.entries {
+		fmt.Printf("\nDomains:     %s\nRenewAt:     %s\nValidBefore: %s\n", strings.Join(cert.Domains, ", "), cert.Cert.RenewAt, cert.Cert.ValidBefore)
+	}
+}
+
+func (s *ServerCacheFile) listenUpdate() {
 	for fe := range s.update {
 		logging.Info("Update domains cache to file")
-		if err := s.writeCacheFile(fe); err != nil {
+		if err := s.updateCacheFileEntry(fe); err != nil {
 			logging.Warn("Update domains cache to file failed, err: %s", err)
 		}
 	}

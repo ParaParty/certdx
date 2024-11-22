@@ -32,6 +32,8 @@ func main() {
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "show-cache":
+			showCache()
 		case "google-account":
 			registerGoogleAccount()
 		case "make-ca":
@@ -60,6 +62,7 @@ Usage:
   %s <command> [options]
 
 Commands:
+  show-cache:     Print server cert cache
   google-account: Register google cloud ACME account
   make-ca:        Make grpc mtls CA certificate and key
   make-server:    Make grpc mtls Server certificate and key

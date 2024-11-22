@@ -30,9 +30,10 @@ for o, a in t:
             f'''env GOOS="{o}" GOARCH="{a}" CGO_ENABLED=0 '''
             f'''go build -ldflags="-s -w '''
             f'''-X main.buildCommit={commitId} -X \'main.buildDate={time}\'" '''
-            f'''-o {dir}/{e}{".exe" if o == "windows" else ""} '''
+            f'''-o {dir}/certdx_{e}{".exe" if o == "windows" else ""} '''
             f'''../{s}''', shell=True
         )
+    subprocess.run(f"cp -r ../config {dir} && cp -r ../systemd-service {dir}", shell=True)
     subprocess.run(f"zip -r {dir}.zip {dir}", shell=True)
     subprocess.run(f"rm -r {dir}", shell=True)
 
