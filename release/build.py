@@ -23,6 +23,15 @@ exec = [['server', 'exec/server'],
         ['tools',  'exec/tools'],
 ]
 
+copy = [
+    'config',
+    'systemd-service',
+    'LICENSE',
+]
+
+copy = map(lambda x: f'../{x}', copy)
+copy = ' '.join(copy)
+
 for o, a in t:
     dir = f'certdx_{o}_{a}'
     for e, s in exec:
@@ -33,7 +42,7 @@ for o, a in t:
             f'''-o {dir}/certdx_{e}{".exe" if o == "windows" else ""} '''
             f'''../{s}''', shell=True
         )
-    subprocess.run(f"cp -r ../config {dir} && cp -r ../systemd-service {dir}", shell=True)
+    subprocess.run(f"cp -r {copy} {dir}", shell=True)
     subprocess.run(f"zip -r {dir}.zip {dir}", shell=True)
     subprocess.run(f"rm -r {dir}", shell=True)
 
