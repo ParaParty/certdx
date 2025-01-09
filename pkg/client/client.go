@@ -2,6 +2,9 @@ package client
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -299,4 +302,18 @@ func (r *CertDXClientDaemon) GRPCMain() {
 		standByClient.Kill <- struct{}{}
 	}
 	r.wg.Wait()
+}
+
+func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	serverName := hello.ServerName
+	for _, cert := range r.certs {
+		domainsInCert := cert.Data.Domains
+		if utils.DomainAllowed(domainsInCert, serverName) {
+			tlsCert, err := tls.X509KeyPair(cert.Data.Fullchain, cert.Data.Key)
+			if err == nil {
+				return &tlsCert, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no certificate found")
 }
