@@ -281,23 +281,6 @@ func (c *ServerCertCacheEntry) IsSubcribing() bool {
 	return c.Listening.Load() != 0
 }
 
-func isSubdomain(domain string, allowedDomains []string) bool {
-	for _, allowedDomain := range allowedDomains {
-		if allowedDomain == domain {
-			return true
-		}
-		if strings.HasSuffix(domain, "."+allowedDomain) {
-			return true
-		}
-	}
-	return false
-}
-
 func domainsAllowed(domains []string) bool {
-	for _, i := range domains {
-		if !isSubdomain(i, Config.ACME.AllowedDomains) {
-			return false
-		}
-	}
-	return true
+	return utils.DomainsAllowed(Config.ACME.AllowedDomains, domains)
 }
