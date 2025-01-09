@@ -4,7 +4,7 @@ go 1.23.0
 
 toolchain go1.23.4
 
-replace pkg.para.party/certdx v0.0.0-20250109082112-7904a2e88e40 => ../..
+replace pkg.para.party/certdx v0.0.0-20250109151811-9a22086ff81d => ../..
 
 require (
 	github.com/BurntSushi/toml v1.4.0
@@ -12,7 +12,7 @@ require (
 	github.com/caddyserver/certmagic v0.21.6
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	go.uber.org/zap v1.27.0
-	pkg.para.party/certdx v0.0.0-20250109082112-7904a2e88e40
+	pkg.para.party/certdx v0.0.0-20250109151811-9a22086ff81d
 )
 
 require (
