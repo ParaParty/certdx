@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/caddyserver/caddy/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 	"io"
 	"os"
@@ -21,6 +22,7 @@ func init() {
 type CertDXCaddyDaemon struct {
 	ConfigPath   *string `json:"config_path,omitempty"`
 	certDXDaemon *client.CertDXClientDaemon
+	cache        *expirable.LRU[string, *tls.Certificate]
 }
 
 func (CertDXCaddyDaemon) CaddyModule() caddy.ModuleInfo {
@@ -70,12 +72,16 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 		return err
 	}
 
-	for _, c := range m.certDXDaemon.Config.Certifications {
+	for idx, _ := range m.certDXDaemon.Config.Certifications {
+		c := &m.certDXDaemon.Config.Certifications[idx]
 		if len(c.Domains) == 0 || c.Name == "" || c.SavePath == "" {
 			caddy.Log().Fatal("invalid certification configuration", zap.Error(err))
 			return err
 		}
+		c.ReloadCommand = ""
 	}
+
+	m.cache = expirable.NewLRU[string, *tls.Certificate](1<<16, nil, time.Minute*60)
 
 	return nil
 }
@@ -103,7 +109,18 @@ func (m *CertDXCaddyDaemon) Stop() error {
 }
 
 func (m *CertDXCaddyDaemon) GetCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return m.certDXDaemon.GetCertificate(ctx, hello)
+	cert, ok := m.cache.Get(hello.ServerName)
+	if ok {
+		return cert, nil
+	}
+
+	caddy.Log().Info("get certificate from certdx", zap.String("server_name", hello.ServerName))
+	cert, err := m.certDXDaemon.GetCertificate(ctx, hello)
+	if err != nil {
+		return nil, err
+	}
+	m.cache.Add(hello.ServerName, cert)
+	return cert, nil
 }
 
 var (
