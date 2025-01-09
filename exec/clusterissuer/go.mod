@@ -1,6 +1,6 @@
 module pkg.para.party/certdx/exec/clusterissuer
 
-go 1.23.0
+go 1.23.4
 
 toolchain go1.23.4
 

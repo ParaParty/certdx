@@ -57,6 +57,10 @@ func (c *CertT) IsValid() bool {
 	return time.Now().Before(c.ValidBefore)
 }
 
+func (c *CertT) IsNeedRenew() bool {
+	return time.Now().Before(c.ValidBefore.Add(-Config.ACME.RenewTimeLeftDuration))
+}
+
 func makeServerCertCache() ServerCertCacheT {
 	return ServerCertCacheT{
 		entries: make(map[string]*ServerCertCacheEntry),
@@ -202,7 +206,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 	defer c.mutex.Unlock()
 
 	logging.Info("Renew cert: %v", c.domains)
-	if !c.cert.IsValid() {
+	if !c.cert.IsNeedRenew() {
 		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(Config.ACME.CertLifeTimeDuration)
 
 		acme := acme.GetACME()
