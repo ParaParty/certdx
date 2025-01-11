@@ -21,7 +21,7 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 					logstr = fmt.Sprintf("%s, xff: %s", logstr, xff)
 				}
-				logging.Info(logstr)
+				logging.Info("%s", logstr)
 
 				handleCertReq(&w, r)
 				return

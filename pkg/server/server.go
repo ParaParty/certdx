@@ -30,7 +30,7 @@ type ServerCacheFileEntry struct {
 
 type ServerCacheFile struct {
 	path    string
-	entries map[string]*ServerCacheFileEntry
+	entries map[uint64]*ServerCacheFileEntry
 	update  chan *ServerCacheFileEntry
 }
 
@@ -45,7 +45,7 @@ type ServerCertCacheEntry struct {
 }
 
 type ServerCertCacheT struct {
-	entries map[string]*ServerCertCacheEntry
+	entries map[uint64]*ServerCertCacheEntry
 	mutex   sync.Mutex
 }
 
@@ -59,7 +59,7 @@ func (c *CertT) IsValid() bool {
 
 func makeServerCertCache() ServerCertCacheT {
 	return ServerCertCacheT{
-		entries: make(map[string]*ServerCertCacheEntry),
+		entries: make(map[uint64]*ServerCertCacheEntry),
 	}
 }
 
@@ -76,7 +76,7 @@ func MakeServerCacheFile() ServerCacheFile {
 
 	return ServerCacheFile{
 		path:    cachePath,
-		entries: make(map[string]*ServerCacheFileEntry),
+		entries: make(map[uint64]*ServerCacheFileEntry),
 		update:  make(chan *ServerCacheFileEntry, 10),
 	}
 }
@@ -142,7 +142,7 @@ func (s *ServerCacheFile) writeCacheFile() error {
 }
 
 func (s *ServerCacheFile) updateCacheFileEntry(fe *ServerCacheFileEntry) error {
-	s.entries[domainsAsKey(fe.Domains)] = fe
+	s.entries[utils.DomainsAsKey(fe.Domains)] = fe
 
 	return s.writeCacheFile()
 }
@@ -162,12 +162,8 @@ func (s *ServerCacheFile) listenUpdate() {
 	}
 }
 
-func domainsAsKey(domains []string) string {
-	return strings.Join(domains, "&_&")
-}
-
 func (s *ServerCertCacheT) getEntryNoLock(domains []string) *ServerCertCacheEntry {
-	entryKey := domainsAsKey(domains)
+	entryKey := utils.DomainsAsKey(domains)
 	entry, ok := s.entries[entryKey]
 	if ok {
 		return entry
