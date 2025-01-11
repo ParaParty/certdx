@@ -22,7 +22,7 @@ type CertDXClientDaemon struct {
 	Config    *config.ClientConfigT
 	ClientOpt []CertDXHttpClientOption
 
-	certs []*watchingCert
+	certs map[uint64]*watchingCert
 	wg    sync.WaitGroup
 }
 
@@ -32,14 +32,14 @@ type certData struct {
 }
 
 type watchingCert struct {
-	Data           certData
+	Data           atomic.Pointer[certData]
 	Config         config.ClientCertification
 	UpdateHandlers []certUpdateHandler
 	UpdateChan     chan certData
 	Stop           atomic.Pointer[chan struct{}]
 }
 
-func (c *watchingCert) watch(wg *sync.WaitGroup) {
+func (c *watchingCert) watchUpdate(wg *sync.WaitGroup) {
 	wg.Add(1)
 	defer wg.Done()
 	for {
@@ -47,12 +47,12 @@ func (c *watchingCert) watch(wg *sync.WaitGroup) {
 		case <-*c.Stop.Load():
 			return
 		case newCert := <-c.UpdateChan:
-			if !bytes.Equal(c.Data.Fullchain, newCert.Fullchain) || !bytes.Equal(c.Data.Key, newCert.Key) {
+			currentCert := c.Data.Load()
+			if !bytes.Equal(currentCert.Fullchain, newCert.Fullchain) || !bytes.Equal(currentCert.Key, newCert.Key) {
 				logging.Notice("Notify cert %v changed", newCert.Domains)
-				c.Data.Fullchain = newCert.Fullchain
-				c.Data.Key = newCert.Key
+				c.Data.Swap(&newCert)
 				for _, handleFunc := range c.UpdateHandlers {
-					handleFunc(c.Data.Fullchain, c.Data.Key, &c.Config)
+					handleFunc(newCert.Fullchain, newCert.Key, &c.Config)
 				}
 			} else {
 				logging.Info("Cert %v not changed", newCert.Domains)
@@ -65,6 +65,7 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 	ret := &CertDXClientDaemon{
 		Config:    &config.ClientConfigT{},
 		ClientOpt: make([]CertDXHttpClientOption, 0),
+		certs:     make(map[uint64]*watchingCert),
 	}
 	ret.Config.SetDefault()
 	return ret
@@ -100,16 +101,16 @@ func (r *CertDXClientDaemon) init() {
 		}
 
 		cert := &watchingCert{
-			Data:           cd,
 			Config:         c,
 			UpdateHandlers: []certUpdateHandler{writeCertAndDoCommand},
 			UpdateChan:     make(chan certData, 1),
 		}
+		cert.Data.Store(&cd)
 		stop := make(chan struct{})
 		cert.Stop.Store(&stop)
 
-		r.certs = append(r.certs, cert)
-		go cert.watch(&r.wg)
+		r.certs[utils.DomainsAsKey(c.Domains)] = cert
+		go cert.watchUpdate(&r.wg)
 	}
 }
 
@@ -119,7 +120,7 @@ func (r *CertDXClientDaemon) stop() {
 	}
 }
 
-func (r *CertDXClientDaemon) requestCert(domains []string) *types.HttpCertResp {
+func (r *CertDXClientDaemon) httpRequestCert(domains []string) *types.HttpCertResp {
 	var resp *types.HttpCertResp
 	err := utils.Retry(r.Config.Server.RetryCount, func() error {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
@@ -147,11 +148,11 @@ func (r *CertDXClientDaemon) requestCert(domains []string) *types.HttpCertResp {
 	return nil
 }
 
-func (r *CertDXClientDaemon) certWatchDog(cert *watchingCert) {
+func (r *CertDXClientDaemon) httpPollingCert(cert *watchingCert) {
 	sleepTime := 1 * time.Hour // default sleep time
 	for {
 		logging.Info("Requesting cert %v", cert.Config.Domains)
-		resp := r.requestCert(cert.Config.Domains)
+		resp := r.httpRequestCert(cert.Config.Domains)
 		if resp != nil {
 			if resp.Err != "" {
 				logging.Error("Failed to request cert, err: %s", resp.Err)
@@ -183,7 +184,7 @@ func (r *CertDXClientDaemon) HttpMain() {
 		r.wg.Add(1)
 		go func(_c *watchingCert) {
 			defer r.wg.Done()
-			r.certWatchDog(_c)
+			r.httpPollingCert(_c)
 		}(c)
 	}
 
@@ -307,9 +308,10 @@ func (r *CertDXClientDaemon) GRPCMain() {
 func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	serverName := hello.ServerName
 	for _, cert := range r.certs {
-		domainsInCert := cert.Data.Domains
+		certData := cert.Data.Load()
+		domainsInCert := certData.Domains
 		if utils.DomainAllowed(domainsInCert, serverName) {
-			tlsCert, err := tls.X509KeyPair(cert.Data.Fullchain, cert.Data.Key)
+			tlsCert, err := tls.X509KeyPair(certData.Fullchain, certData.Key)
 			if err == nil {
 				return &tlsCert, nil
 			}

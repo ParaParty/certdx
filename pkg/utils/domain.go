@@ -1,6 +1,9 @@
 package utils
 
-import "strings"
+import (
+	"hash/fnv"
+	"strings"
+)
 
 func IsSubdomain(domain string, allowedDomains []string) bool {
 	for _, allowedDomain := range allowedDomains {
@@ -25,4 +28,14 @@ func DomainsAllowed(allowedList []string, toCheck []string) bool {
 
 func DomainAllowed(allowedList []string, toCheck string) bool {
 	return IsSubdomain(toCheck, allowedList)
+}
+
+func DomainsAsKey(domains []string) uint64 {
+	var h uint64 = 0
+	for _, d := range domains {
+		hf := fnv.New64a()
+		hf.Write([]byte(d))
+		h += hf.Sum64()
+	}
+	return h
 }

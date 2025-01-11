@@ -42,14 +42,14 @@ func (e *killed) Error() string {
 type CertDXgRPCClient struct {
 	tlsCred credentials.TransportCredentials
 	server  *config.ClientGRPCServer
-	certs   []*watchingCert
+	certs   map[uint64]*watchingCert
 
 	Kill     chan struct{}
 	Running  atomic.Bool
 	Received atomic.Pointer[chan struct{}]
 }
 
-func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs []*watchingCert) *CertDXgRPCClient {
+func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[uint64]*watchingCert) *CertDXgRPCClient {
 	c := &CertDXgRPCClient{
 		server: server,
 		certs:  certs,
