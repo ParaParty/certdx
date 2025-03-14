@@ -1,7 +1,6 @@
-[Server]
+[Common]
 retryCount = 5
 # http or grpc
-# gRPC will be implemented later...
 mode = "http"
 # only take effect in gRPC mode. If client lost connection from
 # main server or standby server, will reconnect to server every

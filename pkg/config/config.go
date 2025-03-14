@@ -228,7 +228,7 @@ func (c *ServerConfigT) Validate() error {
 }
 
 type ClientConfigT struct {
-	Server ClientServerConfig `toml:"Server" json:"server,omitempty"`
+	Common ClientCommonConfig `toml:"Common" json:"common,omitempty"`
 
 	Http struct {
 		MainServer    ClientHttpServer `toml:"MainServer" json:"main_server,omitempty"`
@@ -243,7 +243,7 @@ type ClientConfigT struct {
 	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
 }
 
-type ClientServerConfig struct {
+type ClientCommonConfig struct {
 	RetryCount        int    `toml:"retryCount" json:"retry_count,omitempty"`
 	Mode              string `toml:"mode" json:"mode,omitempty"`
 	ReconnectInterval string `toml:"reconnectInterval" json:"reconnect_interval,omitempty"`
@@ -277,7 +277,7 @@ func (c *ClientCertification) GetFullChainAndKeyPath() (fullchain, key string) {
 }
 
 func (c *ClientConfigT) SetDefault() {
-	c.Server = ClientServerConfig{
+	c.Common = ClientCommonConfig{
 		RetryCount:        5,
 		Mode:              "http",
 		ReconnectInterval: "10m",

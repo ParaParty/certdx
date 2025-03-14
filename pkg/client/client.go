@@ -122,7 +122,7 @@ func (r *CertDXClientDaemon) stop() {
 
 func (r *CertDXClientDaemon) httpRequestCert(domains []string) *types.HttpCertResp {
 	var resp *types.HttpCertResp
-	err := utils.Retry(r.Config.Server.RetryCount, func() error {
+	err := utils.Retry(r.Config.Common.RetryCount, func() error {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
 		var err error
 		resp, err = certdxClient.GetCert(domains)
@@ -135,7 +135,7 @@ func (r *CertDXClientDaemon) httpRequestCert(domains []string) *types.HttpCertRe
 
 	if r.Config.Http.StandbyServer.Url != "" {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
-		err = utils.Retry(r.Config.Server.RetryCount, func() error {
+		err = utils.Retry(r.Config.Common.RetryCount, func() error {
 			var err error
 			resp, err = certdxClient.GetCert(domains)
 			return err
@@ -237,7 +237,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 			}
 
 			logging.Info("Current main server retry count: %d", retryCount)
-			if retryCount < r.Config.Server.RetryCount {
+			if retryCount < r.Config.Common.RetryCount {
 				time.Sleep(15 * time.Second)
 				continue
 			}
@@ -260,13 +260,13 @@ func (r *CertDXClientDaemon) GRPCMain() {
 							continue
 						}
 						logging.Info("Current standby server retry count: %d", retryCount)
-						if retryCount < r.Config.Server.RetryCount {
+						if retryCount < r.Config.Common.RetryCount {
 							time.Sleep(15 * time.Second)
 							continue
 						}
 						retryCount = 0
-						logging.Info("Will reconnect standby server after %s", r.Config.Server.ReconnectInterval)
-						<-time.After(r.Config.Server.ReconnectDuration)
+						logging.Info("Will reconnect standby server after %s", r.Config.Common.ReconnectInterval)
+						<-time.After(r.Config.Common.ReconnectDuration)
 					}
 				}()
 
@@ -276,9 +276,9 @@ func (r *CertDXClientDaemon) GRPCMain() {
 			}
 
 			retryCount = 0
-			logging.Info("Will reconnect main server after %s", r.Config.Server.ReconnectInterval)
+			logging.Info("Will reconnect main server after %s", r.Config.Common.ReconnectInterval)
 			select {
-			case <-time.After(r.Config.Server.ReconnectDuration):
+			case <-time.After(r.Config.Common.ReconnectDuration):
 				continue
 			case <-kill:
 				return
