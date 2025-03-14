@@ -9,7 +9,7 @@ mode = "http"
 reconnectInterval = "10m"
 
 [Http.MainServer]
-url = "https://acmeserver.example.com:19198/1145141919810"
+url = "https://certdxserver.example.com:19198/1145141919810"
 token = "KFCCrazyThursdayVMe50"
 
 [Http.StandbyServer]

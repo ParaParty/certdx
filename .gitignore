@@ -36,3 +36,5 @@ release/certdx_*
 /private
 /sds
 cache.json
+*Caddyfile
+*caddy

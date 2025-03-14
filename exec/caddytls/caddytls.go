@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/caddyserver/certmagic"
+	"pkg.para.party/certdx/pkg/utils"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -19,6 +20,8 @@ func init() {
 type CertDXTls struct {
 	ctx       caddy.Context
 	certDXApp *CertDXCaddyDaemon
+	certId    string
+	certHash  uint64
 }
 
 // CaddyModule returns the Caddy module information.
@@ -45,20 +48,34 @@ func (certdx *CertDXTls) Validate() error {
 	if !ok {
 		return fmt.Errorf("certdx app has an unexpected type: %T", app)
 	}
+
+	domains, exists := certdx.certDXApp.CertificateDefs[certdx.certId]
+	if !exists {
+		return fmt.Errorf("cert definition for cert-id: %v not exists", certdx.certId)
+	}
+	certdx.certHash = utils.DomainsAsKey(domains)
+
 	return nil
 }
 
 func (certdx CertDXTls) GetCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return certdx.certDXApp.GetCertificate(ctx, hello)
+	return certdx.certDXApp.GetCertificate(ctx, certdx.certHash)
 }
 
 // UnmarshalCaddyfile deserializes Caddyfile tokens into ts.
 //
-//	... certdx
+//	... certdx [cert-id]
 func (certdx *CertDXTls) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	for d.Next() {
+		args := d.RemainingArgs()
+		if len(args) != 1 {
+			return d.Errf("expected 1 argument for certdx, got %v", len(args))
+		}
+
+		certdx.certId = args[0]
+
 		for d.NextBlock(0) {
-			return d.Err("no settings are allowed for `certdx`")
+			return d.Errf("no block excepted for certdx")
 		}
 	}
 	return nil

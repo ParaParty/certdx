@@ -89,7 +89,7 @@ func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertification) (fullc
 	return
 }
 
-func (r *CertDXClientDaemon) init() {
+func (r *CertDXClientDaemon) ClientInit() {
 	for _, c := range r.Config.Certifications {
 		cd := certData{
 			Domains: c.Domains,
@@ -112,6 +112,27 @@ func (r *CertDXClientDaemon) init() {
 		r.certs[utils.DomainsAsKey(c.Domains)] = cert
 		go cert.watchUpdate(&r.wg)
 	}
+}
+
+func (r *CertDXClientDaemon) CaddyAddCert(name string, domains []string) error {
+	cd := certData{
+		Domains: domains,
+	}
+
+	cert := &watchingCert{
+		Config:         config.ClientCertification{Name: name, Domains: domains},
+		UpdateHandlers: []certUpdateHandler{},
+		UpdateChan:     make(chan certData, 1),
+	}
+
+	cert.Data.Store(&cd)
+	stop := make(chan struct{})
+	cert.Stop.Store(&stop)
+
+	r.certs[utils.DomainsAsKey(domains)] = cert
+	go cert.watchUpdate(&r.wg)
+
+	return nil
 }
 
 func (r *CertDXClientDaemon) stop() {
@@ -178,8 +199,6 @@ func (r *CertDXClientDaemon) httpPollingCert(cert *watchingCert) {
 }
 
 func (r *CertDXClientDaemon) HttpMain() {
-	r.init()
-
 	for _, c := range r.certs {
 		r.wg.Add(1)
 		go func(_c *watchingCert) {
@@ -203,8 +222,6 @@ func (r *CertDXClientDaemon) HttpMain() {
 }
 
 func (r *CertDXClientDaemon) GRPCMain() {
-	r.init()
-
 	var standByClient *CertDXgRPCClient
 	standByExists := r.Config.GRPC.StandbyServer.Server != ""
 
@@ -305,16 +322,13 @@ func (r *CertDXClientDaemon) GRPCMain() {
 	r.wg.Wait()
 }
 
-func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	serverName := hello.ServerName
-	for _, cert := range r.certs {
+func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash uint64) (*tls.Certificate, error) {
+	cert, exists := r.certs[certHash]
+	if exists {
 		certData := cert.Data.Load()
-		domainsInCert := certData.Domains
-		if utils.DomainAllowed(domainsInCert, serverName) {
-			tlsCert, err := tls.X509KeyPair(certData.Fullchain, certData.Key)
-			if err == nil {
-				return &tlsCert, nil
-			}
+		tlsCert, err := tls.X509KeyPair(certData.Fullchain, certData.Key)
+		if err == nil {
+			return &tlsCert, nil
 		}
 	}
 	return nil, fmt.Errorf("no certificate found")
