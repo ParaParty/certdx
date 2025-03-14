@@ -64,7 +64,7 @@ func init() {
 		logging.Fatal("Reading config file failed, err: %s", err)
 	}
 
-	certDXDaemon.Config.Server.ReconnectDuration, err = time.ParseDuration(certDXDaemon.Config.Server.ReconnectInterval)
+	certDXDaemon.Config.Common.ReconnectDuration, err = time.ParseDuration(certDXDaemon.Config.Common.ReconnectInterval)
 	if err != nil {
 		logging.Fatal("Failed to parse interval, err: %s", err)
 	}
@@ -81,7 +81,7 @@ func init() {
 }
 
 func main() {
-	switch certDXDaemon.Config.Server.Mode {
+	switch certDXDaemon.Config.Common.Mode {
 	case "http":
 		if certDXDaemon.Config.Http.MainServer.Url == "" {
 			logging.Fatal("Http main server url should not be empty")
@@ -93,6 +93,6 @@ func main() {
 		}
 		certDXDaemon.GRPCMain()
 	default:
-		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Server.Mode)
+		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Common.Mode)
 	}
 }
