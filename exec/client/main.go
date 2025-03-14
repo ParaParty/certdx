@@ -78,6 +78,8 @@ func init() {
 			logging.Fatal("Wrong certification configuration")
 		}
 	}
+
+	certDXDaemon.ClientInit()
 }
 
 func main() {
