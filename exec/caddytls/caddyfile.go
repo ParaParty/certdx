@@ -51,19 +51,19 @@ func parseCertDXGlobalOptions(d *caddyfile.Dispenser, existingVal any) (any, err
 				module.ReconnectInterval = v
 			case "http":
 				if d.NextArg() {
-					return nil, d.Err("no argumen expected for http")
+					return nil, d.Err("no argument expected for http")
 				}
 				err := module.UnmarshalHttpBlock(d.NewFromNextSegment())
 				if err != nil {
-					return nil, d.Errf("unexpected unmarshaling error for http: %e", err)
+					return nil, d.Errf("unexpected unmarshaling error for http: %w", err)
 				}
 			case "GRPC":
 				if d.NextArg() {
-					return nil, d.Err("no argumen expected for GRPC")
+					return nil, d.Err("no argument expected for GRPC")
 				}
 				err := module.UnmarshalGRPCBlock(d.NewFromNextSegment())
 				if err != nil {
-					return nil, d.Errf("unexpected unmarshaling error for GRPC: %e", err)
+					return nil, d.Errf("unexpected unmarshaling error for GRPC: %w", err)
 				}
 			case "certificate":
 				args := d.RemainingArgs()
@@ -73,7 +73,7 @@ func parseCertDXGlobalOptions(d *caddyfile.Dispenser, existingVal any) (any, err
 				cert_id := args[0]
 				err := module.UnmarshalCertificateBlock(cert_id, d.NewFromNextSegment())
 				if err != nil {
-					return nil, d.Errf("unexpected unmarshaling error for certificate: %e", err)
+					return nil, d.Errf("unexpected unmarshaling error for certificate: %w", err)
 				}
 			default:
 				return nil, d.Errf("unrecognized subdirective for certdx: %s", d.Val())
