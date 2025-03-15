@@ -20,7 +20,7 @@ func init() {
 type CertDXTls struct {
 	ctx       caddy.Context
 	certDXApp *CertDXCaddyDaemon
-	certId    string
+	CertId    string `json:"cert_id"`
 	certHash  uint64
 }
 
@@ -49,9 +49,9 @@ func (certdx *CertDXTls) Validate() error {
 		return fmt.Errorf("certdx app has an unexpected type: %T", app)
 	}
 
-	domains, exists := certdx.certDXApp.CertificateDefs[certdx.certId]
+	domains, exists := certdx.certDXApp.CertificateDefs[certdx.CertId]
 	if !exists {
-		return fmt.Errorf("cert definition for cert-id: %v not exists", certdx.certId)
+		return fmt.Errorf("cert definition for cert-id: %v not exists", certdx.CertId)
 	}
 	certdx.certHash = utils.DomainsAsKey(domains)
 
@@ -72,7 +72,7 @@ func (certdx *CertDXTls) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			return d.Errf("expected 1 argument for certdx, got %v", len(args))
 		}
 
-		certdx.certId = args[0]
+		certdx.CertId = args[0]
 
 		for d.NextBlock(0) {
 			return d.Errf("no block excepted for certdx")
