@@ -48,7 +48,7 @@
         # define a certificate with following domains
         certificate cert-id {
             example.com
-            6.examle.com
+            6.example.com
         }
     }
 }
