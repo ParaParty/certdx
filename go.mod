@@ -6,13 +6,11 @@ toolchain go1.23.4
 
 require (
 	cloud.google.com/go/security v1.18.2
-	github.com/BurntSushi/toml v1.4.0
 	github.com/aws/aws-sdk-go-v2 v1.32.6
 	github.com/aws/aws-sdk-go-v2/config v1.28.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.47
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.71.0
 	github.com/go-acme/lego/v4 v4.20.4
-	github.com/spf13/pflag v1.0.5
 	google.golang.org/api v0.213.0
 	google.golang.org/appengine v1.6.8
 	google.golang.org/grpc v1.69.2
