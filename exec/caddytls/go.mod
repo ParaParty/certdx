@@ -4,13 +4,13 @@ go 1.23.6
 
 toolchain go1.24.1
 
-replace pkg.para.party/certdx v0.0.0-20250314142501-a475440ea575 => ../..
+replace pkg.para.party/certdx v0.0.0-20250315074035-1fbc9661261a => ../..
 
 require (
 	github.com/caddyserver/caddy/v2 v2.9.1
 	github.com/caddyserver/certmagic v0.22.0
 	go.uber.org/zap v1.27.0
-	pkg.para.party/certdx v0.0.0-20250314142501-a475440ea575
+	pkg.para.party/certdx v0.0.0-20250315074035-1fbc9661261a
 )
 
 require (
