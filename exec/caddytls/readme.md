@@ -55,9 +55,6 @@
 
 https://example.com {
     tls {
-        # certdx on demand
-        get_certificate certdx
-
         # use previously defined cert
         get_certificate certdx cert-id
      }
