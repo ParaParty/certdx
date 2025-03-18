@@ -6,10 +6,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"os"
-	"os/signal"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"pkg.para.party/certdx/pkg/config"
@@ -198,7 +196,7 @@ func (r *CertDXClientDaemon) httpPollingCert(cert *watchingCert) {
 	}
 }
 
-func (r *CertDXClientDaemon) HttpMain() {
+func (r *CertDXClientDaemon) HttpMain(stop chan struct{}) {
 	for _, c := range r.certs {
 		r.wg.Add(1)
 		go func(_c *watchingCert) {
@@ -206,9 +204,6 @@ func (r *CertDXClientDaemon) HttpMain() {
 			r.httpPollingCert(_c)
 		}(c)
 	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	<-stop
 	go func() {
@@ -221,7 +216,7 @@ func (r *CertDXClientDaemon) HttpMain() {
 	r.wg.Wait()
 }
 
-func (r *CertDXClientDaemon) GRPCMain() {
+func (r *CertDXClientDaemon) GRPCMain(stop chan struct{}) {
 	var standByClient *CertDXgRPCClient
 	standByExists := r.Config.GRPC.StandbyServer.Server != ""
 
@@ -302,9 +297,6 @@ func (r *CertDXClientDaemon) GRPCMain() {
 			}
 		}
 	}()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	<-stop
 	go func() {
