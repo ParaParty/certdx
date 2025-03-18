@@ -25,6 +25,7 @@ go.work
 
 # Release files
 release/certdx_*
+release/caddy_certdx_*
 /tools
 /server
 /client
