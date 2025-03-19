@@ -32,7 +32,7 @@ var certDXDaemon *client.CertDXClientDaemon
 
 func init() {
 	flag.Parse()
-	logging.LogInit(*pLogPath)
+	logging.SetLogFile(*pLogPath)
 	logging.SetDebug(*pDebug)
 
 	certDXDaemon = client.MakeCertDXClientDaemon()
