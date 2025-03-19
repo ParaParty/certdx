@@ -44,7 +44,7 @@ type CertDXgRPCClient struct {
 	server  *config.ClientGRPCServer
 	certs   map[uint64]*watchingCert
 
-	Kill     chan struct{}
+	kill     chan struct{}
 	Running  atomic.Bool
 	Received atomic.Pointer[chan struct{}]
 }
@@ -53,7 +53,7 @@ func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[uint64]*wat
 	c := &CertDXgRPCClient{
 		server: server,
 		certs:  certs,
-		Kill:   make(chan struct{}, 1),
+		kill:   make(chan struct{}),
 	}
 	received := make(chan struct{})
 	c.Received.Store(&received)
@@ -88,7 +88,7 @@ func (c *CertDXgRPCClient) getTLSConfig() *tls.Config {
 
 func (c *CertDXgRPCClient) Stream() error {
 	select {
-	case <-c.Kill:
+	case <-c.kill:
 		return &killed{Err: "stream killed"}
 	default:
 	}
@@ -221,7 +221,7 @@ func (c *CertDXgRPCClient) Stream() error {
 	case err := <-errChan:
 		logging.Error("Stream end due to errored: %s", err)
 		return err
-	case <-c.Kill:
+	case <-c.kill:
 		logging.Debug("Stream end due to explicit kill.")
 		return &killed{Err: "stream killed"}
 	}
@@ -254,5 +254,12 @@ func (c *CertDXgRPCClient) handleCert(ctx context.Context, cert *watchingCert,
 			logging.Debug("handler stopped due to ctx done: %s", ctx.Err())
 			return
 		}
+	}
+}
+
+func (c *CertDXgRPCClient) Kill() {
+	if c.Running.Load() {
+		close(c.kill)
+		c.kill = make(chan struct{})
 	}
 }

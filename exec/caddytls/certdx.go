@@ -40,7 +40,6 @@ type CertDXCaddyDaemon struct {
 	CertDXCaddyConfig
 
 	certDXDaemon *client.CertDXClientDaemon
-	stop         chan struct{}
 	logger       *zap.Logger
 }
 
@@ -63,7 +62,6 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	logging.SetLogger(zap.NewStdLog(m.logger))
 
 	m.certDXDaemon = client.MakeCertDXClientDaemon()
-	m.stop = make(chan struct{}, 1)
 
 	m.certDXDaemon.Config.Common = m.ClientCommonConfig
 	m.certDXDaemon.Config.Http.MainServer = m.Http.MainServer
@@ -91,12 +89,12 @@ func (m *CertDXCaddyDaemon) Start() error {
 		if m.certDXDaemon.Config.Http.MainServer.Url == "" {
 			m.logger.Fatal("http main server url should not be empty")
 		}
-		go m.certDXDaemon.HttpMain(m.stop)
+		go m.certDXDaemon.HttpMain()
 	case "grpc":
 		if m.certDXDaemon.Config.GRPC.MainServer.Server == "" {
 			m.logger.Fatal("GRPC main server url should not be empty")
 		}
-		go m.certDXDaemon.GRPCMain(m.stop)
+		go m.certDXDaemon.GRPCMain()
 	default:
 		m.logger.Fatal("not supported mode", zap.String("mode", m.certDXDaemon.Config.Common.Mode))
 	}
@@ -104,7 +102,7 @@ func (m *CertDXCaddyDaemon) Start() error {
 }
 
 func (m *CertDXCaddyDaemon) Stop() error {
-	m.stop <- struct{}{}
+	m.certDXDaemon.Stop()
 	return nil
 }
 

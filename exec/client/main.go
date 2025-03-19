@@ -88,12 +88,13 @@ func main() {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 
-	stop := make(chan struct{}, 1)
 	go func() {
-		for {
-			<-signalChan
-			stop <- struct{}{}
-		}
+		<-signalChan
+		certDXDaemon.Stop()
+
+		// TODO remove this feature later? Graceful stop is fast enough maybe...
+		<-signalChan
+		logging.Fatal("Fast dying...")
 	}()
 
 	switch certDXDaemon.Config.Common.Mode {
@@ -101,12 +102,12 @@ func main() {
 		if certDXDaemon.Config.Http.MainServer.Url == "" {
 			logging.Fatal("Http main server url should not be empty")
 		}
-		certDXDaemon.HttpMain(stop)
+		certDXDaemon.HttpMain()
 	case "grpc":
 		if certDXDaemon.Config.GRPC.MainServer.Server == "" {
 			logging.Fatal("GRPC main server url should not be empty")
 		}
-		certDXDaemon.GRPCMain(stop)
+		certDXDaemon.GRPCMain()
 	default:
 		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Common.Mode)
 	}
