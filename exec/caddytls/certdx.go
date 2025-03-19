@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 func init() {
@@ -40,6 +41,7 @@ type CertDXCaddyDaemon struct {
 
 	certDXDaemon *client.CertDXClientDaemon
 	stop         chan struct{}
+	logger       *zap.Logger
 }
 
 func MakeCertDXClientDaemon() *CertDXCaddyDaemon {
@@ -57,6 +59,9 @@ func (CertDXCaddyDaemon) CaddyModule() caddy.ModuleInfo {
 }
 
 func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
+	m.logger = ctx.Logger(m)
+	logging.SetLogger(zap.NewStdLog(m.logger))
+
 	m.certDXDaemon = client.MakeCertDXClientDaemon()
 	m.stop = make(chan struct{}, 1)
 
@@ -69,7 +74,7 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	var err error
 	m.certDXDaemon.Config.Common.ReconnectDuration, err = time.ParseDuration(m.ReconnectInterval)
 	if err != nil {
-		caddy.Log().Fatal("failed to parse interval", zap.Error(err))
+		m.logger.Fatal("failed to parse interval", zap.Error(err))
 		return err
 	}
 
@@ -84,16 +89,16 @@ func (m *CertDXCaddyDaemon) Start() error {
 	switch m.certDXDaemon.Config.Common.Mode {
 	case "http":
 		if m.certDXDaemon.Config.Http.MainServer.Url == "" {
-			caddy.Log().Fatal("http main server url should not be empty")
+			m.logger.Fatal("http main server url should not be empty")
 		}
 		go m.certDXDaemon.HttpMain(m.stop)
 	case "grpc":
 		if m.certDXDaemon.Config.GRPC.MainServer.Server == "" {
-			caddy.Log().Fatal("GRPC main server url should not be empty")
+			m.logger.Fatal("GRPC main server url should not be empty")
 		}
 		go m.certDXDaemon.GRPCMain(m.stop)
 	default:
-		caddy.Log().Fatal("not supported mode", zap.String("mode", m.certDXDaemon.Config.Common.Mode))
+		m.logger.Fatal("not supported mode", zap.String("mode", m.certDXDaemon.Config.Common.Mode))
 	}
 	return nil
 }

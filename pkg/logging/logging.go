@@ -8,10 +8,9 @@ import (
 )
 
 var debugEnabled = false
+var logger *log.Logger = log.New(os.Stderr, "", log.LstdFlags)
 
-func LogInit(logFilePath string) {
-	log.SetOutput(os.Stderr)
-
+func SetLogFile(logFilePath string) {
 	if logFilePath != "" {
 		logFile, err := os.OpenFile(logFilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
 		if err != nil {
@@ -20,8 +19,12 @@ func LogInit(logFilePath string) {
 		}
 		Info("Log to file path: %s", logFilePath)
 		mw := io.MultiWriter(os.Stderr, logFile)
-		log.SetOutput(mw)
+		logger.SetOutput(mw)
 	}
+}
+
+func SetLogger(l *log.Logger) {
+	logger = l
 }
 
 func SetDebug(enabled bool) {
@@ -30,30 +33,30 @@ func SetDebug(enabled bool) {
 
 func Debug(format string, v ...any) {
 	if debugEnabled {
-		log.Printf("[DEB] %s", fmt.Sprintf(format, v...))
+		logger.Printf("[DEB] %s", fmt.Sprintf(format, v...))
 	}
 }
 
 func Info(format string, v ...any) {
-	log.Printf("[INF] %s", fmt.Sprintf(format, v...))
+	logger.Printf("[INF] %s", fmt.Sprintf(format, v...))
 }
 
 func Notice(format string, v ...any) {
-	log.Printf("[NOT] %s", fmt.Sprintf(format, v...))
+	logger.Printf("[NOT] %s", fmt.Sprintf(format, v...))
 }
 
 func Warn(format string, v ...any) {
-	log.Printf("[WRN] %s", fmt.Sprintf(format, v...))
+	logger.Printf("[WRN] %s", fmt.Sprintf(format, v...))
 }
 
 func Error(format string, v ...any) {
-	log.Printf("[ERR] %s", fmt.Sprintf(format, v...))
+	logger.Printf("[ERR] %s", fmt.Sprintf(format, v...))
 }
 
 func Fatal(format string, v ...any) {
-	log.Fatalf("[ERR] %s", fmt.Sprintf(format, v...))
+	logger.Fatalf("[ERR] %s", fmt.Sprintf(format, v...))
 }
 
 func Panic(format string, v ...any) {
-	log.Panicf("[ERR] %s", fmt.Sprintf(format, v...))
+	logger.Panicf("[ERR] %s", fmt.Sprintf(format, v...))
 }

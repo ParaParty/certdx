@@ -32,7 +32,7 @@ var config = server.Config
 
 func init() {
 	flag.Parse()
-	logging.LogInit(*pLogPath)
+	logging.SetLogFile(*pLogPath)
 	logging.SetDebug(*pDebug)
 
 	if *help {
