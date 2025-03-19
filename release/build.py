@@ -3,6 +3,7 @@
 import subprocess
 import datetime
 import os
+import shutil
 
 subprocess.run("rm -r ./certdx_* ./caddy_certdx_*", shell=True)
 
@@ -42,6 +43,16 @@ copy_caddy = [
 copy_caddy = map(lambda x: f'../{x}', copy_caddy)
 copy_caddy = ' '.join(copy_caddy)
 
+# find xcaddy executable in PATH
+xcaddy_exec = shutil.which("xcaddy")
+if not xcaddy_exec:
+    # if not found, try finding it at go bin
+    xcaddy_exec = os.path.expanduser("~/go/bin/xcaddy")
+
+if not os.path.isfile(xcaddy_exec):
+    print("Error: xcaddy is not installed. Please install xcaddy before building caddy with certdx.")
+    xcaddy_exec = None
+
 for goos, goarch in targets:
     output_dir = f'certdx_{goos}_{goarch}'
     for exec_name, source in execs:
@@ -58,16 +69,17 @@ for goos, goarch in targets:
     subprocess.run(f"rm -r {output_dir}", shell=True)
 
     # build caddy with certdx
-    output_dir_caddy = f'caddy_certdx_{goos}_{goarch}'
-    subprocess.run(
-        f'''env GOOS="{goos}" GOARCH="{goarch}" CGO_ENABLED=0 '''
-        f'''~/go/bin/xcaddy build '''
-        f'''--with pkg.para.party/certdx/exec/caddytls=../exec/caddytls '''
-        f'''--replace pkg.para.party/certdx=../ '''
-        f'''--output {output_dir_caddy}/caddy{".exe" if goos == "windows" else ""}'''
-        , shell=True
-    )
-    subprocess.run(f"cp -r {copy_caddy} {output_dir_caddy}", shell=True)
-    subprocess.run(f"zip -r {output_dir_caddy}.zip {output_dir_caddy}", shell=True)
-    subprocess.run(f"rm -r {output_dir_caddy}", shell=True)
+    if xcaddy_exec:
+        output_dir_caddy = f'caddy_certdx_{goos}_{goarch}'
+        subprocess.run(
+            f'''env GOOS="{goos}" GOARCH="{goarch}" CGO_ENABLED=0 '''
+            f'''{xcaddy_exec} build '''
+            f'''--with pkg.para.party/certdx/exec/caddytls=../exec/caddytls '''
+            f'''--replace pkg.para.party/certdx=../ '''
+            f'''--output {output_dir_caddy}/caddy{".exe" if goos == "windows" else ""}'''
+            , shell=True
+        )
+        subprocess.run(f"cp -r {copy_caddy} {output_dir_caddy}", shell=True)
+        subprocess.run(f"zip -r {output_dir_caddy}.zip {output_dir_caddy}", shell=True)
+        subprocess.run(f"rm -r {output_dir_caddy}", shell=True)
 
