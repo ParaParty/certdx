@@ -20,8 +20,9 @@ type CertDXClientDaemon struct {
 	Config    *config.ClientConfigT
 	ClientOpt []CertDXHttpClientOption
 
-	certs map[uint64]*watchingCert
-	wg    sync.WaitGroup
+	certs    map[uint64]*watchingCert
+	wg       sync.WaitGroup
+	stopChan chan struct{}
 }
 
 type certData struct {
@@ -64,6 +65,7 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 		Config:    &config.ClientConfigT{},
 		ClientOpt: make([]CertDXHttpClientOption, 0),
 		certs:     make(map[uint64]*watchingCert),
+		stopChan:  make(chan struct{}),
 	}
 	ret.Config.SetDefault()
 	return ret
@@ -133,7 +135,7 @@ func (r *CertDXClientDaemon) CaddyAddCert(name string, domains []string) error {
 	return nil
 }
 
-func (r *CertDXClientDaemon) stop() {
+func (r *CertDXClientDaemon) stopWatchingCert() {
 	for _, c := range r.certs {
 		close(*c.Stop.Load())
 	}
@@ -196,7 +198,7 @@ func (r *CertDXClientDaemon) httpPollingCert(cert *watchingCert) {
 	}
 }
 
-func (r *CertDXClientDaemon) HttpMain(stop chan struct{}) {
+func (r *CertDXClientDaemon) HttpMain() {
 	for _, c := range r.certs {
 		r.wg.Add(1)
 		go func(_c *watchingCert) {
@@ -205,18 +207,14 @@ func (r *CertDXClientDaemon) HttpMain(stop chan struct{}) {
 		}(c)
 	}
 
-	<-stop
-	go func() {
-		<-stop
-		logging.Fatal("Fast dying...")
-	}()
+	<-r.stopChan
 
 	logging.Info("Stopping Http client")
-	r.stop()
+	r.stopWatchingCert()
 	r.wg.Wait()
 }
 
-func (r *CertDXClientDaemon) GRPCMain(stop chan struct{}) {
+func (r *CertDXClientDaemon) GRPCMain() {
 	var standByClient *CertDXgRPCClient
 	standByExists := r.Config.GRPC.StandbyServer.Server != ""
 
@@ -283,7 +281,8 @@ func (r *CertDXClientDaemon) GRPCMain(stop chan struct{}) {
 				}()
 
 				go func() {
-					standByClient.Kill <- <-*mainClient.Received.Load()
+					<-*mainClient.Received.Load()
+					standByClient.Kill()
 				}()
 			}
 
@@ -298,20 +297,21 @@ func (r *CertDXClientDaemon) GRPCMain(stop chan struct{}) {
 		}
 	}()
 
-	<-stop
-	go func() {
-		<-stop
-		logging.Fatal("Fast dying...")
-	}()
+	<-r.stopChan
 
 	logging.Info("Stopping gRPC client")
-	r.stop()
-	kill <- struct{}{}
-	mainClient.Kill <- struct{}{}
+	r.stopWatchingCert()
+	close(kill)
+	mainClient.Kill()
 	if standByClient != nil {
-		standByClient.Kill <- struct{}{}
+		standByClient.Kill()
 	}
 	r.wg.Wait()
+}
+
+func (r *CertDXClientDaemon) Stop() {
+	close(r.stopChan)
+	r.stopChan = nil
 }
 
 func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash uint64) (*tls.Certificate, error) {

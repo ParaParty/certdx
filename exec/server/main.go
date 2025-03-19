@@ -93,7 +93,7 @@ func main() {
 		go server.HttpSrv()
 	}
 
-	stopSDS := make(chan struct{}, 1)
+	stopSDS := make(chan struct{})
 	if config.GRPCSDSServer.Enabled {
 		go server.SDSSrv(stopSDS)
 	}
@@ -109,6 +109,6 @@ func main() {
 	}()
 
 	if config.GRPCSDSServer.Enabled {
-		stopSDS <- struct{}{}
+		close(stopSDS)
 	}
 }
