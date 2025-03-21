@@ -45,20 +45,12 @@ func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key
 	return
 }
 
-var acme *ACME
-
-func InitACME(c *config.ServerConfigT) error {
+func MakeACME(c *config.ServerConfig) (*ACME, error) {
 	user, err := makeACMEUser(c)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	acme, err = makeACME(c, user)
-
-	return err
-}
-
-func makeACME(c *config.ServerConfigT, user *ACMEUser) (*ACME, error) {
 	instance := &ACME{
 		retry:        c.ACME.RetryCount,
 		needNotAfter: isACMEProviderGoogle(c.ACME.Provider),
@@ -67,7 +59,6 @@ func makeACME(c *config.ServerConfigT, user *ACMEUser) (*ACME, error) {
 	config.CADirURL = acmeProvidersMap[c.ACME.Provider]
 	config.Certificate.KeyType = certcrypto.EC256
 
-	var err error
 	instance.Client, err = lego.NewClient(config)
 	if err != nil {
 		return nil, fmt.Errorf("unexpected error constructing acme client: %w", err)
@@ -79,8 +70,4 @@ func makeACME(c *config.ServerConfigT, user *ACMEUser) (*ACME, error) {
 	}
 
 	return instance, nil
-}
-
-func GetACME() *ACME {
-	return acme
 }

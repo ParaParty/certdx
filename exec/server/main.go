@@ -28,12 +28,15 @@ var (
 	pDebug   = flag.BoolP("debug", "d", false, "Enable debug log")
 )
 
-var config = server.Config
+var cdxsrv *server.CertDXServer
 
 func init() {
 	flag.Parse()
 	logging.SetLogFile(*pLogPath)
 	logging.SetDebug(*pDebug)
+
+	cdxsrv = server.MakeCertDXServer()
+	config := &cdxsrv.Config
 
 	if *help {
 		flag.PrintDefaults()
@@ -81,21 +84,18 @@ func init() {
 		logging.Fatal("Invalid config, err: %v", err)
 	}
 
-	if err := acme.InitACME(config); err != nil {
-		logging.Fatal("Failed to init ACME client, err: %s", err)
+	if err := cdxsrv.Init(); err != nil {
+		logging.Fatal("Failed to init certdx server, err: %s", err)
 	}
-
-	server.InitCache()
 }
 
 func main() {
-	if config.HttpServer.Enabled {
-		go server.HttpSrv()
+	if cdxsrv.Config.HttpServer.Enabled {
+		go cdxsrv.HttpSrv()
 	}
 
-	stopSDS := make(chan struct{})
-	if config.GRPCSDSServer.Enabled {
-		go server.SDSSrv(stopSDS)
+	if cdxsrv.Config.GRPCSDSServer.Enabled {
+		go cdxsrv.SDSSrv()
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -108,7 +108,5 @@ func main() {
 		logging.Fatal("Fast dying...")
 	}()
 
-	if config.GRPCSDSServer.Enabled {
-		close(stopSDS)
-	}
+	cdxsrv.Stop()
 }

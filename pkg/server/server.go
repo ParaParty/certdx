@@ -39,36 +39,62 @@ type ServerCertCacheEntry struct {
 	cert    CertT
 	mutex   sync.Mutex
 
-	Listening atomic.Uint64
-	Updated   atomic.Pointer[chan struct{}]
-	Stop      atomic.Pointer[chan struct{}]
+	Subscribing atomic.Uint64
+	Updated     atomic.Pointer[chan struct{}]
+	Stop        atomic.Pointer[chan struct{}]
 }
 
-type ServerCertCacheT struct {
+type ServerCertCache struct {
 	entries map[uint64]*ServerCertCacheEntry
 	mutex   sync.Mutex
 }
 
-var serverCacheFile = MakeServerCacheFile()
-var serverCertCache = makeServerCertCache()
-var Config = &config.ServerConfigT{}
+type CertDXServer struct {
+	Config config.ServerConfig
+
+	acme      *acme.ACME
+	certCache ServerCertCache
+	cacheFile ServerCacheFile
+	stop      chan struct{}
+}
+
+func MakeCertDXServer() *CertDXServer {
+	ret := &CertDXServer{
+		Config: config.ServerConfig{},
+
+		certCache: makeServerCertCache(),
+		cacheFile: MakeServerCacheFile(),
+		stop:      make(chan struct{}),
+	}
+
+	return ret
+}
 
 func (c *CertT) IsValid() bool {
 	return time.Now().Before(c.ValidBefore)
 }
 
-func makeServerCertCache() ServerCertCacheT {
-	return ServerCertCacheT{
+func makeServerCertCache() ServerCertCache {
+	return ServerCertCache{
 		entries: make(map[uint64]*ServerCertCacheEntry),
 	}
 }
 
-func InitCache() {
-	if err := serverCacheFile.loadCacheFile(); err != nil {
-		logging.Warn("Failed to load cache file, err: %s", err)
+func (s *CertDXServer) Init() error {
+	var err error
+
+	s.acme, err = acme.MakeACME(&s.Config)
+	if err != nil {
+		return fmt.Errorf("initailizing ACME failed, err: %s", err)
 	}
 
-	go serverCacheFile.listenUpdate()
+	if err = s.loadCacheFile(); err != nil {
+		// It's okay that previous saved cert can not be loaded, just log and continue to run
+		logging.Warn("load cache file failed, err: %s", err)
+	}
+	go s.cacheFile.listenUpdate()
+
+	return nil
 }
 
 func MakeServerCacheFile() ServerCacheFile {
@@ -100,8 +126,8 @@ func (s *ServerCacheFile) ReadCacheFile() error {
 	return nil
 }
 
-func (s *ServerCacheFile) loadCacheFile() error {
-	err := s.ReadCacheFile()
+func (s *CertDXServer) loadCacheFile() error {
+	err := s.cacheFile.ReadCacheFile()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -110,18 +136,18 @@ func (s *ServerCacheFile) loadCacheFile() error {
 		}
 	}
 
-	serverCertCache.mutex.Lock()
-	for key, cache := range s.entries {
+	s.certCache.mutex.Lock()
+	for key, cache := range s.cacheFile.entries {
 		if cache.Cert.IsValid() {
-			entry := serverCertCache.getEntryNoLock(cache.Domains)
+			entry := s.getCertCacheEntryNoLock(cache.Domains)
 			entry.mutex.Lock()
 			entry.cert = cache.Cert
 			entry.mutex.Unlock()
 		} else {
-			delete(s.entries, key)
+			delete(s.cacheFile.entries, key)
 		}
 	}
-	serverCertCache.mutex.Unlock()
+	s.certCache.mutex.Unlock()
 
 	logging.Info("Previous cache loaded.")
 	return nil
@@ -162,9 +188,9 @@ func (s *ServerCacheFile) listenUpdate() {
 	}
 }
 
-func (s *ServerCertCacheT) getEntryNoLock(domains []string) *ServerCertCacheEntry {
+func (s *CertDXServer) getCertCacheEntryNoLock(domains []string) *ServerCertCacheEntry {
 	entryKey := utils.DomainsAsKey(domains)
-	entry, ok := s.entries[entryKey]
+	entry, ok := s.certCache.entries[entryKey]
 	if ok {
 		return entry
 	}
@@ -177,14 +203,14 @@ func (s *ServerCertCacheT) getEntryNoLock(domains []string) *ServerCertCacheEntr
 	stop := make(chan struct{})
 	entry.Stop.Store(&stop)
 
-	s.entries[entryKey] = entry
+	s.certCache.entries[entryKey] = entry
 	return entry
 }
 
-func (s *ServerCertCacheT) GetEntry(domains []string) *ServerCertCacheEntry {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	return s.getEntryNoLock(domains)
+func (s *CertDXServer) GetCertCacheEntry(domains []string) *ServerCertCacheEntry {
+	s.certCache.mutex.Lock()
+	defer s.certCache.mutex.Unlock()
+	return s.getCertCacheEntryNoLock(domains)
 }
 
 func (c *ServerCertCacheEntry) Cert() CertT {
@@ -193,22 +219,20 @@ func (c *ServerCertCacheEntry) Cert() CertT {
 	return c.cert
 }
 
-func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
+func (s *CertDXServer) Renew(c *ServerCertCacheEntry, retry bool) (bool, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	logging.Info("Renew cert: %v", c.domains)
 	if !c.cert.IsValid() {
-		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(Config.ACME.CertLifeTimeDuration)
-
-		acme := acme.GetACME()
+		newValidBefore := time.Now().Truncate(1 * time.Hour).Add(s.Config.ACME.CertLifeTimeDuration)
 
 		var fullchain, key []byte
 		var err error
 		if retry {
-			fullchain, key, err = acme.RetryObtain(c.domains, newValidBefore.Add(Config.ACME.RenewTimeLeftDuration))
+			fullchain, key, err = s.acme.RetryObtain(c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
 		} else {
-			fullchain, key, err = acme.Obtain(c.domains, newValidBefore.Add(Config.ACME.RenewTimeLeftDuration))
+			fullchain, key, err = s.acme.Obtain(c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
 		}
 		if err != nil {
 			return false, err
@@ -222,7 +246,7 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 		}
 		c.cert = newCert
 
-		serverCacheFile.update <- &ServerCacheFileEntry{
+		s.cacheFile.update <- &ServerCacheFileEntry{
 			Domains: c.domains,
 			Cert:    newCert,
 		}
@@ -235,13 +259,13 @@ func (c *ServerCertCacheEntry) Renew(retry bool) (bool, error) {
 	return false, nil
 }
 
-func (c *ServerCertCacheEntry) certWatchDog() {
-	logging.Info("Starting cert watch dog for: %v", c.domains)
-	defer logging.Info("Cert watch dog for: %v stopped", c.domains)
+func (s *CertDXServer) subscribeCertCacheEntry(c *ServerCertCacheEntry) {
+	logging.Info("Start subscribing cert: %v", c.domains)
+	defer logging.Info("Stopped subscribing cert: %v", c.domains)
 
 	for {
 		logging.Info("Server renew: %v", c.domains)
-		changed, err := c.Renew(true)
+		changed, err := s.Renew(c, true)
 		if err != nil {
 			logging.Error("Failed to renew cert %s: %s", c.domains, err)
 		} else if changed {
@@ -250,7 +274,7 @@ func (c *ServerCertCacheEntry) certWatchDog() {
 			close(*c.Updated.Swap(&newUpdated))
 		}
 
-		t := time.NewTimer(Config.ACME.RenewTimeLeftDuration / 4)
+		t := time.NewTimer(s.Config.ACME.RenewTimeLeftDuration / 4)
 		select {
 		case <-t.C:
 			// Do next check
@@ -261,22 +285,23 @@ func (c *ServerCertCacheEntry) certWatchDog() {
 	}
 }
 
-func (c *ServerCertCacheEntry) Subscribe() {
-	if c.Listening.Add(1) == 1 {
-		go c.certWatchDog()
+func (s *CertDXServer) Subscribe(c *ServerCertCacheEntry) {
+	if c.Subscribing.Add(1) == 1 {
+		go s.subscribeCertCacheEntry(c)
 	}
 }
 
-func (c *ServerCertCacheEntry) Release() {
-	if c.Listening.Add(math.MaxUint64) == 0 {
+func (s *CertDXServer) Release(c *ServerCertCacheEntry) {
+	if c.Subscribing.Add(math.MaxUint64) == 0 {
 		*c.Stop.Load() <- struct{}{}
 	}
 }
 
-func (c *ServerCertCacheEntry) IsSubcribing() bool {
-	return c.Listening.Load() != 0
+func (s *CertDXServer) IsSubcribing(c *ServerCertCacheEntry) bool {
+	return c.Subscribing.Load() != 0
 }
 
-func domainsAllowed(domains []string) bool {
-	return utils.DomainsAllowed(Config.ACME.AllowedDomains, domains)
+func (s *CertDXServer) Stop() {
+	close(s.stop)
+	s.stop = nil
 }

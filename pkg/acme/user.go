@@ -44,7 +44,7 @@ func parsePEM(pem []byte) (crypto.PrivateKey, error) {
 	return key, nil
 }
 
-func makeACMEUser(c *config.ServerConfigT) (*ACMEUser, error) {
+func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 	keyPath, err := utils.GetACMEPrivateKeySavePath(c.ACME.Email, c.ACME.Provider)
 	if err != nil {
 		return nil, err
