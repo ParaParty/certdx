@@ -88,7 +88,7 @@ func (p *HttpProvider) Validate() error {
 
 type GoogleCloudCredential map[string]string
 
-type ServerConfigT struct {
+type ServerConfig struct {
 	ACME ACMEConfig `toml:"ACME" json:"acme,omitempty"`
 
 	GoogleCloudCredential GoogleCloudCredential `toml:"GoogleCloudCredential" json:"google_cloud_credential,omitempty"`
@@ -166,7 +166,7 @@ func (c *GRPCServerConfig) Validate() error {
 	return nil
 }
 
-func (c *ServerConfigT) SetDefault() {
+func (c *ServerConfig) SetDefault() {
 	c.ACME = ACMEConfig{
 		RetryCount:            5,
 		CertLifeTimeDuration:  168 * time.Hour,
@@ -186,7 +186,7 @@ func (c *ServerConfigT) SetDefault() {
 	}
 }
 
-func (c *ServerConfigT) Validate() error {
+func (c *ServerConfig) Validate() error {
 	ret := appengine.MultiError{}
 
 	if err := c.ACME.Validate(); err != nil {

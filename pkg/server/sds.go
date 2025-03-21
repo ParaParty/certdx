@@ -27,7 +27,8 @@ const domainKey = "domains"
 
 type MySDS struct {
 	secretv3.UnimplementedSecretDiscoveryServiceServer
-	kill chan struct{}
+	cdxsrv *CertDXServer
+	kill   chan struct{}
 }
 
 func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSecretsServer) error {
@@ -117,7 +118,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 						errChan <- fmt.Errorf("bad metadata, domain pack should be an array")
 						return
 					}
-					if !domainsAllowed(domains) {
+					if !utils.DomainsAllowed(sds.cdxsrv.Config.ACME.AllowedDomains, domains) {
 						errChan <- fmt.Errorf("domains %v not allowed", domains)
 						return
 					}
@@ -131,7 +132,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 			for name, domains := range packRequests {
 				logging.Info("Handling pack %s with domains %v in response to %s", name, domains, peer)
 
-				entry := serverCertCache.GetEntry(domains)
+				entry := sds.cdxsrv.GetCertCacheEntry(domains)
 
 				reqChan := make(chan *discoveryv3.DiscoveryRequest)
 				dispatch[name] = reqChan
@@ -161,8 +162,8 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCert
 
 	cert_ := entry.Cert()
 
-	entry.Subscribe()
-	defer entry.Release()
+	sds.cdxsrv.Subscribe(entry)
+	defer sds.cdxsrv.Release(entry)
 
 	if !cert_.IsValid() {
 		<-*entry.Updated.Load()
@@ -279,7 +280,7 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 	return handler(ctx, req)
 }
 
-func SDSSrv(stop chan struct{}) {
+func (s *CertDXServer) SDSSrv() {
 	server := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(getTLSConfig())),
 		grpc.UnaryInterceptor(clientTLSLog),
@@ -294,14 +295,15 @@ func SDSSrv(stop chan struct{}) {
 	)
 
 	sds := &MySDS{
-		kill: make(chan struct{}),
+		cdxsrv: s,
+		kill:   make(chan struct{}),
 	}
 	secretv3.RegisterSecretDiscoveryServiceServer(server, sds)
 
 	go func() {
-		l, err := net.Listen("tcp", Config.GRPCSDSServer.Listen)
+		l, err := net.Listen("tcp", s.Config.GRPCSDSServer.Listen)
 		if err != nil {
-			logging.Fatal("Failed to listen at %s, err: %s", Config.GRPCSDSServer.Listen, err)
+			logging.Fatal("Failed to listen at %s, err: %s", s.Config.GRPCSDSServer.Listen, err)
 		}
 		logging.Info("SDS server started")
 		if err := server.Serve(l); err != nil {
@@ -309,7 +311,7 @@ func SDSSrv(stop chan struct{}) {
 		}
 	}()
 
-	<-stop
+	<-s.stop
 
 	close(sds.kill)
 	server.GracefulStop()

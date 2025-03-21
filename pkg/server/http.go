@@ -10,20 +10,21 @@ import (
 
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/types"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
-func apiHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == Config.HttpServer.APIPath {
+func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == s.Config.HttpServer.APIPath {
 		switch r.Method {
 		case "POST":
-			if checkAuthorization(r) {
+			if s.checkAuthorization(r) {
 				logstr := fmt.Sprintf("Http received cert request from: %s", r.RemoteAddr)
 				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 					logstr = fmt.Sprintf("%s, xff: %s", logstr, xff)
 				}
 				logging.Info("%s", logstr)
 
-				handleCertReq(&w, r)
+				s.handleCertReq(&w, r)
 				return
 			}
 		default:
@@ -32,15 +33,15 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "", http.StatusNotFound)
 }
 
-func checkAuthorization(r *http.Request) bool {
-	if Config.HttpServer.Token == "" {
+func (s *CertDXServer) checkAuthorization(r *http.Request) bool {
+	if s.Config.HttpServer.Token == "" {
 		return true
 	}
 
 	auth := r.Header.Get("Authorization")
 	if auth != "" && strings.HasPrefix(auth, "Token ") {
 		token := strings.TrimPrefix(auth, "Token ")
-		if token == Config.HttpServer.Token {
+		if token == s.Config.HttpServer.Token {
 			return true
 		}
 	}
@@ -50,7 +51,7 @@ func checkAuthorization(r *http.Request) bool {
 	return false
 }
 
-func handleCertReq(w *http.ResponseWriter, r *http.Request) {
+func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	var req types.HttpCertReq
 	var resp []byte
 	var cachedCert *ServerCertCacheEntry
@@ -64,16 +65,16 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 		goto ERR
 	}
 
-	if !domainsAllowed(req.Domains) {
+	if !utils.DomainsAllowed(s.Config.ACME.AllowedDomains, req.Domains) {
 		logging.Warn("Requested domains not allowed: %v", req.Domains)
 		(*w).Header().Set("Content-Type", "application/json")
 		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
 		return
 	}
 
-	cachedCert = serverCertCache.GetEntry(req.Domains)
-	if !cachedCert.IsSubcribing() {
-		_, err = cachedCert.Renew(false)
+	cachedCert = s.GetCertCacheEntry(req.Domains)
+	if !s.IsSubcribing(cachedCert) {
+		_, err = s.Renew(cachedCert, false)
 		if err != nil {
 			goto ERR
 		}
@@ -81,7 +82,7 @@ func handleCertReq(w *http.ResponseWriter, r *http.Request) {
 
 	cert = cachedCert.Cert()
 	resp, err = json.Marshal(&types.HttpCertResp{
-		RenewTimeLeft: Config.ACME.RenewTimeLeftDuration,
+		RenewTimeLeft: s.Config.ACME.RenewTimeLeftDuration,
 		FullChain:     cert.FullChain,
 		Key:           cert.Key,
 	})
@@ -99,11 +100,11 @@ ERR:
 	http.Error(*w, "", http.StatusInternalServerError)
 }
 
-func serveHttps() {
-	entry := serverCertCache.GetEntry(Config.HttpServer.Names)
+func (s *CertDXServer) serveHttps() {
+	entry := s.GetCertCacheEntry(s.Config.HttpServer.Names)
 	cert_ := entry.Cert()
 
-	entry.Subscribe()
+	s.Subscribe(entry)
 
 	if !cert_.IsValid() {
 		<-*entry.Updated.Load()
@@ -117,7 +118,7 @@ func serveHttps() {
 		}
 
 		server := http.Server{
-			Addr: Config.HttpServer.Listen,
+			Addr: s.Config.HttpServer.Listen,
 		}
 
 		server.TLSConfig = &tls.Config{
@@ -130,19 +131,38 @@ func serveHttps() {
 			err := server.ListenAndServeTLS("", "")
 			logging.Info("Https server stopped: %s", err)
 		}()
-		<-*entry.Updated.Load()
-		server.Close()
+
+		select {
+		case <-*entry.Updated.Load():
+			server.Close()
+		case <-s.stop:
+			server.Close()
+			return
+		}
 	}
 }
 
-func HttpSrv() {
-	http.HandleFunc("/", apiHandler)
+func (s *CertDXServer) serveHttp() {
+	server := http.Server{
+		Addr: s.Config.HttpServer.Listen,
+	}
 
-	if !Config.HttpServer.Secure {
+	go func() {
 		logging.Info("Http server started")
-		err := http.ListenAndServe(Config.HttpServer.Listen, nil)
+		err := server.ListenAndServe()
 		logging.Info("Http server stopped: %s", err)
+	}()
+
+	<-s.stop
+	server.Close()
+}
+
+func (s *CertDXServer) HttpSrv() {
+	http.HandleFunc("/", s.apiHandler)
+
+	if !s.Config.HttpServer.Secure {
+		s.serveHttp()
 	} else {
-		serveHttps()
+		s.serveHttps()
 	}
 }

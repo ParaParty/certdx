@@ -13,7 +13,7 @@ import (
 	"pkg.para.party/certdx/pkg/config"
 )
 
-func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfigT) error {
+func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig) error {
 	typ, clg, err := getChallenger(legoCfg, p)
 	if err != nil {
 		return fmt.Errorf("unexpected error constructing cloudflare dns client: %w", err)
@@ -40,7 +40,7 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfigT
 	return nil
 }
 
-func getChallenger(legoCfg *lego.Config, p *config.ServerConfigT) (string, challenge.Provider, error) {
+func getChallenger(legoCfg *lego.Config, p *config.ServerConfig) (string, challenge.Provider, error) {
 	switch p.ACME.ChallengeType {
 	case config.ChallengeTypeDns01:
 		switch p.DnsProvider.Type {
