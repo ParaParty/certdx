@@ -214,6 +214,16 @@ func (r *CertDXClientDaemon) HttpMain() {
 	r.wg.Wait()
 }
 
+type GRPC_CLIENT_STATE int
+
+const (
+	GRPC_STATE_STOP = GRPC_CLIENT_STATE(iota)
+	GRPC_STATE_MAIN
+	GRPC_STATE_FAILOVER
+	GRPC_STATE_TRY_FALLBACK
+	GRPC_STATE_RESTART_MAIN
+)
+
 func (r *CertDXClientDaemon) GRPCMain() {
 	var standByClient *CertDXgRPCClient
 	standByExists := r.Config.GRPC.StandbyServer.Server != ""
@@ -222,86 +232,174 @@ func (r *CertDXClientDaemon) GRPCMain() {
 	if standByExists {
 		standByClient = MakeCertDXgRPCClient(&r.Config.GRPC.StandbyServer, r.certs)
 	}
-	kill := make(chan struct{}, 1)
+	stateChan := make(chan GRPC_CLIENT_STATE, 1)
 
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		retryCount := 0
+		mainRetryCount := 0
+		StandByActive := atomic.Bool{}
+		StandByActive.Store(false)
+		resetChan_ := make(chan struct{})
+		resetChan := atomic.Pointer[chan struct{}]{}
+		resetChan.Store(&resetChan_)
+
+		resetFunc := func() {
+			newReset := make(chan struct{})
+			close(*resetChan.Swap(&newReset))
+		}
+
 		for {
-			logging.Info("Starting gRPC main stream")
-			startTime := time.Now()
-			err := mainClient.Stream()
-			if err != nil {
-				logging.Info("gRPC main stream stopped: %s", err)
-				if _, ok := err.(*killed); ok {
-					return
-				}
-
-				if time.Now().Before(startTime.Add(5 * time.Minute)) {
-					retryCount += 1
-				} else {
-					retryCount = 0
-					continue
-				}
-			}
-
-			logging.Info("Current main server retry count: %d", retryCount)
-			if retryCount < r.Config.Common.RetryCount {
-				time.Sleep(15 * time.Second)
-				continue
-			}
-
-			if standByExists && !standByClient.Running.Load() {
+			state := <-stateChan
+			logging.Debug("Process grpc client state: %d", state)
+			switch state {
+			case GRPC_STATE_STOP:
+				resetFunc()
+				return
+			case GRPC_STATE_MAIN:
+				r.wg.Add(1)
 				go func() {
+					defer func() {
+						r.wg.Done()
+						logging.Debug("Main stream gorountine exit")
+					}()
+					logging.Info("Starting gRPC main stream")
 					startTime := time.Now()
-					retryCount := 0
+					err := mainClient.Stream()
+					logging.Info("gRPC main stream stopped: %s", err)
+					if _, ok := err.(*killed); ok {
+						stateChan <- GRPC_STATE_STOP
+						return
+					}
+
+					if time.Now().Before(startTime.Add(5 * time.Minute)) {
+						mainRetryCount += 1
+					} else {
+						mainRetryCount = 0
+						stateChan <- GRPC_STATE_MAIN
+						return
+					}
+
+					logging.Info("Current main server retry count: %d", mainRetryCount)
+					if mainRetryCount < r.Config.Common.RetryCount {
+						select {
+						case <-time.After(15 * time.Second):
+							stateChan <- GRPC_STATE_MAIN
+							return
+						case <-r.stopChan:
+							return
+						}
+					}
+
+					logging.Info("Retry limite for main stream reached")
+					mainRetryCount = 0
+					if standByExists && !StandByActive.Load() {
+						logging.Info("Start trying standby stream")
+						stateChan <- GRPC_STATE_FAILOVER
+					} else {
+						logging.Info("Sleep %s", r.Config.Common.ReconnectInterval)
+						stateChan <- GRPC_STATE_RESTART_MAIN
+					}
+				}()
+			case GRPC_STATE_FAILOVER:
+				StandByActive.Store(true)
+				r.wg.Add(1)
+				go func() {
+					defer func() {
+						r.wg.Done()
+						StandByActive.Store(false)
+						logging.Debug("Standby goroutine exit")
+					}()
+					standbyRetryCount := 0
 					for {
+						select {
+						case <-*resetChan.Load():
+							return
+						default:
+						}
 						logging.Info("Starting gRPC standby stream")
+						startTime := time.Now()
 						err := standByClient.Stream()
 						logging.Info("gRPC standby stream stopped: %s", err)
 						if _, ok := err.(*killed); ok {
 							return
 						}
+
 						if time.Now().Before(startTime.Add(5 * time.Minute)) {
-							retryCount += 1
+							standbyRetryCount += 1
 						} else {
-							retryCount = 0
+							standbyRetryCount = 0
 							continue
 						}
-						logging.Info("Current standby server retry count: %d", retryCount)
-						if retryCount < r.Config.Common.RetryCount {
-							time.Sleep(15 * time.Second)
-							continue
+
+						logging.Info("Current standby server retry count: %d", standbyRetryCount)
+						if standbyRetryCount < r.Config.Common.RetryCount {
+							select {
+							case <-time.After(15 * time.Second):
+								continue
+							case <-*resetChan.Load():
+								logging.Debug("Standby goroutine reset")
+								return
+							}
 						}
-						retryCount = 0
-						logging.Info("Will reconnect standby server after %s", r.Config.Common.ReconnectInterval)
-						<-time.After(r.Config.Common.ReconnectDuration)
+
+						logging.Info("Retry limite for standby stream reached, sleep %s", r.Config.Common.ReconnectInterval)
+						standbyRetryCount = 0
+						select {
+						case <-time.After(r.Config.Common.ReconnectDuration):
+							continue
+						case <-*resetChan.Load():
+							logging.Debug("Standby goroutine reset")
+							return
+						}
 					}
 				}()
-
+				stateChan <- GRPC_STATE_TRY_FALLBACK
+			case GRPC_STATE_TRY_FALLBACK:
+				r.wg.Add(1)
 				go func() {
-					<-*mainClient.Received.Load()
-					standByClient.Kill()
+					defer func() {
+						r.wg.Done()
+						logging.Debug("Fallback goroutine exit")
+					}()
+					select {
+					case <-*mainClient.Received.Load():
+						standByClient.Kill()
+						resetFunc()
+					case <-*resetChan.Load():
+						logging.Debug("Fallback goroutine reset")
+						return
+					}
 				}()
-			}
-
-			retryCount = 0
-			logging.Info("Will reconnect main server after %s", r.Config.Common.ReconnectInterval)
-			select {
-			case <-time.After(r.Config.Common.ReconnectDuration):
-				continue
-			case <-kill:
-				return
+				stateChan <- GRPC_STATE_RESTART_MAIN
+			case GRPC_STATE_RESTART_MAIN:
+				r.wg.Add(1)
+				go func() {
+					defer func() {
+						r.wg.Done()
+						logging.Debug("Restart goroutine exit")
+					}()
+					logging.Debug("Reconnect duration is: %s", r.Config.Common.ReconnectDuration)
+					select {
+					case <-time.After(r.Config.Common.ReconnectDuration):
+						stateChan <- GRPC_STATE_MAIN
+					case <-*resetChan.Load():
+						logging.Debug("Restart goroutine reset")
+						return
+					}
+				}()
 			}
 		}
 	}()
 
+	stateChan <- GRPC_STATE_MAIN
+
 	<-r.stopChan
+
+	stateChan <- GRPC_STATE_STOP
 
 	logging.Info("Stopping gRPC client")
 	r.stopWatchingCert()
-	close(kill)
 	mainClient.Kill()
 	if standByClient != nil {
 		standByClient.Kill()

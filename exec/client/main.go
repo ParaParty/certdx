@@ -70,6 +70,7 @@ func init() {
 	if err != nil {
 		logging.Fatal("Failed to parse interval, err: %s", err)
 	}
+	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)
 
 	if len(certDXDaemon.Config.Certifications) == 0 {
 		logging.Fatal("No certification configured")
