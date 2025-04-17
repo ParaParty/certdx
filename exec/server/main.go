@@ -32,11 +32,6 @@ var cdxsrv *server.CertDXServer
 
 func init() {
 	flag.Parse()
-	logging.SetLogFile(*pLogPath)
-	logging.SetDebug(*pDebug)
-
-	cdxsrv = server.MakeCertDXServer()
-	config := &cdxsrv.Config
 
 	if *help {
 		flag.PrintDefaults()
@@ -47,6 +42,13 @@ func init() {
 		fmt.Printf("Certdx server %s, built at %s\n", buildCommit, buildDate)
 		os.Exit(0)
 	}
+
+	logging.SetLogFile(*pLogPath)
+	logging.SetDebug(*pDebug)
+	logging.Info("\nStarting certdx server %s, built at %s", buildCommit, buildDate)
+
+	cdxsrv = server.MakeCertDXServer()
+	config := &cdxsrv.Config
 
 	config.SetDefault()
 	cfile, err := os.Open(*pConf)
