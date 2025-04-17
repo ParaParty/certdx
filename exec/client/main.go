@@ -32,10 +32,6 @@ var certDXDaemon *client.CertDXClientDaemon
 
 func init() {
 	flag.Parse()
-	logging.SetLogFile(*pLogPath)
-	logging.SetDebug(*pDebug)
-
-	certDXDaemon = client.MakeCertDXClientDaemon()
 
 	if *help {
 		flag.PrintDefaults()
@@ -46,6 +42,12 @@ func init() {
 		fmt.Printf("Certdx client %s, built at %s\n", buildCommit, buildDate)
 		os.Exit(0)
 	}
+
+	logging.SetLogFile(*pLogPath)
+	logging.SetDebug(*pDebug)
+	logging.Info("\nStarting certdx client %s, built at %s", buildCommit, buildDate)
+
+	certDXDaemon = client.MakeCertDXClientDaemon()
 
 	if *test {
 		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
