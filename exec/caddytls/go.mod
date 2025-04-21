@@ -10,7 +10,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.9.1
 	github.com/caddyserver/certmagic v0.23.0
 	go.uber.org/zap v1.27.0
-	pkg.para.party/certdx v0.3.0
+	pkg.para.party/certdx v0.4.0
 )
 
 require (
