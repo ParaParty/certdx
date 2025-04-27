@@ -2,11 +2,8 @@
 name: release
 
 on:
-  pull_request:
-  push:
-    # run only against tags
-    tags:
-      - "v*"
+  release:
+    types: [created]
 
 permissions:
   contents: write
