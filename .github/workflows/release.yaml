@@ -1,0 +1,68 @@
+# .github/workflows/release.yml
+name: release
+
+on:
+  pull_request:
+  push:
+    # run only against tags
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+     - name: Checkout repository
+       uses: actions/checkout@v4
+
+     - name: Set up Go
+       uses: actions/setup-go@v5
+       with:
+         go-version: 1.24.2
+     
+     - name: Set up Python
+       uses: actions/setup-python@v5
+       with:
+         python-version: '3.12'
+
+     - name: Install Go dependencies
+       run: |
+         go mod tidy
+         go mod vendor
+         go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+     - name: Run build script
+       run: |
+         cd release
+         python3 build.py
+
+     - name: Collect artifacts
+       uses: actions/upload-artifact@v4
+       with:
+         name: build-artifacts
+         path: |
+           release/*.zip
+         if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+     - name: Checkout repository
+       uses: actions/checkout@v4
+
+     - name: Download artifacts
+       uses: actions/download-artifact@v4
+       with:
+        name: build-artifacts
+
+     - name: Create release
+       uses: softprops/action-gh-release@v2
+       with:
+         files: |
+           release/*.zip
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
