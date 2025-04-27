@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
      - name: Checkout repository
@@ -47,22 +47,11 @@ jobs:
            release/*.zip
          if-no-files-found: error
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-     - name: Checkout repository
-       uses: actions/checkout@v4
-
-     - name: Download artifacts
-       uses: actions/download-artifact@v4
-       with:
-        name: build-artifacts
-
-     - name: Create release
+     - name: Upload release
        uses: softprops/action-gh-release@v2
        with:
          files: |
            release/*.zip
+    
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
