@@ -20,6 +20,7 @@ targets = [
     ['linux',   'mips'],
     ['linux',   'mipsle'],
     ['windows', 'amd64'],
+    ['darwin',  'arm64'],
 ]
 
 execs = [
