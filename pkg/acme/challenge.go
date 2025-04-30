@@ -47,7 +47,7 @@ func getChallenger(legoCfg *lego.Config, p *config.ServerConfig) (string, challe
 		case config.DnsProviderTypeCloudflare:
 			return makeCloudflareProvider(legoCfg, *p.DnsProvider)
 		case config.DnsProviderTypeTencentCloud:
-			return makeTencentCLoudProvider(legoCfg, *p.DnsProvider)
+			return makeTencentCloudProvider(legoCfg, *p.DnsProvider)
 		default:
 			return "", nil, fmt.Errorf("unknown dns provider type: %s", p.DnsProvider.Type)
 		}
@@ -89,7 +89,7 @@ func makeCloudflareProvider(legoCfg *lego.Config, p config.DnsProvider) (string,
 	return config.ChallengeTypeDns01, c, err
 }
 
-func makeTencentCLoudProvider(_ *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
+func makeTencentCloudProvider(_ *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
 	tencentCloudConfig := tencentcloud.NewDefaultConfig()
 	tencentCloudConfig.SecretID = p.SecretID
 	tencentCloudConfig.SecretKey = p.SecretKey
