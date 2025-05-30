@@ -42,6 +42,7 @@ jobs:
          name: build-artifacts
          path: |
            release/*.zip
+           release/*.tar.gz
          if-no-files-found: error
 
      - name: Upload release
@@ -49,6 +50,7 @@ jobs:
        with:
          files: |
            release/*.zip
+           release/*.tar.gz
     
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

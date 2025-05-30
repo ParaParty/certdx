@@ -5,24 +5,28 @@ import datetime
 import os
 import shutil
 
-subprocess.run("rm -r ./certdx_* ./caddy_certdx_*", shell=True)
-
-commitId = subprocess.run("git rev-parse --short HEAD", shell=True, capture_output=True)
+commitId = subprocess.run("git rev-parse --short HEAD", shell=True, check=True, capture_output=True)
 commitId = commitId.stdout.decode().strip()
 
 time = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d %H:%M')
-cwd = os.getcwd()
 
+release_path = os.path.abspath(f'{__file__}/../')
+os.chdir(release_path)
+
+subprocess.run(f"rm -r ./certdx_* ./caddy_certdx_*", shell=True)
+
+# goos, goarch
 targets = [
     ['linux',   'amd64'],
     ['linux',   'arm'],
     ['linux',   'arm64'],
     ['linux',   'mips'],
     ['linux',   'mipsle'],
-    ['windows', 'amd64'],
     ['darwin',  'arm64'],
+    ['windows', 'amd64'],
 ]
 
+# executable, source
 execs = [
     ['server', 'exec/server'],
     ['client', 'exec/client'],
@@ -62,12 +66,15 @@ for goos, goarch in targets:
             f'''env GOOS="{goos}" GOARCH="{goarch}" CGO_ENABLED=0 '''
             f'''go build -ldflags="-s -w '''
             f'''-X main.buildCommit={commitId} -X \'main.buildDate={time}\'" '''
-            f'''-o {cwd}/{output_dir}/certdx_{exec_name}{".exe" if goos == "windows" else ""} '''
-            , shell=True
+            f'''-o {release_path}/{output_dir}/certdx_{exec_name}{".exe" if goos == "windows" else ""} '''
+            , shell=True, check=True
         )
-    subprocess.run(f"cp -r {copy} {output_dir}", shell=True)
-    subprocess.run(f"zip -r {output_dir}.zip {output_dir}", shell=True)
-    subprocess.run(f"rm -r {output_dir}", shell=True)
+    subprocess.run(f"cp -r {copy} {output_dir}", shell=True, check=True)
+    if goos == "windows":
+        subprocess.run(f"zip -r {output_dir}.zip {output_dir}", shell=True, check=True)
+    else:
+        subprocess.run(f"tar -czf {output_dir}.tar.gz {output_dir}", shell=True, check=True)
+    subprocess.run(f"rm -r {output_dir}", shell=True, check=True)
 
     # build caddy with certdx
     if xcaddy_exec:
@@ -78,9 +85,11 @@ for goos, goarch in targets:
             f'''--with pkg.para.party/certdx/exec/caddytls=../exec/caddytls '''
             f'''--replace pkg.para.party/certdx=../ '''
             f'''--output {output_dir_caddy}/caddy{".exe" if goos == "windows" else ""}'''
-            , shell=True
+            , shell=True, check=True
         )
-        subprocess.run(f"cp -r {copy_caddy} {output_dir_caddy}", shell=True)
-        subprocess.run(f"zip -r {output_dir_caddy}.zip {output_dir_caddy}", shell=True)
-        subprocess.run(f"rm -r {output_dir_caddy}", shell=True)
-
+        subprocess.run(f"cp -r {copy_caddy} {output_dir_caddy}", shell=True, check=True)
+        if goos == "windows":
+            subprocess.run(f"zip -r {output_dir_caddy}.zip {output_dir_caddy}", shell=True, check=True)
+        else:
+            subprocess.run(f"tar -czf {output_dir_caddy}.tar.gz {output_dir_caddy}", shell=True, check=True)
+        subprocess.run(f"rm -r {output_dir_caddy}", shell=True, check=True)
