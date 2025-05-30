@@ -6,8 +6,13 @@ import (
 	"path"
 )
 
+func FileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func MakeSDSCertDir() (string, error) {
-	dir, err := os.Getwd()
+	dir, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +74,7 @@ func GetSDSClientCertPath(name string) (certPEMPath, certKeyPath string, err err
 }
 
 func GetACMEPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
-	saveDir, err := os.Getwd()
+	saveDir, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
@@ -89,7 +94,7 @@ func GetACMEPrivateKeySavePath(email string, ACMEProvider string) (string, error
 }
 
 func GetServerCacheSavePath() string {
-	saveDir, err := os.Getwd()
+	saveDir, err := os.Executable()
 	if err != nil {
 		return "cache.json"
 	}
