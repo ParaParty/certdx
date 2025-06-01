@@ -2,11 +2,8 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -232,40 +229,6 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCert
 	}
 }
 
-func getTLSConfig() *tls.Config {
-	srvCertPath, srvKeyPath, err := utils.GetSDSServerCertPath()
-	if err != nil {
-		logging.Fatal("err: %s", err)
-	}
-
-	cert, err := tls.LoadX509KeyPair(srvCertPath, srvKeyPath)
-	if err != nil {
-		logging.Fatal("Invalid sds server cert, err: %s", err)
-	}
-
-	caPEMPath, _, err := utils.GetSDSCAPath()
-	if err != nil {
-		logging.Fatal("%s", err)
-	}
-	caPEM, err := os.ReadFile(caPEMPath)
-	if err != nil {
-		logging.Fatal("err: %s", err)
-	}
-
-	capool := x509.NewCertPool()
-	if !capool.AppendCertsFromPEM(caPEM) {
-		logging.Fatal("Invalid ca cert")
-	}
-
-	return &tls.Config{
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		Certificates: []tls.Certificate{cert},
-		ClientCAs:    capool,
-		MinVersion:   tls.VersionTLS13,
-		MaxVersion:   tls.VersionTLS13,
-	}
-}
-
 func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 	if p, ok := peer.FromContext(ctx); ok {
 		if mtls, ok := p.AuthInfo.(credentials.TLSInfo); ok {
@@ -282,7 +245,7 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 
 func (s *CertDXServer) SDSSrv() {
 	server := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(getTLSConfig())),
+		grpc.Creds(credentials.NewTLS(getMtlsConfig())),
 		grpc.UnaryInterceptor(clientTLSLog),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             time.Second,

@@ -60,12 +60,11 @@ type CertDXServer struct {
 
 func MakeCertDXServer() *CertDXServer {
 	ret := &CertDXServer{
-		Config: config.ServerConfig{},
-
 		certCache: makeServerCertCache(),
 		cacheFile: MakeServerCacheFile(),
 		stop:      make(chan struct{}),
 	}
+	ret.Config.SetDefault()
 
 	return ret
 }

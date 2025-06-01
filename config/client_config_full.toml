@@ -10,7 +10,13 @@ reconnectInterval = "10m"
 
 [Http.MainServer]
 url = "https://certdxserver.example.com:19198/1145141919810"
+authMethod = "token"
 token = "KFCCrazyThursdayVMe50"
+
+# authMethod = "mtls"
+# ca = "/path/to/grpc/mtls/ca.pem"
+# certificate = "/path/to/grpc/mtls/client/cert.pem"
+# key = "/path/to/grpc/mtls/client/private.key"
 
 [Http.StandbyServer]
 url = "http://mybackupserver.local:11451/1919810"
