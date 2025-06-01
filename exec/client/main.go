@@ -6,11 +6,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/client"
+	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
 )
 
@@ -68,21 +68,11 @@ func init() {
 		logging.Fatal("Reading config file failed, err: %s", err)
 	}
 
-	certDXDaemon.Config.Common.ReconnectDuration, err = time.ParseDuration(certDXDaemon.Config.Common.ReconnectInterval)
+	err = certDXDaemon.Config.Validate()
 	if err != nil {
-		logging.Fatal("Failed to parse interval, err: %s", err)
+		logging.Fatal("Invalid config: %s", err)
 	}
 	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)
-
-	if len(certDXDaemon.Config.Certifications) == 0 {
-		logging.Fatal("No certification configured")
-	}
-
-	for _, c := range certDXDaemon.Config.Certifications {
-		if len(c.Domains) == 0 || c.Name == "" || c.SavePath == "" {
-			logging.Fatal("Wrong certification configuration")
-		}
-	}
 
 	certDXDaemon.ClientInit()
 }
@@ -101,15 +91,9 @@ func main() {
 	}()
 
 	switch certDXDaemon.Config.Common.Mode {
-	case "http":
-		if certDXDaemon.Config.Http.MainServer.Url == "" {
-			logging.Fatal("Http main server url should not be empty")
-		}
+	case config.CLIENT_MODE_HTTP:
 		certDXDaemon.HttpMain()
-	case "grpc":
-		if certDXDaemon.Config.GRPC.MainServer.Server == "" {
-			logging.Fatal("GRPC main server url should not be empty")
-		}
+	case config.CLIENT_MODE_GRPC:
 		certDXDaemon.GRPCMain()
 	default:
 		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Common.Mode)

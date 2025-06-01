@@ -64,12 +64,18 @@ url = "https://cos.ap-beijing.myqcloud.com"
 enabled = true
 listen = ":19198"
 apiPath = "/1145141919810"
+
+authMethod = "token"
 secure = true
 # Domain of this server, server will issue a certification for itself
 # for https api. Make sure your acme server can issue this domain.
 names = ["certdxserver.example.com", "*.example.com"]
 # left empty for no token
 token = "KFCCrazyThursdayVMe50"
+
+# authMethod = "mtls"
+# mtls mode will automatically load CA certificate key from
+# certdx_executable/mtls/
 
 [gRPCSDSServer]
 enabled = true

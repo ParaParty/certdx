@@ -1,6 +1,7 @@
 package acme
 
 import (
+	"pkg.para.party/certdx/pkg/acmeprovider"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/utils"
 
@@ -53,10 +54,10 @@ func MakeACME(c *config.ServerConfig) (*ACME, error) {
 
 	instance := &ACME{
 		retry:        c.ACME.RetryCount,
-		needNotAfter: isACMEProviderGoogle(c.ACME.Provider),
+		needNotAfter: acmeprovider.IsACMEProviderGoogle(c.ACME.Provider),
 	}
 	config := lego.NewConfig(user)
-	config.CADirURL = acmeProvidersMap[c.ACME.Provider]
+	config.CADirURL = acmeprovider.GetACMEURL(c.ACME.Provider)
 	config.Certificate.KeyType = certcrypto.EC256
 
 	instance.Client, err = lego.NewClient(config)

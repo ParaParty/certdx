@@ -11,14 +11,14 @@ func FileExists(path string) bool {
 	return err == nil
 }
 
-func MakeSDSCertDir() (string, error) {
+func MakeMtlsCertDir() (string, error) {
 	exec, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
 	dir := path.Dir(exec)
 
-	dir = path.Join(dir, "sds")
+	dir = path.Join(dir, "mtls")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		err := os.Mkdir(dir, 0o777)
 		if err != nil {
@@ -31,8 +31,8 @@ func MakeSDSCertDir() (string, error) {
 	return dir, nil
 }
 
-func GetSDSCAPath() (caPEMPath, caKeyPath string, err error) {
-	caDir, err := MakeSDSCertDir()
+func GetMtlsCAPath() (caPEMPath, caKeyPath string, err error) {
+	caDir, err := MakeMtlsCertDir()
 	if err != nil {
 		return
 	}
@@ -43,7 +43,7 @@ func GetSDSCAPath() (caPEMPath, caKeyPath string, err error) {
 }
 
 func GetCACounterPath() (caCounterPath string, err error) {
-	caDir, err := MakeSDSCertDir()
+	caDir, err := MakeMtlsCertDir()
 	if err != nil {
 		return
 	}
@@ -52,19 +52,19 @@ func GetCACounterPath() (caCounterPath string, err error) {
 	return
 }
 
-func GetSDSServerCertPath() (certPEMPath, certKeyPath string, err error) {
-	caDir, err := MakeSDSCertDir()
+func GetMtlsServerCertPath() (certPEMPath, certKeyPath string, err error) {
+	caDir, err := MakeMtlsCertDir()
 	if err != nil {
 		return
 	}
 
-	certPEMPath = path.Join(caDir, "sds_server.pem")
-	certKeyPath = path.Join(caDir, "sds_server.key")
+	certPEMPath = path.Join(caDir, "server.pem")
+	certKeyPath = path.Join(caDir, "server.key")
 	return
 }
 
-func GetSDSClientCertPath(name string) (certPEMPath, certKeyPath string, err error) {
-	caDir, err := MakeSDSCertDir()
+func GetMtlsClientCertPath(name string) (certPEMPath, certKeyPath string, err error) {
+	caDir, err := MakeMtlsCertDir()
 	if err != nil {
 		return
 	}

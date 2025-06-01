@@ -6,11 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
-	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/server"
 )
@@ -48,16 +46,14 @@ func init() {
 	logging.Info("\nStarting certdx server %s, built at %s", buildCommit, buildDate)
 
 	cdxsrv = server.MakeCertDXServer()
-	config := &cdxsrv.Config
 
-	config.SetDefault()
 	cfile, err := os.Open(*pConf)
 	if err != nil {
 		logging.Fatal("Open config file failed, err: %s", err)
 	}
 	defer cfile.Close()
 	if b, err := io.ReadAll(cfile); err == nil {
-		if err := toml.Unmarshal(b, config); err == nil {
+		if err := toml.Unmarshal(b, &cdxsrv.Config); err == nil {
 			logging.Info("Config loaded")
 		} else {
 			logging.Fatal("Unmarshaling config failed, err: %s", err)
@@ -66,23 +62,7 @@ func init() {
 		logging.Fatal("Reading config file failed, err: %s", err)
 	}
 
-	if !acme.ACMEProviderSupported(config.ACME.Provider) {
-		logging.Fatal("ACME provider not supported: %s", config.ACME.Provider)
-	}
-
-	d, err := time.ParseDuration(config.ACME.CertLifeTime)
-	if err != nil {
-		logging.Fatal("Invalid config, err: %s", err)
-	}
-	config.ACME.CertLifeTimeDuration = d
-
-	d, err = time.ParseDuration(config.ACME.RenewTimeLeft)
-	if err != nil {
-		logging.Fatal("Invalid config, err: %s", err)
-	}
-	config.ACME.RenewTimeLeftDuration = d
-
-	if err = config.Validate(); err != nil {
+	if err = cdxsrv.Config.Validate(); err != nil {
 		logging.Fatal("Invalid config, err: %v", err)
 	}
 
