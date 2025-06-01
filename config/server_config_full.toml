@@ -1,0 +1,77 @@
+[ACME]
+# Email of ACME account registeration
+email = ""
+# Supported provider: google googletest r3 r3test
+provider = "r3"
+retryCount = 5
+# dns or http
+challengeType = "dns"
+
+# Certification will have a life time of certLifeTime + renewTimeLeft
+# If certLifeTime is passed, server will renew this certification
+# Server and client will check certification every renewTimeLeft/4
+certLifeTime = "168h"
+renewTimeLeft = "24h"
+
+# Give root domain here
+allowedDomains = [
+    "example.com",
+]
+
+# Google cloud credential, for registering google acme account
+[GoogleCloudCredential]
+type = "service_account"
+project_id = "lanlanlu"
+private_key_id = "0123456789012345678901234567890123456789"
+private_key = "-----BEGIN PRIVATE KEY-----\nSOMETHING\n-----END PRIVATE KEY-----\n"
+client_email = "acme-user@lanlanlu.iam.gserviceaccount.com"
+client_id = "01234567890123456789"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/acme-user@lanlanlu.iam.gserviceaccount.com"
+
+[DnsProvider]
+disableCompletePropagationRequirement = false
+
+# cloudflare global api key and email
+type = "cloudflare"
+email = ""
+apiKey = ""
+
+# or cloudflare auth token and zone token
+# type = "cloudflare"
+# authToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
+# zoneToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
+
+# or you can use tencent cloud
+# type = "tencent"
+# secretID = ""
+# SecretKey = ""
+
+[HttpProvider]
+type = "s3"
+
+[HttpProvider.S3]
+region = "ap-beijing"
+bucket = "cos-1000000000"
+accessKeyId = "xxxxxxxxxx"
+accessKeySecret = "xxxxxxxx"
+sessionToken = ""
+url = "https://cos.ap-beijing.myqcloud.com"
+
+[HttpServer]
+enabled = true
+listen = ":19198"
+apiPath = "/1145141919810"
+secure = true
+# Domain of this server, server will issue a certification for itself
+# for https api. Make sure your acme server can issue this domain.
+names = ["certdxserver.example.com", "*.example.com"]
+# left empty for no token
+token = "KFCCrazyThursdayVMe50"
+
+[gRPCSDSServer]
+enabled = true
+listen = ":11451"
+names = ["grpcserver.example.com"]
