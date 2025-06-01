@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/types"
 	"pkg.para.party/certdx/pkg/utils"
@@ -17,23 +18,29 @@ func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == s.Config.HttpServer.APIPath {
 		switch r.Method {
 		case "POST":
-			if s.checkAuthorization(r) {
-				logstr := fmt.Sprintf("Http received cert request from: %s", r.RemoteAddr)
-				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-					logstr = fmt.Sprintf("%s, xff: %s", logstr, xff)
-				}
-				logging.Info("%s", logstr)
-
-				s.handleCertReq(&w, r)
-				return
+			logstr := fmt.Sprintf("Http received cert request from: %s", r.RemoteAddr)
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				logstr = fmt.Sprintf("%s, xff: %s", logstr, xff)
 			}
+			logging.Info("%s", logstr)
+
+			s.handleCertReq(&w, r)
+			return
 		default:
 		}
 	}
 	http.Error(w, "", http.StatusNotFound)
 }
 
-func (s *CertDXServer) checkAuthorization(r *http.Request) bool {
+func (s *CertDXServer) apiWithTokenHandler(w http.ResponseWriter, r *http.Request) {
+	if s.checkAuthorizationToken(r) {
+		s.apiHandler(w, r)
+	} else {
+		http.Error(w, "", http.StatusNotFound)
+	}
+}
+
+func (s *CertDXServer) checkAuthorizationToken(r *http.Request) bool {
 	if s.Config.HttpServer.Token == "" {
 		return true
 	}
@@ -157,12 +164,32 @@ func (s *CertDXServer) serveHttp() {
 	server.Close()
 }
 
-func (s *CertDXServer) HttpSrv() {
-	http.HandleFunc("/", s.apiHandler)
+func (s *CertDXServer) serveHttpMtls() {
+	server := http.Server{
+		Addr:      s.Config.HttpServer.Listen,
+		TLSConfig: getMtlsConfig(),
+	}
 
-	if !s.Config.HttpServer.Secure {
-		s.serveHttp()
-	} else {
-		s.serveHttps()
+	go func() {
+		logging.Info("Http mtls server started")
+		err := server.ListenAndServeTLS("", "")
+		logging.Info("Http mtls server stopped: %s", err)
+	}()
+
+	<-s.stop
+	server.Close()
+}
+
+func (s *CertDXServer) HttpSrv() {
+	if s.Config.HttpServer.AuthMethod == config.HTTP_AUTH_TOKEN {
+		http.HandleFunc("/", s.apiWithTokenHandler)
+		if !s.Config.HttpServer.Secure {
+			s.serveHttp()
+		} else {
+			s.serveHttps()
+		}
+	} else if s.Config.HttpServer.AuthMethod == config.HTTP_AUTH_MTLS {
+		http.HandleFunc("/", s.apiHandler)
+		s.serveHttpMtls()
 	}
 }

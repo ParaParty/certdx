@@ -23,7 +23,7 @@ import (
 var counter big.Int = *big.NewInt(0)
 
 func MakeCA(organization, commonName string) error {
-	caPEMPath, caKeyPath, err := utils.GetSDSCAPath()
+	caPEMPath, caKeyPath, err := utils.GetMtlsCAPath()
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func MakeCA(organization, commonName string) error {
 }
 
 func loadCA() (*x509.Certificate, *crypto.PrivateKey, error) {
-	caPEMPath, caKeyPath, err := utils.GetSDSCAPath()
+	caPEMPath, caKeyPath, err := utils.GetMtlsCAPath()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -230,7 +230,7 @@ func makeCert(PEMPath, keyPath, organization, commonName string,
 }
 
 func MakeServerCert(organization, commonName string, domains []string) error {
-	servPEMPath, servKeyPath, err := utils.GetSDSServerCertPath()
+	servPEMPath, servKeyPath, err := utils.GetMtlsServerCertPath()
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func MakeServerCert(organization, commonName string, domains []string) error {
 }
 
 func MakeClientCert(name, organization, commonName string, domains []string) error {
-	clientPEMPath, clientKeyPath, err := utils.GetSDSClientCertPath(name)
+	clientPEMPath, clientKeyPath, err := utils.GetMtlsClientCertPath(name)
 	if err != nil {
 		return err
 	}

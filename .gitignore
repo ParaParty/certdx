@@ -35,7 +35,7 @@ release/caddy_certdx_*
 *.service.toml
 *_config.service.toml
 private
-sds
+mtls
 cache.json
 *Caddyfile
 *caddy
