@@ -12,10 +12,11 @@ func FileExists(path string) bool {
 }
 
 func MakeSDSCertDir() (string, error) {
-	dir, err := os.Executable()
+	exec, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
+	dir := path.Dir(exec)
 
 	dir = path.Join(dir, "sds")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -74,10 +75,12 @@ func GetSDSClientCertPath(name string) (certPEMPath, certKeyPath string, err err
 }
 
 func GetACMEPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
-	saveDir, err := os.Executable()
+	exec, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
+	saveDir := path.Dir(exec)
+
 	saveDir = path.Join(saveDir, "private")
 	keyName := fmt.Sprintf("%s_%s.key", email, ACMEProvider)
 
@@ -94,10 +97,11 @@ func GetACMEPrivateKeySavePath(email string, ACMEProvider string) (string, error
 }
 
 func GetServerCacheSavePath() string {
-	saveDir, err := os.Executable()
+	exec, err := os.Executable()
 	if err != nil {
 		return "cache.json"
 	}
+	saveDir := path.Dir(exec)
 
 	cacheFile := path.Join(saveDir, "cache.json")
 	return cacheFile
