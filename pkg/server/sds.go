@@ -244,6 +244,8 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 }
 
 func (s *CertDXServer) SDSSrv() {
+	logging.Info("Start listening GRPC at %s", s.Config.GRPCSDSServer.Listen)
+
 	server := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(getMtlsConfig())),
 		grpc.UnaryInterceptor(clientTLSLog),
