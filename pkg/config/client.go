@@ -185,7 +185,7 @@ func (c *ClientCertification) GetFullChainAndKeyPath() (fullchain, key string) {
 func (c *ClientConfig) SetDefault() {
 	c.Common = ClientCommonConfig{
 		RetryCount:        5,
-		Mode:              "http",
+		Mode:              CLIENT_MODE_HTTP,
 		ReconnectInterval: "10m",
 	}
 
