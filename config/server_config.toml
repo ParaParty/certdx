@@ -16,8 +16,6 @@ zoneToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
 
 [HttpServer]
 enabled = true
-listen = ":19198"
-apiPath = "/1145141919810"
 secure = true
 # Domain of this server, server will issue a certification for itself
 # for https api. Make sure your acme server can issue this domain.
