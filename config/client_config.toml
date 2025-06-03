@@ -1,5 +1,5 @@
 [Http.MainServer]
-url = "https://certdxserver.example.com:19198/1145141919810"
+url = "https://certdxserver.example.com:10001/"
 token = "KFCCrazyThursdayVMe50"
 
 [[Certifications]]

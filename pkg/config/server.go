@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/appengine"
@@ -194,6 +195,10 @@ type HttpServerConfig struct {
 func (c *HttpServerConfig) Validate() error {
 	if !c.Enabled {
 		return nil
+	}
+
+	if !strings.HasPrefix(c.APIPath, "/") {
+		c.APIPath = fmt.Sprintf("/%s", c.APIPath)
 	}
 
 	if c.Secure && len(c.Names) == 0 {

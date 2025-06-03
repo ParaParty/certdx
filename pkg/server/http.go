@@ -181,6 +181,8 @@ func (s *CertDXServer) serveHttpMtls() {
 }
 
 func (s *CertDXServer) HttpSrv() {
+	logging.Info("Start listening Http at %s%s", s.Config.HttpServer.Listen, s.Config.HttpServer.APIPath)
+
 	if s.Config.HttpServer.AuthMethod == config.HTTP_AUTH_TOKEN {
 		http.HandleFunc("/", s.apiWithTokenHandler)
 		if !s.Config.HttpServer.Secure {
