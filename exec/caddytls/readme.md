@@ -19,7 +19,13 @@
         http {
             main_server {
                 url https://certdxserver.example.com:19198/1145141919810
+                authMode token
                 token KFCCrazyThursdayVMe50
+
+                # authMode mtls
+                # ca /path/to/grpc/mtls/ca.pem
+                # certificate /path/to/grpc/mtls/client/cert.pem
+                # key /path/to/grpc/mtls/client/private.key
             }
 
             # optional

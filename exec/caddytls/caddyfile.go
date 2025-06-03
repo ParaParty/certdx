@@ -15,7 +15,7 @@ func init() {
 
 // parseCertDXGlobalOptions configures the "certdx" global option from Caddyfile.
 func parseCertDXGlobalOptions(d *caddyfile.Dispenser, existingVal any) (any, error) {
-	module := MakeCertDXClientDaemon()
+	module := MakeCertDXCaddyDaemon()
 
 	for d.Next() {
 		if d.NextArg() {
@@ -120,6 +120,13 @@ func (c *CertDXCaddyDaemon) UnmarshalHttpServerBlock(s *config.ClientHttpServer,
 				}
 				v := args[0]
 				s.Url = v
+			case "authMethod":
+				args := d.RemainingArgs()
+				if len(args) != 1 {
+					return d.Errf("expected 1 argument for token, got %v", len(args))
+				}
+				v := args[0]
+				s.AuthMethod = v
 			case "token":
 				args := d.RemainingArgs()
 				if len(args) != 1 {
@@ -127,6 +134,27 @@ func (c *CertDXCaddyDaemon) UnmarshalHttpServerBlock(s *config.ClientHttpServer,
 				}
 				v := args[0]
 				s.Token = v
+			case "ca":
+				args := d.RemainingArgs()
+				if len(args) != 1 {
+					return d.Errf("expected 1 argument for ca, got %v", len(args))
+				}
+				v := args[0]
+				s.CA = v
+			case "certificate":
+				args := d.RemainingArgs()
+				if len(args) != 1 {
+					return d.Errf("expected 1 argument for certificate, got %v", len(args))
+				}
+				v := args[0]
+				s.Certificate = v
+			case "key":
+				args := d.RemainingArgs()
+				if len(args) != 1 {
+					return d.Errf("expected 1 argument for key, got %v", len(args))
+				}
+				v := args[0]
+				s.Key = v
 			default:
 				return d.Errf("unrecognized subdirective for http server: %s", d.Val())
 			}

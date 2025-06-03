@@ -36,6 +36,15 @@ type CertDXCaddyConfig struct {
 	CertificateDefs CertificateDef `json:"certificates"`
 }
 
+func (c *CertDXCaddyConfig) SetDefaultConfig() {
+	c.RetryCount = 5
+	c.Mode = config.CLIENT_MODE_HTTP
+	c.ReconnectInterval = "10m"
+
+	c.Http.MainServer.AuthMethod = config.HTTP_AUTH_TOKEN
+	c.Http.StandbyServer.AuthMethod = config.HTTP_AUTH_TOKEN
+}
+
 type CertDXCaddyDaemon struct {
 	CertDXCaddyConfig
 
@@ -43,9 +52,10 @@ type CertDXCaddyDaemon struct {
 	logger       *zap.Logger
 }
 
-func MakeCertDXClientDaemon() *CertDXCaddyDaemon {
+func MakeCertDXCaddyDaemon() *CertDXCaddyDaemon {
 	ret := &CertDXCaddyDaemon{}
 	ret.CertificateDefs = make(CertificateDef, 0)
+	ret.SetDefaultConfig()
 
 	return ret
 }
