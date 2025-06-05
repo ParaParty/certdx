@@ -15,6 +15,7 @@ import (
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/registration"
 	"pkg.para.party/certdx/pkg/acme/google"
+	"pkg.para.party/certdx/pkg/acmeprovider"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/utils"
 )
@@ -54,7 +55,7 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 		kid := ""
 		hmac := ""
 
-		if isACMEProviderGoogle(c.ACME.Provider) {
+		if acmeprovider.IsACMEProviderGoogle(c.ACME.Provider) {
 			account, err := google.CreateExternalAccountKeyRequest(c.GoogleCloudCredential)
 			if err != nil {
 				return nil, fmt.Errorf("failed to register google ca: %v", err)
@@ -86,7 +87,7 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 	}
 
 	legoConfig := lego.NewConfig(user)
-	legoConfig.CADirURL = acmeProvidersMap[c.ACME.Provider]
+	legoConfig.CADirURL = acmeprovider.GetACMEURL(c.ACME.Provider)
 	acmeClient, err := lego.NewClient(legoConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed constructing acme client: %w", err)
@@ -124,7 +125,7 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 	}
 
 	config := lego.NewConfig(&myUser)
-	config.CADirURL = acmeProvidersMap[ACMEProvider]
+	config.CADirURL = acmeprovider.GetACMEURL(ACMEProvider)
 
 	client, err := lego.NewClient(config)
 	if err != nil {

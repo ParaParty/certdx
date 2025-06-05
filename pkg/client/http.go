@@ -23,6 +23,12 @@ type CertDXHttpClientOption func(client *CertDXHttpClient)
 func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOption {
 	return func(client *CertDXHttpClient) {
 		client.Server = server
+
+		if server.AuthMethod == config.HTTP_AUTH_MTLS {
+			client.HttpClient.Transport = &http.Transport{
+				TLSClientConfig: getMtlsConfig(server.CA, server.Certificate, server.Key),
+			}
+		}
 	}
 }
 
@@ -63,7 +69,7 @@ func (c *CertDXHttpClient) makeGetCertRequest(ctx context.Context, domains []str
 
 	req = req.WithContext(ctx)
 
-	if c.Server.Token != "" {
+	if c.Server.AuthMethod == config.HTTP_AUTH_TOKEN && c.Server.Token != "" {
 		req.Header = http.Header{
 			"Authorization": {fmt.Sprintf("Token %s", c.Server.Token)},
 		}

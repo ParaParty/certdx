@@ -1,4 +1,4 @@
-package acme
+package acmeprovider
 
 import "strings"
 
@@ -14,6 +14,10 @@ func ACMEProviderSupported(provider string) bool {
 	return ok
 }
 
-func isACMEProviderGoogle(provider string) bool {
+func IsACMEProviderGoogle(provider string) bool {
 	return strings.HasPrefix(provider, "google")
+}
+
+func GetACMEURL(provider string) string {
+	return acmeProvidersMap[provider]
 }

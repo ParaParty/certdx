@@ -2,10 +2,7 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -58,32 +55,8 @@ func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[uint64]*wat
 	received := make(chan struct{})
 	c.Received.Store(&received)
 	c.Running.Store(false)
-	c.tlsCred = credentials.NewTLS(c.getTLSConfig())
+	c.tlsCred = credentials.NewTLS(getMtlsConfig(server.CA, server.Certificate, server.Key))
 	return c
-}
-
-func (c *CertDXgRPCClient) getTLSConfig() *tls.Config {
-	cert, err := tls.LoadX509KeyPair(c.server.Certificate, c.server.Key)
-	if err != nil {
-		logging.Fatal("Invalid gRPC client cert, err: %s", err)
-	}
-
-	caPEM, err := os.ReadFile(c.server.CA)
-	if err != nil {
-		logging.Fatal("err: %s", err)
-	}
-
-	capool := x509.NewCertPool()
-	if !capool.AppendCertsFromPEM(caPEM) {
-		logging.Fatal("Invalid ca cert")
-	}
-
-	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      capool,
-		MinVersion:   tls.VersionTLS13,
-		MaxVersion:   tls.VersionTLS13,
-	}
 }
 
 func (c *CertDXgRPCClient) Stream() error {
