@@ -409,7 +409,6 @@ func (r *CertDXClientDaemon) GRPCMain() {
 
 func (r *CertDXClientDaemon) Stop() {
 	close(r.stopChan)
-	r.stopChan = nil
 }
 
 func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash uint64) (*tls.Certificate, error) {
