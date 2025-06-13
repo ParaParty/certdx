@@ -6,19 +6,50 @@ import (
 	"path"
 )
 
+const (
+	MTLS_CERTIFICATE_DIR = "mtls"
+	ACME_PRIVATE_KEY_DIR = "private"
+	SERVER_CACHE_FILE    = "cache.json"
+)
+
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
+func findFile(file string) (string, error) {
+	cwd, err := os.Getwd()
+	if err == nil {
+		pa := path.Join(cwd, file)
+		if FileExists(pa) {
+			return pa, nil
+		}
+	}
+
+	exec, err := os.Executable()
+	if err == nil {
+		pa := path.Join(exec, file)
+		if FileExists(pa) {
+			return pa, nil
+		}
+	}
+
+	return "", os.ErrNotExist
+}
+
 func MakeMtlsCertDir() (string, error) {
+	dir, err := findFile(MTLS_CERTIFICATE_DIR)
+	if err == nil {
+		return dir, nil
+	}
+
 	exec, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	dir := path.Dir(exec)
+	dir = path.Dir(exec)
 
-	dir = path.Join(dir, "mtls")
+	dir = path.Join(dir, MTLS_CERTIFICATE_DIR)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		err := os.Mkdir(dir, 0o777)
 		if err != nil {
@@ -75,14 +106,20 @@ func GetMtlsClientCertPath(name string) (certPEMPath, certKeyPath string, err er
 }
 
 func GetACMEPrivateKeySavePath(email string, ACMEProvider string) (string, error) {
+	keyName := fmt.Sprintf("%s_%s.key", email, ACMEProvider)
+
+	saveDir, err := findFile(ACME_PRIVATE_KEY_DIR)
+	if err == nil {
+		return path.Join(saveDir, keyName), nil
+	}
+
 	exec, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	saveDir := path.Dir(exec)
+	saveDir = path.Dir(exec)
 
-	saveDir = path.Join(saveDir, "private")
-	keyName := fmt.Sprintf("%s_%s.key", email, ACMEProvider)
+	saveDir = path.Join(saveDir, ACME_PRIVATE_KEY_DIR)
 
 	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
 		err := os.Mkdir(saveDir, 0o755)
@@ -97,12 +134,16 @@ func GetACMEPrivateKeySavePath(email string, ACMEProvider string) (string, error
 }
 
 func GetServerCacheSavePath() string {
+	cacheFile, err := findFile(SERVER_CACHE_FILE)
+	if err == nil {
+		return cacheFile
+	}
+
 	exec, err := os.Executable()
 	if err != nil {
-		return "cache.json"
+		return SERVER_CACHE_FILE
 	}
 	saveDir := path.Dir(exec)
 
-	cacheFile := path.Join(saveDir, "cache.json")
-	return cacheFile
+	return path.Join(saveDir, SERVER_CACHE_FILE)
 }
