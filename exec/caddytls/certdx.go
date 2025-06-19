@@ -3,6 +3,7 @@ package caddytls
 import (
 	"context"
 	"crypto/tls"
+	"pkg.para.party/certdx/pkg/types"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
@@ -87,7 +88,9 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	}
 
 	for certID, domains := range m.CertificateDefs {
-		m.certDXDaemon.CaddyAddCert(certID, domains)
+		if err := m.certDXDaemon.AddCertToWatch(certID, domains); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -116,7 +119,7 @@ func (m *CertDXCaddyDaemon) Stop() error {
 	return nil
 }
 
-func (m *CertDXCaddyDaemon) GetCertificate(ctx context.Context, certHash uint64) (*tls.Certificate, error) {
+func (m *CertDXCaddyDaemon) GetCertificate(ctx context.Context, certHash types.DomainKey) (*tls.Certificate, error) {
 	return m.certDXDaemon.GetCertificate(ctx, certHash)
 }
 

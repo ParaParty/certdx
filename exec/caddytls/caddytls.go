@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"pkg.para.party/certdx/pkg/types"
 
 	"github.com/caddyserver/certmagic"
 	"pkg.para.party/certdx/pkg/utils"
@@ -21,7 +22,7 @@ type CertDXTls struct {
 	ctx       caddy.Context
 	certDXApp *CertDXCaddyDaemon
 	CertId    string `json:"cert_id"`
-	certHash  uint64
+	certHash  types.DomainKey
 }
 
 // CaddyModule returns the Caddy module information.

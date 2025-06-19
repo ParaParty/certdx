@@ -1,0 +1,29 @@
+[Http.MainServer]
+url = "https://certdxserver.example.com:10001/"
+token = "KFCCrazyThursdayVMe50"
+
+# https://cloud.tencent.com/document/product/457/31718
+[Authorization]
+secretID = "tencent cloud secret id"
+secretKey = "tencent cloud secret key"
+
+[[Certifications]]
+name = "certificate name to display"
+
+# certdx updater will match the domains with the list on https://console.cloud.tencent.com/ssl
+domains = [
+    "*.example.com",
+    "*.mm.example.com",
+]
+
+# resource to replace
+# https://cloud.tencent.com/document/product/400/91649
+resourceTypes = ["teo"] # clb、cdn、waf、live、vod、ddos、tke、apigateway、tcb、teo
+resourceTypesRegions = [
+    { resourceType = "", regions = [] }
+]
+
+#resourceTypes = ["clb"]
+#resourceTypesRegions = [
+#    { resourceType = "clb", regions = ["ap-guangzhou"] }
+#]

@@ -1,4 +1,4 @@
-package main
+package tasks
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"pkg.para.party/certdx/pkg/logging"
 )
 
-func registerGoogleAccount() {
+func RegisterGoogleAccount() {
 	var (
 		gaCMD = flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 
@@ -16,7 +16,7 @@ func registerGoogleAccount() {
 		email       = gaCMD.StringP("email", "e", "", "Email of registeration")
 		keyId       = gaCMD.StringP("kid", "k", "", "Key id of eab")
 		hmac        = gaCMD.StringP("hmac", "h", "", "B64HMAC of eab")
-		gaHelp      = gaCMD.Bool("help", false, "Print help")
+		gaHelp      = gaCMD.Bool("Help", false, "Print Help")
 	)
 	gaCMD.Parse(os.Args[2:])
 

@@ -1,4 +1,4 @@
-package main
+package tasks
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"pkg.para.party/certdx/pkg/tools"
 )
 
-func makeClient() {
+func MakeClient() {
 	var (
 		clientCMD = flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 
@@ -17,7 +17,7 @@ func makeClient() {
 		clientDomains      = clientCMD.StringSliceP("dns-names", "d", []string{}, "CertDX grpc client certificate dns names, combine multiple names with \",\"")
 		clientOrganization = clientCMD.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		clientCommonName   = clientCMD.StringP("common-name", "c", "CertDX Client: {name}", "Subject Common Name")
-		clientHelp         = clientCMD.BoolP("help", "h", false, "Print help")
+		clientHelp         = clientCMD.BoolP("Help", "h", false, "Print Help")
 	)
 	clientCMD.Parse(os.Args[2:])
 

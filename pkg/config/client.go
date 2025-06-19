@@ -25,19 +25,24 @@ type ClientConfig struct {
 	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
 }
 
-func (c *ClientConfig) Validate() error {
+func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
+	option := makeValidatingConfiguration()
+	for _, it := range optionList {
+		it(option)
+	}
+
 	ret := appengine.MultiError{}
 
 	if err := c.parseDuration(); err != nil {
 		ret = append(ret, err)
 	}
 
-	if len(c.Certifications) == 0 {
+	if len(c.Certifications) == 0 && !option.acceptEmptyCertificatesList {
 		ret = append(ret, fmt.Errorf("no certification configured"))
 	}
 
 	for _, cert := range c.Certifications {
-		if err := cert.Validate(); err != nil {
+		if err := cert.Validate(option); err != nil {
 			ret = append(ret, err)
 		}
 	}
@@ -169,14 +174,21 @@ type ClientCertification struct {
 	ReloadCommand string   `toml:"reloadCommand" json:"reload_command,omitempty"`
 }
 
-func (c *ClientCertification) Validate() error {
-	if len(c.Domains) == 0 || c.Name == "" || c.SavePath == "" {
+func (c *ClientCertification) Validate(options *validatingConfiguration) error {
+	var savePathAccepted = c.SavePath != ""
+	if options.acceptEmptyCertificateSavePath && len(c.SavePath) == 0 {
+		savePathAccepted = true
+	}
+	if len(c.Domains) == 0 || c.Name == "" || !savePathAccepted {
 		return fmt.Errorf("wrong certification configuration for %s", c.Name)
 	}
 	return nil
 }
 
-func (c *ClientCertification) GetFullChainAndKeyPath() (fullchain, key string) {
+func (c *ClientCertification) GetFullChainAndKeyPath() (fullchain, key string, err error) {
+	if len(c.SavePath) == 0 || len(c.Name) == 0 {
+		return "", "", fmt.Errorf("empty save path")
+	}
 	fullchain = path.Join(c.SavePath, fmt.Sprintf("%s.pem", c.Name))
 	key = path.Join(c.SavePath, fmt.Sprintf("%s.key", c.Name))
 	return
@@ -191,4 +203,30 @@ func (c *ClientConfig) SetDefault() {
 
 	c.Http.MainServer.AuthMethod = HTTP_AUTH_TOKEN
 	c.Http.StandbyServer.AuthMethod = HTTP_AUTH_TOKEN
+}
+
+type validatingConfiguration struct {
+	acceptEmptyCertificateSavePath bool
+	acceptEmptyCertificatesList    bool
+}
+
+func makeValidatingConfiguration() *validatingConfiguration {
+	return &validatingConfiguration{
+		acceptEmptyCertificateSavePath: false,
+		acceptEmptyCertificatesList:    false,
+	}
+}
+
+type ValidatingOption func(*validatingConfiguration)
+
+func WithAcceptEmptyCertificateSavePath(value bool) ValidatingOption {
+	return func(v *validatingConfiguration) {
+		v.acceptEmptyCertificateSavePath = value
+	}
+}
+
+func WithAcceptEmptyCertificatesList(value bool) ValidatingOption {
+	return func(v *validatingConfiguration) {
+		v.acceptEmptyCertificatesList = value
+	}
 }

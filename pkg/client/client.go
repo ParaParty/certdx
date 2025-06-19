@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/types"
@@ -20,7 +22,7 @@ type CertDXClientDaemon struct {
 	Config    *config.ClientConfig
 	ClientOpt []CertDXHttpClientOption
 
-	certs    map[uint64]*watchingCert
+	certs    map[types.DomainKey]*watchingCert
 	wg       sync.WaitGroup
 	stopChan chan struct{}
 }
@@ -33,9 +35,17 @@ type certData struct {
 type watchingCert struct {
 	Data           atomic.Pointer[certData]
 	Config         config.ClientCertification
-	UpdateHandlers []certUpdateHandler
+	UpdateHandlers []CertificateUpdateHandler
 	UpdateChan     chan certData
 	Stop           atomic.Pointer[chan struct{}]
+}
+
+type WatchingCertsOption func(*watchingCert)
+
+func WithCertificateHandlerOption(handler CertificateUpdateHandler) WatchingCertsOption {
+	return func(wc *watchingCert) {
+		wc.UpdateHandlers = append(wc.UpdateHandlers, handler)
+	}
 }
 
 func (c *watchingCert) watchUpdate(wg *sync.WaitGroup) {
@@ -64,7 +74,7 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 	ret := &CertDXClientDaemon{
 		Config:    &config.ClientConfig{},
 		ClientOpt: make([]CertDXHttpClientOption, 0),
-		certs:     make(map[uint64]*watchingCert),
+		certs:     make(map[types.DomainKey]*watchingCert),
 		stopChan:  make(chan struct{}),
 	}
 	ret.Config.SetDefault()
@@ -72,7 +82,10 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 }
 
 func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertification) (fullchan, key []byte, err error) {
-	fullchanPath, keyPath := c.GetFullChainAndKeyPath()
+	fullchanPath, keyPath, err := c.GetFullChainAndKeyPath()
+	if err != nil {
+		return nil, nil, err
+	}
 	if utils.FileExists(fullchanPath) && utils.FileExists(keyPath) {
 		fullchan, err = os.ReadFile(fullchanPath)
 		if err != nil {
@@ -102,7 +115,7 @@ func (r *CertDXClientDaemon) ClientInit() {
 
 		cert := &watchingCert{
 			Config:         c,
-			UpdateHandlers: []certUpdateHandler{writeCertAndDoCommand},
+			UpdateHandlers: []CertificateUpdateHandler{writeCertAndDoCommand},
 			UpdateChan:     make(chan certData, 1),
 		}
 		cert.Data.Store(&cd)
@@ -114,15 +127,18 @@ func (r *CertDXClientDaemon) ClientInit() {
 	}
 }
 
-func (r *CertDXClientDaemon) CaddyAddCert(name string, domains []string) error {
+func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, options []WatchingCertsOption) error {
 	cd := certData{
 		Domains: domains,
 	}
 
 	cert := &watchingCert{
 		Config:         config.ClientCertification{Name: name, Domains: domains},
-		UpdateHandlers: []certUpdateHandler{},
+		UpdateHandlers: []CertificateUpdateHandler{},
 		UpdateChan:     make(chan certData, 1),
+	}
+	for _, it := range options {
+		it(cert)
 	}
 
 	cert.Data.Store(&cd)
@@ -133,6 +149,9 @@ func (r *CertDXClientDaemon) CaddyAddCert(name string, domains []string) error {
 	go cert.watchUpdate(&r.wg)
 
 	return nil
+}
+func (r *CertDXClientDaemon) AddCertToWatch(name string, domains []string) error {
+	return r.AddCertToWatchOpt(name, domains, []WatchingCertsOption{})
 }
 
 func (r *CertDXClientDaemon) stopWatchingCert() {
@@ -212,6 +231,30 @@ func (r *CertDXClientDaemon) HttpMain() {
 	logging.Info("Stopping Http client")
 	r.stopWatchingCert()
 	r.wg.Wait()
+}
+
+func (r *CertDXClientDaemon) LoadConfigurationAndValidateOpt(path string, options []config.ValidatingOption) error {
+	cfile, err := os.Open(path)
+	if err != nil {
+		logging.Fatal("Open config file failed, err: %s", err)
+		return err
+	}
+	defer cfile.Close()
+	if b, err := io.ReadAll(cfile); err == nil {
+		if err := toml.Unmarshal(b, r.Config); err == nil {
+			logging.Info("Config loaded")
+		} else {
+			logging.Fatal("Unmarshalling config failed, err: %s", err)
+		}
+	} else {
+		logging.Fatal("Reading config file failed, err: %s", err)
+	}
+
+	return r.Config.Validate(options)
+}
+
+func (r *CertDXClientDaemon) LoadConfigurationAndValidate(path string) error {
+	return r.LoadConfigurationAndValidateOpt(path, []config.ValidatingOption{})
 }
 
 type GRPC_CLIENT_STATE int
@@ -411,7 +454,7 @@ func (r *CertDXClientDaemon) Stop() {
 	close(r.stopChan)
 }
 
-func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash uint64) (*tls.Certificate, error) {
+func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash types.DomainKey) (*tls.Certificate, error) {
 	cert, exists := r.certs[certHash]
 	if exists {
 		certData := cert.Data.Load()

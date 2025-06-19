@@ -10,7 +10,7 @@ import (
 	"pkg.para.party/certdx/pkg/logging"
 )
 
-type certUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
+type CertificateUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
 
 func checkFileAndCreate(file string) (exists bool, err error) {
 	exists = false
@@ -41,8 +41,12 @@ func checkFileAndCreate(file string) (exists bool, err error) {
 func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification) {
 	var doCommand, ce, ke bool
 
-	certPath, keyPath := c.GetFullChainAndKeyPath()
-	ce, err := checkFileAndCreate(certPath)
+	certPath, keyPath, err := c.GetFullChainAndKeyPath()
+	if err != nil {
+		logging.Debug("Failed to get full chain and key path")
+		return
+	}
+	ce, err = checkFileAndCreate(certPath)
 	if err != nil {
 		goto ERR
 	}
