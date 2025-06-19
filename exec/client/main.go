@@ -2,12 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
@@ -53,22 +51,8 @@ func init() {
 		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
 	}
 
-	cfile, err := os.Open(*conf)
-	if err != nil {
-		logging.Fatal("Open config file failed, err: %s", err)
-	}
-	defer cfile.Close()
-	if b, err := io.ReadAll(cfile); err == nil {
-		if err := toml.Unmarshal(b, certDXDaemon.Config); err == nil {
-			logging.Info("Config loaded")
-		} else {
-			logging.Fatal("Unmarshaling config failed, err: %s", err)
-		}
-	} else {
-		logging.Fatal("Reading config file failed, err: %s", err)
-	}
-
-	err = certDXDaemon.Config.Validate()
+	certDXDaemon = client.MakeCertDXClientDaemon()
+	err := certDXDaemon.LoadConfigurationAndValidate(*conf)
 	if err != nil {
 		logging.Fatal("Invalid config: %s", err)
 	}

@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/types"
@@ -212,6 +214,26 @@ func (r *CertDXClientDaemon) HttpMain() {
 	logging.Info("Stopping Http client")
 	r.stopWatchingCert()
 	r.wg.Wait()
+}
+
+func (r *CertDXClientDaemon) LoadConfigurationAndValidate(path string) error {
+	cfile, err := os.Open(path)
+	if err != nil {
+		logging.Fatal("Open config file failed, err: %s", err)
+		return err
+	}
+	defer cfile.Close()
+	if b, err := io.ReadAll(cfile); err == nil {
+		if err := toml.Unmarshal(b, r.Config); err == nil {
+			logging.Info("Config loaded")
+		} else {
+			logging.Fatal("Unmarshaling config failed, err: %s", err)
+		}
+	} else {
+		logging.Fatal("Reading config file failed, err: %s", err)
+	}
+
+	return r.Config.Validate()
 }
 
 type GRPC_CLIENT_STATE int
