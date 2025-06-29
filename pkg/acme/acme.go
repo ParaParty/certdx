@@ -14,9 +14,10 @@ import (
 )
 
 type ACME struct {
-	Client       *lego.Client
-	retry        int
-	needNotAfter bool
+	Client         *lego.Client
+	retry          int
+	needNotAfter   bool
+	preferredChain string
 }
 
 func (a *ACME) Obtain(domains []string, deadline time.Time) (fullchain, key []byte, err error) {
@@ -26,6 +27,9 @@ func (a *ACME) Obtain(domains []string, deadline time.Time) (fullchain, key []by
 	}
 	if a.needNotAfter {
 		request.NotAfter = deadline
+	}
+	if len(a.preferredChain) > 0 {
+		request.PreferredChain = a.preferredChain
 	}
 
 	certificates, err := a.Client.Certificate.Obtain(request)
@@ -53,19 +57,20 @@ func MakeACME(c *config.ServerConfig) (*ACME, error) {
 	}
 
 	instance := &ACME{
-		retry:        c.ACME.RetryCount,
-		needNotAfter: acmeprovider.IsACMEProviderGoogle(c.ACME.Provider),
+		retry:          c.ACME.RetryCount,
+		needNotAfter:   acmeprovider.IsACMEProviderGoogle(c.ACME.Provider),
+		preferredChain: c.ACME.PreferredChain,
 	}
-	config := lego.NewConfig(user)
-	config.CADirURL = acmeprovider.GetACMEURL(c.ACME.Provider)
-	config.Certificate.KeyType = certcrypto.EC256
+	legoCfg := lego.NewConfig(user)
+	legoCfg.CADirURL = acmeprovider.GetACMEURL(c.ACME.Provider)
+	legoCfg.Certificate.KeyType = certcrypto.EC256
 
-	instance.Client, err = lego.NewClient(config)
+	instance.Client, err = lego.NewClient(legoCfg)
 	if err != nil {
 		return nil, fmt.Errorf("unexpected error constructing acme client: %w", err)
 	}
 
-	err = SetChallenger(config, instance, c)
+	err = SetChallenger(legoCfg, instance, c)
 	if err != nil {
 		return nil, err
 	}

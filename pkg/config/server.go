@@ -89,6 +89,7 @@ type ACMEConfig struct {
 	CertLifeTime   string   `toml:"certLifeTime" json:"cert_life_time,omitempty"`
 	RenewTimeLeft  string   `toml:"renewTimeLeft" json:"renew_time_left,omitempty"`
 	AllowedDomains []string `toml:"allowedDomains" json:"allowed_domains,omitempty"`
+	PreferredChain string   `toml:"preferredChain" json:"preferred_chain,omitempty"`
 
 	CertLifeTimeDuration  time.Duration `toml:"-" json:"-"`
 	RenewTimeLeftDuration time.Duration `toml:"-" json:"-"`

@@ -13,6 +13,10 @@ challengeType = "dns"
 certLifeTime = "168h"
 renewTimeLeft = "24h"
 
+# https://cert-manager.io/docs/configuration/acme/#alternative-certificate-chains
+# https://github.com/acmesh-official/acme.sh/wiki/Preferred-Chain
+preferredChain = ""
+
 # Give root domain here
 allowedDomains = [
     "example.com",
@@ -47,7 +51,7 @@ apiKey = ""
 # or you can use tencent cloud
 # type = "tencent"
 # secretID = ""
-# SecretKey = ""
+# secretKey = ""
 
 [HttpProvider]
 type = "s3"

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	publicca "cloud.google.com/go/security/publicca/apiv1beta1"
-	"cloud.google.com/go/security/publicca/apiv1beta1/publiccapb"
+	publicca "cloud.google.com/go/security/publicca/apiv1"
+	"cloud.google.com/go/security/publicca/apiv1/publiccapb"
 	"google.golang.org/api/option"
 	"pkg.para.party/certdx/pkg/config"
 )

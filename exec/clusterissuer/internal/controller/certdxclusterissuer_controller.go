@@ -136,7 +136,7 @@ func (o *CertDXClusterIssuerReconciler) Sign(ctx context.Context, cr signer.Cert
 	}
 
 	return signer.PEMBundle{
-		ChainPEM: resp.Cert,
+		ChainPEM: resp.FullChain,
 		CAPEM:    resp.Key,
 	}, nil
 }
