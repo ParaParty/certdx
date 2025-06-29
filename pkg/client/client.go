@@ -35,9 +35,17 @@ type certData struct {
 type watchingCert struct {
 	Data           atomic.Pointer[certData]
 	Config         config.ClientCertification
-	UpdateHandlers []certUpdateHandler
+	UpdateHandlers []CertificateUpdateHandler
 	UpdateChan     chan certData
 	Stop           atomic.Pointer[chan struct{}]
+}
+
+type WatchingCertsOption func(*watchingCert)
+
+func WithCertificateHandlerOption(handler CertificateUpdateHandler) WatchingCertsOption {
+	return func(wc *watchingCert) {
+		wc.UpdateHandlers = append(wc.UpdateHandlers, handler)
+	}
 }
 
 func (c *watchingCert) watchUpdate(wg *sync.WaitGroup) {
@@ -107,7 +115,7 @@ func (r *CertDXClientDaemon) ClientInit() {
 
 		cert := &watchingCert{
 			Config:         c,
-			UpdateHandlers: []certUpdateHandler{writeCertAndDoCommand},
+			UpdateHandlers: []CertificateUpdateHandler{writeCertAndDoCommand},
 			UpdateChan:     make(chan certData, 1),
 		}
 		cert.Data.Store(&cd)
@@ -119,15 +127,18 @@ func (r *CertDXClientDaemon) ClientInit() {
 	}
 }
 
-func (r *CertDXClientDaemon) AddCertToWatch(name string, domains []string) error {
+func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, options []WatchingCertsOption) error {
 	cd := certData{
 		Domains: domains,
 	}
 
 	cert := &watchingCert{
 		Config:         config.ClientCertification{Name: name, Domains: domains},
-		UpdateHandlers: []certUpdateHandler{},
+		UpdateHandlers: []CertificateUpdateHandler{},
 		UpdateChan:     make(chan certData, 1),
+	}
+	for _, it := range options {
+		it(cert)
 	}
 
 	cert.Data.Store(&cd)
@@ -138,6 +149,9 @@ func (r *CertDXClientDaemon) AddCertToWatch(name string, domains []string) error
 	go cert.watchUpdate(&r.wg)
 
 	return nil
+}
+func (r *CertDXClientDaemon) AddCertToWatch(name string, domains []string) error {
+	return r.AddCertToWatchOpt(name, domains, []WatchingCertsOption{})
 }
 
 func (r *CertDXClientDaemon) stopWatchingCert() {

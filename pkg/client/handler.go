@@ -10,7 +10,7 @@ import (
 	"pkg.para.party/certdx/pkg/logging"
 )
 
-type certUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
+type CertificateUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
 
 func checkFileAndCreate(file string) (exists bool, err error) {
 	exists = false
