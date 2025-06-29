@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/exec/tools/config"
+	"pkg.para.party/certdx/exec/tools/tasks"
+	"pkg.para.party/certdx/exec/tools/tasks/txcReplaceCertificate"
 )
 
 var (
@@ -13,17 +14,10 @@ var (
 	buildDate   string
 )
 
-var (
-	rootCMD = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-
-	help    = rootCMD.BoolP("help", "h", false, "Print help")
-	version = rootCMD.BoolP("version", "v", false, "Print version")
-)
-
 func main() {
-	rootCMD.Parse(os.Args[1:])
+	config.RootCMD.Parse(os.Args[1:])
 
-	if *version {
+	if *config.Version {
 		fmt.Printf("Certdx tools %s, built at %s\n", buildCommit, buildDate)
 		os.Exit(0)
 	}
@@ -31,17 +25,21 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "show-cache":
-			showCache()
+			tasks.ShowCache()
 		case "google-account":
-			registerGoogleAccount()
+			tasks.RegisterGoogleAccount()
 		case "make-ca":
-			makeCA()
+			tasks.MakeCA()
 		case "make-server":
-			makeServer()
+			tasks.MakeServer()
 		case "make-client":
-			makeClient()
+			tasks.MakeClient()
+		case "tencent-cloud-replace-certificate":
+			fallthrough
+		case "tencent-cloud-replace-certificates":
+			txcReplaceCertificate.TencentCloudReplaceCertificate()
 		default:
-			if !*help {
+			if !*config.Help {
 				fmt.Printf("Unknown command: %s", os.Args[1])
 			}
 			printHelp()
@@ -60,15 +58,16 @@ Usage:
   %s <command> [options]
 
 Commands:
-  show-cache:     Print server cert cache
-  google-account: Register google cloud ACME account
-  make-ca:        Make grpc mtls CA certificate and key
-  make-server:    Make grpc mtls Server certificate and key
-  make-client:    Make grpc mtls Client certificate and key
+  show-cache:    						Print server cert cache
+  google-account:						Register google cloud ACME account
+  make-ca:       						Make grpc mtls CA certificate and key
+  make-server:   						Make grpc mtls Server certificate and key
+  make-client:   						Make grpc mtls Client certificate and key
+  tencent-cloud-replace-certificate:    Replace Tencent Cloud Expiring Certificates
 
-For command details, use %s <commmand> --help
+For command details, use %s <commmand> --Help
 
 Options:
 %s`,
-		executableName, executableName, rootCMD.FlagUsages())
+		executableName, executableName, config.RootCMD.FlagUsages())
 }

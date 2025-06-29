@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"pkg.para.party/certdx/pkg/types"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,7 +31,7 @@ type ServerCacheFileEntry struct {
 
 type ServerCacheFile struct {
 	path    string
-	entries map[uint64]*ServerCacheFileEntry
+	entries map[types.DomainKey]*ServerCacheFileEntry
 	update  chan *ServerCacheFileEntry
 }
 
@@ -45,7 +46,7 @@ type ServerCertCacheEntry struct {
 }
 
 type ServerCertCache struct {
-	entries map[uint64]*ServerCertCacheEntry
+	entries map[types.DomainKey]*ServerCertCacheEntry
 	mutex   sync.Mutex
 }
 
@@ -75,7 +76,7 @@ func (c *CertT) IsValid() bool {
 
 func makeServerCertCache() ServerCertCache {
 	return ServerCertCache{
-		entries: make(map[uint64]*ServerCertCacheEntry),
+		entries: make(map[types.DomainKey]*ServerCertCacheEntry),
 	}
 }
 
@@ -101,7 +102,7 @@ func MakeServerCacheFile() ServerCacheFile {
 
 	return ServerCacheFile{
 		path:    cachePath,
-		entries: make(map[uint64]*ServerCacheFileEntry),
+		entries: make(map[types.DomainKey]*ServerCacheFileEntry),
 		update:  make(chan *ServerCacheFileEntry, 10),
 	}
 }

@@ -7,8 +7,11 @@ toolchain go1.24.3
 replace pkg.para.party/certdx => ../..
 
 require (
+	github.com/BurntSushi/toml v1.5.0
 	github.com/spf13/pflag v1.0.6
-	pkg.para.party/certdx v0.0.0
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1196
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.0.1193
+	pkg.para.party/certdx v0.4.2
 )
 
 require (
@@ -52,8 +55,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.14.2 // indirect
 	github.com/miekg/dns v1.1.66 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1177 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1174 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1196 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.61.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect

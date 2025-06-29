@@ -1,11 +1,11 @@
-package main
+package tasks
 
 import (
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/server"
 )
 
-func showCache() {
+func ShowCache() {
 	cacheFile := server.MakeServerCacheFile()
 	err := cacheFile.ReadCacheFile()
 	if err != nil {

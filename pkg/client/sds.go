@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"pkg.para.party/certdx/pkg/types"
 	"sync/atomic"
 	"time"
 
@@ -39,14 +40,14 @@ func (e *killed) Error() string {
 type CertDXgRPCClient struct {
 	tlsCred credentials.TransportCredentials
 	server  *config.ClientGRPCServer
-	certs   map[uint64]*watchingCert
+	certs   map[types.DomainKey]*watchingCert
 
 	kill     chan struct{}
 	Running  atomic.Bool
 	Received atomic.Pointer[chan struct{}]
 }
 
-func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[uint64]*watchingCert) *CertDXgRPCClient {
+func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[types.DomainKey]*watchingCert) *CertDXgRPCClient {
 	c := &CertDXgRPCClient{
 		server: server,
 		certs:  certs,

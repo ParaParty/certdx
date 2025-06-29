@@ -12,3 +12,5 @@ type HttpCertResp struct {
 	Key           []byte        `json:"key"`
 	Err           string        `json:"err"`
 }
+
+type DomainKey uint64

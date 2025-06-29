@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	cloud.google.com/go/security v1.18.5
+	github.com/BurntSushi/toml v1.5.0
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.14
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.67
@@ -54,8 +55,8 @@ require (
 	github.com/googleapis/gax-go/v2 v2.14.2 // indirect
 	github.com/miekg/dns v1.1.66 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1177 // indirect
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1174 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1196 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1196 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.61.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
 	go.opentelemetry.io/otel v1.36.0 // indirect

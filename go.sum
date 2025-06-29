@@ -6,6 +6,8 @@ cloud.google.com/go/compute/metadata v0.7.0 h1:PBWF+iiAerVNe8UCHxdOt6eHLVc3ydFeO
 cloud.google.com/go/compute/metadata v0.7.0/go.mod h1:j5MvL9PprKL39t166CoB1uVHfQMs4tFQZZcKwksXUjo=
 cloud.google.com/go/security v1.18.5 h1:6hqzvuwC8za9jyCTxygmEHnp4vZ8hfhwKVArxSCAVCo=
 cloud.google.com/go/security v1.18.5/go.mod h1:D1wuUkDwGqTKD0Nv7d4Fn2Dc53POJSmO4tlg1K1iS7s=
+github.com/BurntSushi/toml v1.5.0 h1:W5quZX/G/csjUnuI8SUYlsHs9M38FC7znL0lIO+DvMg=
+github.com/BurntSushi/toml v1.5.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/aws/aws-sdk-go-v2 v1.36.3 h1:mJoei2CxPutQVxaATCzDUjcZEjVRdpsiiXi2o38yqWM=
 github.com/aws/aws-sdk-go-v2 v1.36.3/go.mod h1:LLXuLpgzEbD766Z5ECcRmi8AzSwfZItDtmABVkRLGzg=
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.10 h1:zAybnyUQXIZ5mok5Jqwlf58/TFE7uvd3IAsa1aF9cXs=
@@ -93,11 +95,10 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1174/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
-github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1177 h1:Lcr72Dtd1eRYP4jz9xch9SN5lJ80e2RFnIwTHlaxAFY=
-github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1177/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
-github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1174 h1:LRmjetOxA7ZjHIEiYKoZmVOntxpzscgrse50PDEUs/s=
-github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1174/go.mod h1:H0oIwVla6DcgpKnEvFcFEphENZng64Mqkq2p4alU4tE=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1196 h1:2pRWolqipwF5RBtpSKp9YAg9cIvIPnhFCkj5FFhv8V8=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.1196/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1196 h1:02DmXsC68arv+DL7C9nJdA7LACU6RNPcLcooMvS7B1U=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/dnspod v1.0.1196/go.mod h1:NT4Tt/7c5rZR1HK8aqmRBdPdnqIkgiOfj9X41FBer88=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=
 go.opentelemetry.io/auto/sdk v1.1.0/go.mod h1:3wSPjt5PWp2RhlCcmmOial7AvC4DQqZb7a7wCow3W8A=

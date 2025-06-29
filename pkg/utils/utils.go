@@ -34,3 +34,25 @@ func Retry(retryCount int, work func() error) error {
 
 	return fmt.Errorf("errored too many times, give up retry. last error is: %w", err)
 }
+
+func IsSameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	setA := make(map[string]struct{}, len(a))
+	for _, v := range a {
+		setA[v] = struct{}{}
+	}
+	setB := make(map[string]struct{}, len(b))
+	for _, v := range b {
+		setB[v] = struct{}{}
+	}
+
+	for key := range setA {
+		if _, ok := setB[key]; !ok {
+			return false
+		}
+	}
+	return true
+}

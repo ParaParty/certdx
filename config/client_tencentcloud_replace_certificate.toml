@@ -1,0 +1,11 @@
+[Http.MainServer]
+url = "https://certdxserver.example.com:10001/"
+token = "KFCCrazyThursdayVMe50"
+
+[[Certifications]]
+name = "certFileNameToSave"
+# will save cert and key file at savePath/name.pem and savePath/name.key
+domains = [
+    "*.example.com",
+    "*.mm.example.com",
+]

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"hash/fnv"
+	"pkg.para.party/certdx/pkg/types"
 	"strings"
 )
 
@@ -30,12 +31,12 @@ func DomainAllowed(allowedList []string, toCheck string) bool {
 	return IsSubdomain(toCheck, allowedList)
 }
 
-func DomainsAsKey(domains []string) uint64 {
+func DomainsAsKey(domains []string) types.DomainKey {
 	var h uint64 = 0
 	for _, d := range domains {
 		hf := fnv.New64a()
 		hf.Write([]byte(d))
 		h += hf.Sum64()
 	}
-	return h
+	return types.DomainKey(h)
 }

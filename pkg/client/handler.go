@@ -41,8 +41,12 @@ func checkFileAndCreate(file string) (exists bool, err error) {
 func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification) {
 	var doCommand, ce, ke bool
 
-	certPath, keyPath := c.GetFullChainAndKeyPath()
-	ce, err := checkFileAndCreate(certPath)
+	certPath, keyPath, err := c.GetFullChainAndKeyPath()
+	if err != nil {
+		logging.Debug("Failed to get full chain and key path")
+		return
+	}
+	ce, err = checkFileAndCreate(certPath)
 	if err != nil {
 		goto ERR
 	}

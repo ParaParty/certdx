@@ -1,4 +1,4 @@
-package main
+package tasks
 
 import (
 	"os"
@@ -8,13 +8,13 @@ import (
 	"pkg.para.party/certdx/pkg/tools"
 )
 
-func makeCA() {
+func MakeCA() {
 	var (
 		caCMD = flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 
 		caOrganization = caCMD.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		caCommonName   = caCMD.StringP("common-name", "c", "CertDX Private Certificate Authority", "Subject Common Name")
-		caHelp         = caCMD.BoolP("help", "h", false, "Print help")
+		caHelp         = caCMD.BoolP("Help", "h", false, "Print Help")
 	)
 	caCMD.Parse(os.Args[2:])
 
