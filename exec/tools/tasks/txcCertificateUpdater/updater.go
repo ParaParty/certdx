@@ -1,81 +1,74 @@
-package txcReplaceCertificate
+package txcCertificateUpdater
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"github.com/BurntSushi/toml"
-	flag "github.com/spf13/pflag"
-	txcommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
-	txerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
+	txprofile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	"google.golang.org/appengine"
 	"io"
 	"os"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/types"
 	"pkg.para.party/certdx/pkg/utils"
 	"strings"
 	"sync"
 	"time"
 
-	txprofile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
+	txcommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
+	txerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
 	txssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
 )
 
-type ResourceTypeRegions struct {
-	ResourceType string   `json:"ResourceType,omitnil,omitempty" name:"resource_type"`
-	Regions      []string `json:"Regions,omitnil,omitempty" name:"regions"`
+type TencentCloudCertificateUpdater struct {
+	cmd *txcCertsUpdateCmd
+
+	cfg    *TencentCloudConfig
+	client *txssl.Client
+
+	wg           sync.WaitGroup
+	taskErr      appengine.MultiError
+	taskErrMutex sync.Mutex
+
+	certDXDaemon *client.CertDXClientDaemon
 }
 
-type ClientCertification struct {
-	Name                 string                `toml:"name" json:"name,omitempty"`
-	Domains              []string              `toml:"domains" json:"domains,omitempty"`
-	ResourceTypes        []string              `toml:"resourceTypes" json:"resource_types"`
-	ResourceTypesRegions []ResourceTypeRegions `toml:"resourceTypesRegions" json:"resource_types_regions"`
+func MakeTencentCloudCertificateUpdater(updaterCmd *txcCertsUpdateCmd) *TencentCloudCertificateUpdater {
+	return &TencentCloudCertificateUpdater{
+		cmd: updaterCmd,
 
-	certDxKey        types.DomainKey
-	oldCertificateId string
-}
+		cfg: &TencentCloudConfig{},
+		// client : in tencent cloud init
 
-func (r *ClientCertification) ToResourceTypesAndResourceTypesRegions() (resourceTypes []*string, resourceTypesRegions []*txssl.ResourceTypeRegions) {
-	resourceTypes = make([]*string, 0)
-	resourceTypesRegions = make([]*txssl.ResourceTypeRegions, 0)
+		wg:           sync.WaitGroup{},
+		taskErr:      appengine.MultiError{},
+		taskErrMutex: sync.Mutex{},
 
-	resourceTypes = txcommon.StringPtrs(r.ResourceTypes)
-	for _, it := range r.ResourceTypesRegions {
-		resourceTypesRegions = append(resourceTypesRegions, &txssl.ResourceTypeRegions{
-			ResourceType: txcommon.StringPtr(it.ResourceType),
-			Regions:      txcommon.StringPtrs(it.Regions),
-		})
+		// certDXDaemon : in certdx init
 	}
-	if len(resourceTypesRegions) == 0 {
-		resourceTypesRegions = nil
+}
+
+func isActivatingCertificateExists(activatingCertificates []*txssl.Certificates, cert *txssl.Certificates) (*txssl.Certificates, error) {
+	if cert == nil {
+		return nil, fmt.Errorf("certificate is nil")
 	}
-
-	return resourceTypes, resourceTypesRegions
+	for _, ac := range activatingCertificates {
+		if ac == nil {
+			return nil, fmt.Errorf("activatingCertificates contains nil certificate")
+		}
+		if ac.CertificateId == cert.CertificateId {
+			continue
+		}
+		if isSameStrSetRejectNilItemPtrArrPtrArr(ac.CertSANs, cert.CertSANs) {
+			return ac, nil
+		}
+	}
+	return nil, nil
 }
 
-type TencentCloudConfig struct {
-	Authorization struct {
-		SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
-		SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
-	} `toml:"Authorization" json:"authorization,omitempty"`
-
-	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
-}
-
-type TencentCloudCertificateReplace struct {
-	cfg     *TencentCloudConfig
-	client  *txssl.Client
-	wg      sync.WaitGroup
-	taskErr appengine.MultiError
-
-	mutex sync.Mutex
-}
-
-func (r *TencentCloudCertificateReplace) GetCertificateToUpdate() error {
+func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 	logging.Info("retrieving expiring certificates...")
 	expiringCertificates, err := r.FetchTencentCloudCertificate(func(req *txssl.DescribeCertificatesRequest) {
 		req.CertificateType = txcommon.StringPtr("SVR")          // 服务端证书
@@ -137,29 +130,12 @@ func (r *TencentCloudCertificateReplace) GetCertificateToUpdate() error {
 	return nil
 }
 
-func isActivatingCertificateExists(activatingCertificates []*txssl.Certificates, cert *txssl.Certificates) (*txssl.Certificates, error) {
-	if cert == nil {
-		return nil, fmt.Errorf("certificate is nil")
-	}
-	for _, ac := range activatingCertificates {
-		if ac == nil {
-			return nil, fmt.Errorf("activatingCertificates contains nil certificate")
-		}
-		if ac.CertificateId == cert.CertificateId {
-			continue
-		}
-		if isSameStrSetRejectNilItemPtrArrPtrArr(ac.CertSANs, cert.CertSANs) {
-			return ac, nil
-		}
-	}
-	return nil, nil
-}
-func (r *TencentCloudCertificateReplace) AddReplaceTask() error {
+func (r *TencentCloudCertificateUpdater) AddReplaceTask() error {
 	for _, c := range r.cfg.Certifications {
 		taskCert := c // copy
 		r.wg.Add(1)
 
-		err := certDXDaemon.AddCertToWatchOpt(taskCert.Name, taskCert.Domains, []client.WatchingCertsOption{
+		err := r.certDXDaemon.AddCertToWatchOpt(taskCert.Name, taskCert.Domains, []client.WatchingCertsOption{
 			client.WithCertificateHandlerOption(func(fullchain, key []byte, certDxC *config.ClientCertification) {
 				req := txssl.NewUpdateCertificateInstanceRequest()
 				req.OldCertificateId = &taskCert.oldCertificateId
@@ -185,9 +161,9 @@ func (r *TencentCloudCertificateReplace) AddReplaceTask() error {
 				})
 
 				if err != nil {
-					r.mutex.Lock()
+					r.taskErrMutex.Lock()
 					r.taskErr = append(r.taskErr, err)
-					r.mutex.Unlock()
+					r.taskErrMutex.Unlock()
 				}
 
 				r.wg.Done()
@@ -201,7 +177,7 @@ func (r *TencentCloudCertificateReplace) AddReplaceTask() error {
 	return nil
 }
 
-func (r *TencentCloudCertificateReplace) WaitReplaceTask() error {
+func (r *TencentCloudCertificateUpdater) WaitReplaceTask() error {
 	waitDeadlineCtx, cancelFunc := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
 	defer cancelFunc()
 
@@ -226,8 +202,7 @@ func (r *TencentCloudCertificateReplace) WaitReplaceTask() error {
 		}
 	}
 }
-
-func (r *TencentCloudCertificateReplace) FetchTencentCloudCertificate(opt func(request *txssl.DescribeCertificatesRequest)) ([]*txssl.Certificates, error) {
+func (r *TencentCloudCertificateUpdater) FetchTencentCloudCertificate(opt func(request *txssl.DescribeCertificatesRequest)) ([]*txssl.Certificates, error) {
 	offset := uint64(0)
 	pageSize := uint64(100)
 
@@ -289,73 +264,29 @@ func LogMissingCerts(a, b []ClientCertification) error {
 	return nil
 }
 
-type txcReplaceCertsConf struct {
-	confPath *string
-}
-
-var cfg *txcReplaceCertsConf
-var certDXDaemon *client.CertDXClientDaemon
-var tencentCloudCertReplace *TencentCloudCertificateReplace
-
-func initCmd() error {
-	var (
-		clientCMD = flag.NewFlagSet(os.Args[1], flag.ExitOnError)
-
-		clientHelp = clientCMD.BoolP("help", "h", false, "Print help")
-		conf       = clientCMD.StringP("conf", "c", "./client.toml", "Config file path")
-		pDebug     = clientCMD.BoolP("debug", "d", false, "Enable debug log")
-	)
-	_ = clientCMD.Parse(os.Args[2:])
-
-	if *clientHelp {
-		clientCMD.PrintDefaults()
-		os.Exit(0)
-	}
-
-	logging.SetDebug(*pDebug)
-	if conf == nil || len(*conf) == 0 {
-		logging.Fatal("Config file path is empty")
-	}
-
-	cfg = &txcReplaceCertsConf{
-		confPath: conf,
-	}
-
-	return nil
-}
-
-// Init CretDX Client
-func InitCertDX() error {
-	certDXDaemon = client.MakeCertDXClientDaemon()
-	err := certDXDaemon.LoadConfigurationAndValidateOpt(*cfg.confPath, []config.ValidatingOption{
+func (r *TencentCloudCertificateUpdater) InitCertDX() error {
+	r.certDXDaemon = client.MakeCertDXClientDaemon()
+	err := r.certDXDaemon.LoadConfigurationAndValidateOpt(*r.cmd.confPath, []config.ValidatingOption{
 		config.WithAcceptEmptyCertificateSavePath(true),
 		config.WithAcceptEmptyCertificatesList(false),
 	})
 	if err != nil {
 		logging.Fatal("Invalid config: %s", err)
 	}
-	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)
+	logging.Debug("Reconnect duration is: %s", r.certDXDaemon.Config.Common.ReconnectDuration)
 
 	return nil
 }
 
-// Init Tencent Cloud Client
-func InitTencentCloud() error {
-	tencentCloudCertReplace = &TencentCloudCertificateReplace{
-		cfg:     &TencentCloudConfig{},
-		wg:      sync.WaitGroup{},
-		taskErr: appengine.MultiError{},
-		mutex:   sync.Mutex{},
-	}
-
-	cfile, err := os.Open(*cfg.confPath)
+func (r *TencentCloudCertificateUpdater) InitTencentCloud() error {
+	cfile, err := os.Open(*r.cmd.confPath)
 	if err != nil {
 		logging.Fatal("Open config file failed, err: %s", err)
 		return err
 	}
 	defer cfile.Close()
 	if b, err := io.ReadAll(cfile); err == nil {
-		if err := toml.Unmarshal(b, tencentCloudCertReplace.cfg); err == nil {
+		if err := toml.Unmarshal(b, r.cfg); err == nil {
 			logging.Info("Config loaded")
 		} else {
 			logging.Fatal("Unmarshalling config failed, err: %s", err)
@@ -364,14 +295,14 @@ func InitTencentCloud() error {
 		logging.Fatal("Reading config file failed, err: %s", err)
 	}
 
-	credential := txcommon.NewCredential(tencentCloudCertReplace.cfg.Authorization.SecretID,
-		tencentCloudCertReplace.cfg.Authorization.SecretKey)
+	credential := txcommon.NewCredential(r.cfg.Authorization.SecretID,
+		r.cfg.Authorization.SecretKey)
 
 	cpf := txprofile.NewClientProfile()
 	cpf.HttpProfile.Endpoint = "ssl.tencentcloudapi.com"
 	cpf.HttpProfile.ReqTimeout = 60
 
-	tencentCloudCertReplace.client, err = txssl.NewClient(credential, "", cpf)
+	r.client, err = txssl.NewClient(credential, "", cpf)
 	if err != nil {
 		logging.Fatal("Fail to create tencent cloud client, err: %s", err)
 	}
@@ -379,44 +310,41 @@ func InitTencentCloud() error {
 	return nil
 }
 
-func TencentCloudReplaceCertificate() {
-	// init
-	err := initCmd()
+func (r *TencentCloudCertificateUpdater) InitCertificateUpdater() error {
+	err := r.InitCertDX()
 	if err != nil {
-		logging.Fatal("Failed to initialize certdx: %s", err)
+		logging.Error("Failed to initialize certdx: %s", err)
+		return err
 	}
 
-	err = InitCertDX()
+	err = r.InitTencentCloud()
 	if err != nil {
-		logging.Fatal("Failed to initialize certdx: %s", err)
+		logging.Error("Failed to initialize tencent cloud: %s", err)
+		return err
 	}
 
-	err = InitTencentCloud()
-	if err != nil {
-		logging.Fatal("Failed to initialize tencent cloud: %s", err)
-	}
+	return nil
+}
 
-	err = tencentCloudCertReplace.GetCertificateToUpdate()
-	if err != nil {
-		logging.Fatal("Failed to initialize tencent cloud: %s", err)
-	}
-
-	err = tencentCloudCertReplace.AddReplaceTask()
+func (r *TencentCloudCertificateUpdater) InvokeCertificateUpdate() error {
+	err := r.GetCertificateToUpdate()
 	if err != nil {
 		logging.Fatal("Failed to initialize tencent cloud: %s", err)
 	}
 
-	switch certDXDaemon.Config.Common.Mode {
+	err = r.AddReplaceTask()
+	if err != nil {
+		logging.Fatal("Failed to initialize tencent cloud: %s", err)
+	}
+
+	switch r.certDXDaemon.Config.Common.Mode {
 	case config.CLIENT_MODE_HTTP:
-		go certDXDaemon.HttpMain()
+		go r.certDXDaemon.HttpMain()
 	case config.CLIENT_MODE_GRPC:
-		go certDXDaemon.GRPCMain()
+		go r.certDXDaemon.GRPCMain()
 	default:
-		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Common.Mode)
+		logging.Fatal("Mode: \"%s\" is not supported", r.certDXDaemon.Config.Common.Mode)
 	}
 
-	err = tencentCloudCertReplace.WaitReplaceTask()
-	if err != nil {
-		logging.Fatal("Failed to initialize tencent cloud: %s", err)
-	}
+	return r.WaitReplaceTask()
 }

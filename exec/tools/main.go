@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"pkg.para.party/certdx/exec/tools/config"
 	"pkg.para.party/certdx/exec/tools/tasks"
-	"pkg.para.party/certdx/exec/tools/tasks/txcReplaceCertificate"
+	"pkg.para.party/certdx/exec/tools/tasks/txcCertificateUpdater"
 )
 
 var (
@@ -34,10 +34,10 @@ func main() {
 			tasks.MakeServer()
 		case "make-client":
 			tasks.MakeClient()
-		case "tencent-cloud-replace-certificate":
+		case "tencent-cloud-certificate-updater":
 			fallthrough
-		case "tencent-cloud-replace-certificates":
-			txcReplaceCertificate.TencentCloudReplaceCertificate()
+		case "tencent-cloud-certificates-updater":
+			txcCertificateUpdater.TencentCloudReplaceCertificate()
 		default:
 			if !*config.Help {
 				fmt.Printf("Unknown command: %s", os.Args[1])
@@ -63,7 +63,7 @@ Commands:
   make-ca:       						Make grpc mtls CA certificate and key
   make-server:   						Make grpc mtls Server certificate and key
   make-client:   						Make grpc mtls Client certificate and key
-  tencent-cloud-replace-certificate:    Replace Tencent Cloud Expiring Certificates
+  tencent-cloud-certificate-updater:    Replace Tencent Cloud Expiring Certificates
 
 For command details, use %s <commmand> --Help
 

@@ -1,4 +1,4 @@
-package txcReplaceCertificate
+package txcCertificateUpdater
 
 func isSameStrSetRejectNilItem(a []*string, b []string) bool {
 	if len(a) != len(b) {
