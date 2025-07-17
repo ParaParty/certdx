@@ -1,6 +1,5 @@
 # Introduction
-Certdx is A centralized SSL certificate daemon including server and client.
-One centralized server manage all certificates and multiple clients use the certificates.
+CertDX is a centralized SSL certificate daemon that provides a solution for managing SSL certificates across multiple services and applications.  
 
 # Caddy Plugin
 It has caddy plugin can be used as [certifacate manager](https://caddyserver.com/docs/caddyfile/directives/tls#certificate-managers) in caddy.
