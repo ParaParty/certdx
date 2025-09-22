@@ -4,18 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/BurntSushi/toml"
 	txprofile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	"google.golang.org/appengine"
-	"io"
-	"os"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/utils"
-	"strings"
-	"sync"
-	"time"
 
 	txcommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	txerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
@@ -58,7 +59,7 @@ func isActivatingCertificateExists(activatingCertificates []*txssl.Certificates,
 		if ac == nil {
 			return nil, fmt.Errorf("activatingCertificates contains nil certificate")
 		}
-		if ac.CertificateId == cert.CertificateId {
+		if ac.CertificateId != nil && cert.CertificateId != nil && *ac.CertificateId == *cert.CertificateId {
 			continue
 		}
 		if isSameStrSetRejectNilItemPtrArrPtrArr(ac.CertSANs, cert.CertSANs) {
