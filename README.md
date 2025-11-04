@@ -1,4 +1,7 @@
 # Introduction
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ParaParty/certdx)
+
 CertDX is a centralized SSL certificate daemon that provides a solution for managing SSL certificates across multiple services and applications.  
 
 # Caddy Plugin
