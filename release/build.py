@@ -20,8 +20,6 @@ targets = [
     ['linux',   'amd64'],
     ['linux',   'arm'],
     ['linux',   'arm64'],
-    ['linux',   'mips'],
-    ['linux',   'mipsle'],
     ['darwin',  'arm64'],
     ['windows', 'amd64'],
 ]
