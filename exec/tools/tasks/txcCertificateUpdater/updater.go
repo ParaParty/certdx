@@ -144,12 +144,17 @@ func (r *TencentCloudCertificateUpdater) AddReplaceTask() error {
 				req.CertificatePrivateKey = txcommon.StringPtr(strings.TrimSpace(string(key)))
 				req.ResourceTypes, req.ResourceTypesRegions = taskCert.ToResourceTypesAndResourceTypesRegions()
 				req.ExpiringNotificationSwitch = txcommon.Uint64Ptr(1)
+				req.Repeatable = txcommon.BoolPtr(false)
 
 				err := utils.Retry(3, func() error {
 					resp, err := r.client.UpdateCertificateInstance(req)
 					if err != nil {
 						var tencentCloudSDKError *txerr.TencentCloudSDKError
 						if errors.As(err, &tencentCloudSDKError) {
+							if tencentCloudSDKError.Code == "FailedOperation.CertificateExists" {
+								logging.Warn("certificate already exists, skipping upload. Code: %v, Message: %v, RequestId: %v", tencentCloudSDKError.Code, tencentCloudSDKError.Message, tencentCloudSDKError.RequestId)
+								return nil
+							}
 							logging.Error("UploadUpdateCertificateInstance, failed: %v, requestId: %v", tencentCloudSDKError, tencentCloudSDKError.RequestId)
 						} else {
 							logging.Error("UploadUpdateCertificateInstance, failed: %v", err)
@@ -296,8 +301,7 @@ func (r *TencentCloudCertificateUpdater) InitTencentCloud() error {
 		logging.Fatal("Reading config file failed, err: %s", err)
 	}
 
-	credential := txcommon.NewCredential(r.cfg.Authorization.SecretID,
-		r.cfg.Authorization.SecretKey)
+	credential := txcommon.NewCredential(r.cfg.Authorization.SecretID, r.cfg.Authorization.SecretKey)
 
 	cpf := txprofile.NewClientProfile()
 	cpf.HttpProfile.Endpoint = "ssl.tencentcloudapi.com"
