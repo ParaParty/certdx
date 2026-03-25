@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
 	"pkg.para.party/certdx/exec/tools/config"
 	"pkg.para.party/certdx/exec/tools/tasks"
+	"pkg.para.party/certdx/exec/tools/tasks/kubernetesCertificateUpdater"
 	"pkg.para.party/certdx/exec/tools/tasks/txcCertificateUpdater"
 )
 
@@ -38,6 +40,10 @@ func main() {
 			fallthrough
 		case "tencent-cloud-certificates-updater":
 			txcCertificateUpdater.TencentCloudReplaceCertificate()
+		case "k8s-certificate-updater":
+			fallthrough
+		case "kubernetes-certificate-updater":
+			kubernetesCertificateUpdater.KubernetesReplaceCertificate()
 		default:
 			if !*config.Help {
 				fmt.Printf("Unknown command: %s", os.Args[1])
