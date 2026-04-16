@@ -154,6 +154,10 @@ func (r *KubernetesCertificateUpdater) updateCertificate(ctx context.Context, ce
 		domainsAnnotation := cert.Annotations[certDxDomainAnnotation]
 		domains := parseDomainsAnnotation(domainsAnnotation)
 
+		if isDomainsAllowed(r.certDXDaemon, domains) != nil {
+			continue
+		}
+
 		err := utils.Retry(5, func() error {
 			certToUpload, err := r.certDXDaemon.GetCertificate(ctx, utils.DomainsAsKey(domains))
 			if err != nil {
@@ -204,6 +208,11 @@ func (r *KubernetesCertificateUpdater) updateCertsToWatchList(ctx context.Contex
 	for _, cert := range certs {
 		domainsAnnotation := cert.Annotations[certDxDomainAnnotation]
 		domains := parseDomainsAnnotation(domainsAnnotation)
+
+		if isDomainsAllowed(r.certDXDaemon, domains) != nil {
+			continue
+		}
+
 		watchKey := strings.Join(domains, ",")
 
 		err := r.certDXDaemon.AddCertToWatch(watchKey, domains)
@@ -272,4 +281,13 @@ func parseDomainsAnnotation(domainListStr string) []string {
 	}
 
 	return ret
+}
+
+func isDomainsAllowed(certdx *client.CertDXClientDaemon, domains []string) error {
+	for _, item := range certdx.Config.Certifications {
+		if utils.DomainsAllowed(item.Domains, domains) {
+			return nil
+		}
+	}
+	return fmt.Errorf("domains not allowed: %s", strings.Join(domains, ","))
 }
