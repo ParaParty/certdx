@@ -1,0 +1,11 @@
+[Http.MainServer]
+url = "https://certdxserver.example.com:10001/"
+token = "KFCCrazyThursdayVMe50"
+
+# Certificate list, indicating which certificates this certdx client needs to take over for updates.
+[[Certifications]]
+name = "domainsToWatch"
+domains = [
+    "*.example.com",
+    "*.mm.example.com",
+]
