@@ -28,24 +28,28 @@ func (c *ServerConfig) Validate() error {
 		ret = append(ret, err)
 	}
 
-	switch c.ACME.ChallengeType {
-	case ChallengeTypeDns01:
-		if c.DnsProvider != nil {
-			if err := c.DnsProvider.Validate(); err != nil {
-				ret = append(ret, err)
+	// The mock provider is hermetic and does not require any DNS/HTTP
+	// challenge provider configuration.
+	if !acmeprovider.IsACMEProviderMock(c.ACME.Provider) {
+		switch c.ACME.ChallengeType {
+		case ChallengeTypeDns01:
+			if c.DnsProvider != nil {
+				if err := c.DnsProvider.Validate(); err != nil {
+					ret = append(ret, err)
+				}
+			} else {
+				ret = append(ret, fmt.Errorf("no dns provider"))
 			}
-		} else {
-			ret = append(ret, fmt.Errorf("no dns provider"))
-		}
-	case ChallengeTypeHttp01:
-		if c.HttpProvider != nil {
-			if err := c.HttpProvider.Validate(); err != nil {
-				ret = append(ret, err)
+		case ChallengeTypeHttp01:
+			if c.HttpProvider != nil {
+				if err := c.HttpProvider.Validate(); err != nil {
+					ret = append(ret, err)
+				}
+			} else {
+				ret = append(ret, fmt.Errorf("no http provider"))
 			}
-		} else {
-			ret = append(ret, fmt.Errorf("no http provider"))
+		default:
 		}
-	default:
 	}
 
 	if err := c.parseDuration(); err != nil {
@@ -97,6 +101,11 @@ type ACMEConfig struct {
 func (c *ACMEConfig) Validate() error {
 	if len(c.AllowedDomains) == 0 {
 		return fmt.Errorf("AllowedDomains is empty")
+	}
+
+	if acmeprovider.IsACMEProviderMock(c.Provider) {
+		// Mock provider skips ACME-specific validation entirely.
+		return nil
 	}
 
 	if c.ChallengeType == "" {

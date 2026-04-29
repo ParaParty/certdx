@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"pkg.para.party/certdx/pkg/types"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"pkg.para.party/certdx/pkg/types"
 
 	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/config"
@@ -53,7 +54,7 @@ type ServerCertCache struct {
 type CertDXServer struct {
 	Config config.ServerConfig
 
-	acme      *acme.ACME
+	acme      acme.Obtainer
 	certCache ServerCertCache
 	cacheFile ServerCacheFile
 	stop      chan struct{}
