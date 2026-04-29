@@ -10,14 +10,17 @@ import (
 )
 
 func initCmd() (*k8sCertsUpdateCmd, error) {
-	var (
-		clientCMD = flag.NewFlagSet(os.Args[1], flag.ExitOnError)
+	if len(os.Args) < 2 {
+		return nil, fmt.Errorf("missing subcommand")
+	}
 
-		clientHelp = clientCMD.BoolP("help", "h", false, "Print help")
-		conf       = clientCMD.StringP("conf", "c", "./client.toml", "Config file path")
-		k8sConf    = clientCMD.StringP("k8sConf", "", "", "Config file path")
-		pDebug     = clientCMD.BoolP("debug", "d", false, "Enable debug log")
-	)
+	clientCMD := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
+
+	clientHelp := clientCMD.BoolP("help", "h", false, "Print help")
+	conf := clientCMD.StringP("conf", "c", "./client.toml", "Certdx client config file path")
+	k8sConf := clientCMD.String("k8sConf", "", "Kubeconfig file path (empty: use in-cluster or default kubeconfig resolution)")
+	pDebug := clientCMD.BoolP("debug", "d", false, "Enable debug log")
+
 	_ = clientCMD.Parse(os.Args[2:])
 
 	if *clientHelp {
@@ -26,39 +29,32 @@ func initCmd() (*k8sCertsUpdateCmd, error) {
 	}
 
 	logging.SetDebug(*pDebug)
-	if conf == nil || len(*conf) == 0 {
+	if len(*conf) == 0 {
 		logging.Error("Config file path is empty")
 		return nil, fmt.Errorf("config file path is empty")
 	}
-	if k8sConf == nil || len(*k8sConf) == 0 {
-		emptyStr := ""
-		k8sConf = &emptyStr
-	}
 
 	cfg := &k8sCertsUpdateCmd{
-		certdxConfig: conf,
-		k8sConfig:    k8sConf,
+		certdxConfig: *conf,
+		k8sConfig:    *k8sConf,
 	}
 
 	return cfg, nil
 }
 
 func KubernetesReplaceCertificate() {
-	// init
 	cmdOpt, err := initCmd()
 	if err != nil {
-		logging.Fatal("Failed to initialize certdx: %s", err)
+		logging.Fatal("Failed to parse command line: %s", err)
 	}
 
 	updater := MakeKubernetesReplaceCertificate(cmdOpt)
 
-	err = updater.InitCertificateUpdater()
-	if err != nil {
+	if err := updater.InitCertificateUpdater(); err != nil {
 		logging.Fatal("Failed to initialize updating task: %s", err)
 	}
 
-	err = updater.InvokeCertificateUpdate(context.Background())
-	if err != nil {
-		logging.Fatal("Failed to initialize tencent cloud: %s", err)
+	if err := updater.InvokeCertificateUpdate(context.Background()); err != nil {
+		logging.Fatal("Failed to update kubernetes certificates: %s", err)
 	}
 }
