@@ -13,6 +13,14 @@ import (
 	"github.com/go-acme/lego/v4/lego"
 )
 
+// Obtainer is the minimal interface the server uses to fetch certificates.
+// It is satisfied by both the real *ACME (lego-backed) and the in-process
+// MockACME used by the e2e test suite.
+type Obtainer interface {
+	Obtain(domains []string, deadline time.Time) (fullchain, key []byte, err error)
+	RetryObtain(domains []string, deadline time.Time) (fullchain, key []byte, err error)
+}
+
 type ACME struct {
 	Client       *lego.Client
 	retry        int
@@ -46,7 +54,11 @@ func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key
 	return
 }
 
-func MakeACME(c *config.ServerConfig) (*ACME, error) {
+func MakeACME(c *config.ServerConfig) (Obtainer, error) {
+	if acmeprovider.IsACMEProviderMock(c.ACME.Provider) {
+		return NewMockACME(c.ACME.CertLifeTimeDuration), nil
+	}
+
 	user, err := makeACMEUser(c)
 	if err != nil {
 		return nil, err

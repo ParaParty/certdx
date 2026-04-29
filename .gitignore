@@ -30,6 +30,11 @@ release/caddy_certdx_*
 /server
 /client
 
+# Default `go build` output inside exec/* dirs (binary name = dir basename)
+/exec/server/server
+/exec/client/client
+/exec/tools/tools
+
 .idea
 
 *.service.toml
