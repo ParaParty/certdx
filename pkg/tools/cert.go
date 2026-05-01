@@ -17,25 +17,25 @@ import (
 	"time"
 
 	"github.com/go-acme/lego/v4/certcrypto"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/paths"
 )
 
 var counter big.Int = *big.NewInt(0)
 
 func MakeCA(organization, commonName string) error {
-	caPEMPath, caKeyPath, err := utils.GetMtlsCAPath()
+	caPEMPath, caKeyPath, err := paths.MtlsCAPath()
 	if err != nil {
 		return err
 	}
-	caCounterPath, err := utils.GetCACounterPath()
+	caCounterPath, err := paths.CACounterPath()
 	if err != nil {
 		return err
 	}
 
-	if utils.FileExists(caPEMPath) {
+	if paths.FileExists(caPEMPath) {
 		return fmt.Errorf("CA file: %s already exists", caPEMPath)
 	}
-	if utils.FileExists(caKeyPath) {
+	if paths.FileExists(caKeyPath) {
 		return fmt.Errorf("CA file: %s already exists", caKeyPath)
 	}
 
@@ -89,11 +89,11 @@ func MakeCA(organization, commonName string) error {
 }
 
 func loadCA() (*x509.Certificate, *crypto.PrivateKey, error) {
-	caPEMPath, caKeyPath, err := utils.GetMtlsCAPath()
+	caPEMPath, caKeyPath, err := paths.MtlsCAPath()
 	if err != nil {
 		return nil, nil, err
 	}
-	caCounterPath, err := utils.GetCACounterPath()
+	caCounterPath, err := paths.CACounterPath()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -146,15 +146,15 @@ func generateSubjectKeyID(pub crypto.PublicKey) ([]byte, error) {
 func makeCert(PEMPath, keyPath, organization, commonName string,
 	domains []string, extKeyUseage []x509.ExtKeyUsage) error {
 
-	counterPath, err := utils.GetCACounterPath()
+	counterPath, err := paths.CACounterPath()
 	if err != nil {
 		return err
 	}
 
-	if utils.FileExists(PEMPath) {
+	if paths.FileExists(PEMPath) {
 		return fmt.Errorf("file: %s already exists", PEMPath)
 	}
-	if utils.FileExists(keyPath) {
+	if paths.FileExists(keyPath) {
 		return fmt.Errorf("file: %s already exists", keyPath)
 	}
 
@@ -230,7 +230,7 @@ func makeCert(PEMPath, keyPath, organization, commonName string,
 }
 
 func MakeServerCert(organization, commonName string, domains []string) error {
-	servPEMPath, servKeyPath, err := utils.GetMtlsServerCertPath()
+	servPEMPath, servKeyPath, err := paths.MtlsServerCertPath()
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func MakeServerCert(organization, commonName string, domains []string) error {
 }
 
 func MakeClientCert(name, organization, commonName string, domains []string) error {
-	clientPEMPath, clientKeyPath, err := utils.GetMtlsClientCertPath(name)
+	clientPEMPath, clientKeyPath, err := paths.MtlsClientCertPath(name)
 	if err != nil {
 		return err
 	}

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/types"
 )
 
 type CertDXHttpClient struct {
@@ -57,7 +57,7 @@ func MakeCertDXHttpClient(s ...CertDXHttpClientOption) *CertDXHttpClient {
 }
 
 func (c *CertDXHttpClient) makeGetCertRequest(ctx context.Context, domains []string) (*http.Request, error) {
-	body, err := json.Marshal(types.HttpCertReq{Domains: domains})
+	body, err := json.Marshal(api.HttpCertReq{Domains: domains})
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (c *CertDXHttpClient) makeGetCertRequest(ctx context.Context, domains []str
 	return req, nil
 }
 
-func (c *CertDXHttpClient) GetCertCtx(ctx context.Context, domains []string) (*types.HttpCertResp, error) {
+func (c *CertDXHttpClient) GetCertCtx(ctx context.Context, domains []string) (*api.HttpCertResp, error) {
 	req, err := c.makeGetCertRequest(ctx, domains)
 	if err != nil {
 		return nil, err
@@ -91,7 +91,7 @@ func (c *CertDXHttpClient) GetCertCtx(ctx context.Context, domains []string) (*t
 		return nil, fmt.Errorf("POST '%s' status: %s", c.Server.Url, resp.Status)
 	}
 
-	var certResp = new(types.HttpCertResp)
+	var certResp = new(api.HttpCertResp)
 	err = json.NewDecoder(resp.Body).Decode(certResp)
 	if err != nil {
 		return nil, err
@@ -100,6 +100,6 @@ func (c *CertDXHttpClient) GetCertCtx(ctx context.Context, domains []string) (*t
 	return certResp, nil
 }
 
-func (c *CertDXHttpClient) GetCert(domains []string) (*types.HttpCertResp, error) {
+func (c *CertDXHttpClient) GetCert(domains []string) (*api.HttpCertResp, error) {
 	return c.GetCertCtx(context.Background(), domains)
 }

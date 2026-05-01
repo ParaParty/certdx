@@ -3,7 +3,7 @@ package acme
 import (
 	"pkg.para.party/certdx/pkg/acmeprovider"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/retry"
 
 	"fmt"
 	"time"
@@ -45,7 +45,7 @@ func (a *ACME) Obtain(domains []string, deadline time.Time) (fullchain, key []by
 }
 
 func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key []byte, err error) {
-	err = utils.Retry(a.retry,
+	err = retry.Do(a.retry,
 		func() error {
 			fullchain, key, err = a.Obtain(domains, deadline)
 			return err

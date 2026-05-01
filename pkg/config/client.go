@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"google.golang.org/appengine"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/paths"
 )
 
 type ClientConfig struct {
@@ -128,15 +128,15 @@ type ClientMtlsConfig struct {
 }
 
 func (c *ClientMtlsConfig) Validate() error {
-	if !utils.FileExists(c.CA) {
+	if !paths.FileExists(c.CA) {
 		return fmt.Errorf("file not found: %s", c.CA)
 	}
 
-	if !utils.FileExists(c.Certificate) {
+	if !paths.FileExists(c.Certificate) {
 		return fmt.Errorf("file not found: %s", c.Certificate)
 	}
 
-	if !utils.FileExists(c.Key) {
+	if !paths.FileExists(c.Key) {
 		return fmt.Errorf("file not found: %s", c.Key)
 	}
 

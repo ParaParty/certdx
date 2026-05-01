@@ -4,13 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"pkg.para.party/certdx/pkg/types"
-
-	"github.com/caddyserver/certmagic"
-	"pkg.para.party/certdx/pkg/utils"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
+	"github.com/caddyserver/certmagic"
+	"pkg.para.party/certdx/pkg/domain"
 )
 
 func init() {
@@ -22,7 +20,7 @@ type CertDXTls struct {
 	ctx       caddy.Context
 	certDXApp *CertDXCaddyDaemon
 	CertId    string `json:"cert_id"`
-	certHash  types.DomainKey
+	certHash  domain.Key
 }
 
 // CaddyModule returns the Caddy module information.
@@ -54,7 +52,7 @@ func (certdx *CertDXTls) Validate() error {
 	if !exists {
 		return fmt.Errorf("cert definition for cert-id: %v not exists", certdx.CertId)
 	}
-	certdx.certHash = utils.DomainsAsKey(domains)
+	certdx.certHash = domain.AsKey(domains)
 
 	return nil
 }
