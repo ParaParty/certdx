@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/types/known/anypb"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/utils"
 )
 
 const typeUrl = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret"
@@ -115,7 +115,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 						errChan <- fmt.Errorf("bad metadata, domain pack should be an array")
 						return
 					}
-					if !utils.DomainsAllowed(sds.cdxsrv.Config.ACME.AllowedDomains, domains) {
+					if !domain.AllAllowed(sds.cdxsrv.Config.ACME.AllowedDomains, domains) {
 						errChan <- fmt.Errorf("domains %v not allowed", domains)
 						return
 					}

@@ -17,7 +17,7 @@ import (
 	"pkg.para.party/certdx/pkg/acme/google"
 	"pkg.para.party/certdx/pkg/acmeprovider"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/paths"
 )
 
 type ACMEUser struct {
@@ -46,7 +46,7 @@ func parsePEM(pem []byte) (crypto.PrivateKey, error) {
 }
 
 func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
-	keyPath, err := utils.GetACMEPrivateKeySavePath(c.ACME.Email, c.ACME.Provider)
+	keyPath, err := paths.ACMEPrivateKey(c.ACME.Email, c.ACME.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 }
 
 func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
-	keyPath, err := utils.GetACMEPrivateKeySavePath(Email, ACMEProvider)
+	keyPath, err := paths.ACMEPrivateKey(Email, ACMEProvider)
 	if err != nil {
 		return err
 	}

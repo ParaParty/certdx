@@ -15,8 +15,9 @@ import (
 	"google.golang.org/appengine"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/retry"
 
 	txcommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	txerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
@@ -115,7 +116,7 @@ func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 		for _, cert := range r.cfg.Certifications {
 			if isSameStrSetRejectNilItem(fetchedCertSANs, cert.Domains) {
 				cert.oldCertificateId = *expiringCert.CertificateId
-				cert.certDxKey = utils.DomainsAsKey(cert.Domains)
+				cert.certDxKey = domain.AsKey(cert.Domains)
 				matchedCerts = append(matchedCerts, cert)
 			}
 		}
@@ -146,7 +147,7 @@ func (r *TencentCloudCertificateUpdater) AddReplaceTask() error {
 				req.ExpiringNotificationSwitch = txcommon.Uint64Ptr(1)
 				req.Repeatable = txcommon.BoolPtr(false)
 
-				err := utils.Retry(3, func() error {
+				err := retry.Do(3, func() error {
 					resp, err := r.client.UpdateCertificateInstance(req)
 					if err != nil {
 						var tencentCloudSDKError *txerr.TencentCloudSDKError
@@ -221,7 +222,7 @@ func (r *TencentCloudCertificateUpdater) FetchTencentCloudCertificate(opt func(r
 		req.Limit = txcommon.Uint64Ptr(pageSize)
 
 		noMoreResult := false
-		err := utils.Retry(3, func() error {
+		err := retry.Do(3, func() error {
 			resp, err := r.client.DescribeCertificates(req)
 			if err != nil {
 				var tencentCloudSDKError *txerr.TencentCloudSDKError

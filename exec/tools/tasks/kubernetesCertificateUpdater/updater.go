@@ -16,8 +16,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/utils"
 )
 
 // Required RBAC: this updater performs a cluster-wide list of secrets and
@@ -289,7 +289,7 @@ func parseDomainsAnnotation(domainListStr string) []string {
 
 func areDomainsAllowed(certdx *client.CertDXClientDaemon, domains []string) bool {
 	for _, item := range certdx.Config.Certifications {
-		if utils.DomainsAllowed(item.Domains, domains) {
+		if domain.AllAllowed(item.Domains, domains) {
 			return true
 		}
 	}

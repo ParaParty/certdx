@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"strings"
 
+	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/types"
-	"pkg.para.party/certdx/pkg/utils"
 )
 
 func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func (s *CertDXServer) checkAuthorizationToken(r *http.Request) bool {
 }
 
 func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
-	var req types.HttpCertReq
+	var req api.HttpCertReq
 	var resp []byte
 	var cachedCert *ServerCertCacheEntry
 	var cert CertT
@@ -72,7 +72,7 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 		goto ERR
 	}
 
-	if !utils.DomainsAllowed(s.Config.ACME.AllowedDomains, req.Domains) {
+	if !domain.AllAllowed(s.Config.ACME.AllowedDomains, req.Domains) {
 		logging.Warn("Requested domains not allowed: %v", req.Domains)
 		(*w).Header().Set("Content-Type", "application/json")
 		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
@@ -88,7 +88,7 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	}
 
 	cert = cachedCert.Cert()
-	resp, err = json.Marshal(&types.HttpCertResp{
+	resp, err = json.Marshal(&api.HttpCertResp{
 		RenewTimeLeft: s.Config.ACME.RenewTimeLeftDuration,
 		FullChain:     cert.FullChain,
 		Key:           cert.Key,

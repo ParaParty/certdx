@@ -3,9 +3,10 @@ package client
 import (
 	"context"
 	"fmt"
-	"pkg.para.party/certdx/pkg/types"
 	"sync/atomic"
 	"time"
+
+	"pkg.para.party/certdx/pkg/domain"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	tlsv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
@@ -40,14 +41,14 @@ func (e *killed) Error() string {
 type CertDXgRPCClient struct {
 	tlsCred credentials.TransportCredentials
 	server  *config.ClientGRPCServer
-	certs   map[types.DomainKey]*watchingCert
+	certs   map[domain.Key]*watchingCert
 
 	kill     chan struct{}
 	Running  atomic.Bool
 	Received atomic.Pointer[chan struct{}]
 }
 
-func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[types.DomainKey]*watchingCert) *CertDXgRPCClient {
+func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]*watchingCert) *CertDXgRPCClient {
 	c := &CertDXgRPCClient{
 		server: server,
 		certs:  certs,

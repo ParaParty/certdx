@@ -12,17 +12,19 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/types"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/paths"
+	"pkg.para.party/certdx/pkg/retry"
 )
 
 type CertDXClientDaemon struct {
 	Config    *config.ClientConfig
 	ClientOpt []CertDXHttpClientOption
 
-	certs    map[types.DomainKey]*watchingCert
+	certs    map[domain.Key]*watchingCert
 	wg       sync.WaitGroup
 	stopChan chan struct{}
 }
@@ -74,7 +76,7 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 	ret := &CertDXClientDaemon{
 		Config:    &config.ClientConfig{},
 		ClientOpt: make([]CertDXHttpClientOption, 0),
-		certs:     make(map[types.DomainKey]*watchingCert),
+		certs:     make(map[domain.Key]*watchingCert),
 		stopChan:  make(chan struct{}),
 	}
 	ret.Config.SetDefault()
@@ -86,7 +88,7 @@ func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertification) (fullc
 	if err != nil {
 		return nil, nil, err
 	}
-	if utils.FileExists(fullchanPath) && utils.FileExists(keyPath) {
+	if paths.FileExists(fullchanPath) && paths.FileExists(keyPath) {
 		fullchan, err = os.ReadFile(fullchanPath)
 		if err != nil {
 			return
@@ -122,7 +124,7 @@ func (r *CertDXClientDaemon) ClientInit() {
 		stop := make(chan struct{})
 		cert.Stop.Store(&stop)
 
-		r.certs[utils.DomainsAsKey(c.Domains)] = cert
+		r.certs[domain.AsKey(c.Domains)] = cert
 		go cert.watchUpdate(&r.wg)
 	}
 }
@@ -145,7 +147,7 @@ func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, op
 	stop := make(chan struct{})
 	cert.Stop.Store(&stop)
 
-	r.certs[utils.DomainsAsKey(domains)] = cert
+	r.certs[domain.AsKey(domains)] = cert
 	go cert.watchUpdate(&r.wg)
 
 	return nil
@@ -160,9 +162,9 @@ func (r *CertDXClientDaemon) stopWatchingCert() {
 	}
 }
 
-func (r *CertDXClientDaemon) httpRequestCert(domains []string) *types.HttpCertResp {
-	var resp *types.HttpCertResp
-	err := utils.Retry(r.Config.Common.RetryCount, func() error {
+func (r *CertDXClientDaemon) httpRequestCert(domains []string) *api.HttpCertResp {
+	var resp *api.HttpCertResp
+	err := retry.Do(r.Config.Common.RetryCount, func() error {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
 		var err error
 		resp, err = certdxClient.GetCert(domains)
@@ -175,7 +177,7 @@ func (r *CertDXClientDaemon) httpRequestCert(domains []string) *types.HttpCertRe
 
 	if r.Config.Http.StandbyServer.Url != "" {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
-		err = utils.Retry(r.Config.Common.RetryCount, func() error {
+		err = retry.Do(r.Config.Common.RetryCount, func() error {
 			var err error
 			resp, err = certdxClient.GetCert(domains)
 			return err
@@ -454,7 +456,7 @@ func (r *CertDXClientDaemon) Stop() {
 	close(r.stopChan)
 }
 
-func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash types.DomainKey) (*tls.Certificate, error) {
+func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash domain.Key) (*tls.Certificate, error) {
 	cert, exists := r.certs[certHash]
 	if exists {
 		certData := cert.Data.Load()

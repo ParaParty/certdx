@@ -3,7 +3,7 @@ package txcCertificateUpdater
 import (
 	txcommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	txssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
-	"pkg.para.party/certdx/pkg/types"
+	"pkg.para.party/certdx/pkg/domain"
 )
 
 type ResourceTypeRegions struct {
@@ -17,7 +17,7 @@ type ClientCertification struct {
 	ResourceTypes        []string              `toml:"resourceTypes" json:"resource_types"`
 	ResourceTypesRegions []ResourceTypeRegions `toml:"resourceTypesRegions" json:"resource_types_regions"`
 
-	certDxKey        types.DomainKey
+	certDxKey        domain.Key
 	oldCertificateId string
 }
 

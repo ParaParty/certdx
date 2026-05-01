@@ -10,12 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"pkg.para.party/certdx/pkg/types"
-
 	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/paths"
 )
 
 type CertT struct {
@@ -32,7 +31,7 @@ type ServerCacheFileEntry struct {
 
 type ServerCacheFile struct {
 	path    string
-	entries map[types.DomainKey]*ServerCacheFileEntry
+	entries map[domain.Key]*ServerCacheFileEntry
 	update  chan *ServerCacheFileEntry
 }
 
@@ -47,7 +46,7 @@ type ServerCertCacheEntry struct {
 }
 
 type ServerCertCache struct {
-	entries map[types.DomainKey]*ServerCertCacheEntry
+	entries map[domain.Key]*ServerCertCacheEntry
 	mutex   sync.Mutex
 }
 
@@ -77,7 +76,7 @@ func (c *CertT) IsValid() bool {
 
 func makeServerCertCache() ServerCertCache {
 	return ServerCertCache{
-		entries: make(map[types.DomainKey]*ServerCertCacheEntry),
+		entries: make(map[domain.Key]*ServerCertCacheEntry),
 	}
 }
 
@@ -99,17 +98,17 @@ func (s *CertDXServer) Init() error {
 }
 
 func MakeServerCacheFile() ServerCacheFile {
-	cachePath := utils.GetServerCacheSavePath()
+	cachePath := paths.ServerCacheSave()
 
 	return ServerCacheFile{
 		path:    cachePath,
-		entries: make(map[types.DomainKey]*ServerCacheFileEntry),
+		entries: make(map[domain.Key]*ServerCacheFileEntry),
 		update:  make(chan *ServerCacheFileEntry, 10),
 	}
 }
 
 func (s *ServerCacheFile) ReadCacheFile() error {
-	exist := utils.FileExists(s.path)
+	exist := paths.FileExists(s.path)
 	if !exist {
 		return os.ErrNotExist
 	}
@@ -169,7 +168,7 @@ func (s *ServerCacheFile) writeCacheFile() error {
 }
 
 func (s *ServerCacheFile) updateCacheFileEntry(fe *ServerCacheFileEntry) error {
-	s.entries[utils.DomainsAsKey(fe.Domains)] = fe
+	s.entries[domain.AsKey(fe.Domains)] = fe
 
 	return s.writeCacheFile()
 }
@@ -190,7 +189,7 @@ func (s *ServerCacheFile) listenUpdate() {
 }
 
 func (s *CertDXServer) getCertCacheEntryNoLock(domains []string) *ServerCertCacheEntry {
-	entryKey := utils.DomainsAsKey(domains)
+	entryKey := domain.AsKey(domains)
 	entry, ok := s.certCache.entries[entryKey]
 	if ok {
 		return entry

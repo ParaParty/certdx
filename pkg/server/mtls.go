@@ -6,11 +6,11 @@ import (
 	"os"
 
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/utils"
+	"pkg.para.party/certdx/pkg/paths"
 )
 
 func getMtlsConfig() *tls.Config {
-	srvCertPath, srvKeyPath, err := utils.GetMtlsServerCertPath()
+	srvCertPath, srvKeyPath, err := paths.MtlsServerCertPath()
 	if err != nil {
 		logging.Fatal("err: %s", err)
 	}
@@ -20,7 +20,7 @@ func getMtlsConfig() *tls.Config {
 		logging.Fatal("Invalid server cert, err: %s", err)
 	}
 
-	caPEMPath, _, err := utils.GetMtlsCAPath()
+	caPEMPath, _, err := paths.MtlsCAPath()
 	if err != nil {
 		logging.Fatal("%s", err)
 	}

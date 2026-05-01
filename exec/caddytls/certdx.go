@@ -3,13 +3,13 @@ package caddytls
 import (
 	"context"
 	"crypto/tls"
-	"pkg.para.party/certdx/pkg/types"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"go.uber.org/zap"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
 )
 
@@ -119,7 +119,7 @@ func (m *CertDXCaddyDaemon) Stop() error {
 	return nil
 }
 
-func (m *CertDXCaddyDaemon) GetCertificate(ctx context.Context, certHash types.DomainKey) (*tls.Certificate, error) {
+func (m *CertDXCaddyDaemon) GetCertificate(ctx context.Context, certHash domain.Key) (*tls.Certificate, error) {
 	return m.certDXDaemon.GetCertificate(ctx, certHash)
 }
 
