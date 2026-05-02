@@ -5,6 +5,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -14,6 +15,7 @@ func MakeCA() {
 
 		caOrganization = caCMD.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		caCommonName   = caCMD.StringP("common-name", "c", "CertDX Private Certificate Authority", "Subject Common Name")
+		mtlsDir        = caCMD.String("mtls-dir", "", "mTLS material directory")
 		caHelp         = caCMD.BoolP("Help", "h", false, "Print Help")
 	)
 	caCMD.Parse(os.Args[2:])
@@ -22,6 +24,8 @@ func MakeCA() {
 		caCMD.PrintDefaults()
 		os.Exit(0)
 	}
+
+	paths.SetMtlsDir(*mtlsDir)
 
 	err := tools.MakeCA(*caOrganization, *caCommonName)
 	if err != nil {

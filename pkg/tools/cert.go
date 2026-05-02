@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-acme/lego/v4/certcrypto"
@@ -21,6 +22,12 @@ import (
 )
 
 var counter big.Int = *big.NewInt(0)
+
+const (
+	certFileMode = 0o644
+	keyFileMode  = 0o600
+	dataFileMode = 0o644
+)
 
 func MakeCA(organization, commonName string) error {
 	caPEMPath, caKeyPath, err := paths.MtlsCAPath()
@@ -70,7 +77,9 @@ func MakeCA(organization, commonName string) error {
 		Type:  "CERTIFICATE",
 		Bytes: caBytes,
 	})
-	_ = os.WriteFile(caPEMPath, caPEM, 0o777)
+	if err := os.WriteFile(caPEMPath, caPEM, certFileMode); err != nil {
+		return err
+	}
 
 	b, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
@@ -81,9 +90,13 @@ func MakeCA(organization, commonName string) error {
 		Type:  "PRIVATE KEY",
 		Bytes: b,
 	})
-	_ = os.WriteFile(caKeyPath, caKey, 0o600)
+	if err := os.WriteFile(caKeyPath, caKey, keyFileMode); err != nil {
+		return err
+	}
 
-	_ = os.WriteFile(caCounterPath, []byte(counter.String()), 0o755)
+	if err := os.WriteFile(caCounterPath, []byte(counter.String()), dataFileMode); err != nil {
+		return err
+	}
 	fmt.Println(string(caPEM))
 	return nil
 }
@@ -208,7 +221,9 @@ func makeCert(PEMPath, keyPath, organization, commonName string,
 		Type:  "CERTIFICATE",
 		Bytes: certBytes,
 	})
-	_ = os.WriteFile(PEMPath, certPEM, 0o777)
+	if err := os.WriteFile(PEMPath, certPEM, certFileMode); err != nil {
+		return err
+	}
 
 	b, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
@@ -219,10 +234,14 @@ func makeCert(PEMPath, keyPath, organization, commonName string,
 		Type:  "PRIVATE KEY",
 		Bytes: b,
 	})
-	_ = os.WriteFile(keyPath, certKey, 0o777)
+	if err := os.WriteFile(keyPath, certKey, keyFileMode); err != nil {
+		return err
+	}
 
 	counter.Add(&counter, big.NewInt(1))
-	_ = os.WriteFile(counterPath, []byte(counter.String()), 0o755)
+	if err := os.WriteFile(counterPath, []byte(counter.String()), dataFileMode); err != nil {
+		return err
+	}
 
 	fmt.Println(string(certPEM))
 	fmt.Println(string(certKey))
@@ -238,6 +257,11 @@ func MakeServerCert(organization, commonName string, domains []string) error {
 }
 
 func MakeClientCert(name, organization, commonName string, domains []string) error {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ca", "server":
+		return fmt.Errorf("client name %q is reserved for mtls material", name)
+	}
+
 	clientPEMPath, clientKeyPath, err := paths.MtlsClientCertPath(name)
 	if err != nil {
 		return err

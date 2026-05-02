@@ -5,6 +5,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -15,6 +16,7 @@ func MakeServer() {
 		srvDomains      = srvCMD.StringSliceP("dns-names", "d", []string{}, "CertDX grpc server certificate dns names, combine multiple names with \",\"")
 		srvOrganization = srvCMD.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		srvCommonName   = srvCMD.StringP("common-name", "c", "CertDX Secret Discovery Service", "Subject Common Name")
+		mtlsDir         = srvCMD.String("mtls-dir", "", "mTLS material directory")
 		srvHelp         = srvCMD.BoolP("Help", "h", false, "Print Help")
 	)
 	srvCMD.Parse(os.Args[2:])
@@ -27,6 +29,8 @@ func MakeServer() {
 	if len(*srvDomains) == 0 {
 		logging.Fatal("domains are required")
 	}
+
+	paths.SetMtlsDir(*mtlsDir)
 
 	err := tools.MakeServerCert(*srvOrganization, *srvCommonName, *srvDomains)
 	if err != nil {

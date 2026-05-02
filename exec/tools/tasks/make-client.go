@@ -6,6 +6,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -17,6 +18,7 @@ func MakeClient() {
 		clientDomains      = clientCMD.StringSliceP("dns-names", "d", []string{}, "CertDX grpc client certificate dns names, combine multiple names with \",\"")
 		clientOrganization = clientCMD.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		clientCommonName   = clientCMD.StringP("common-name", "c", "CertDX Client: {name}", "Subject Common Name")
+		mtlsDir            = clientCMD.String("mtls-dir", "", "mTLS material directory")
 		clientHelp         = clientCMD.BoolP("Help", "h", false, "Print Help")
 	)
 	clientCMD.Parse(os.Args[2:])
@@ -33,6 +35,8 @@ func MakeClient() {
 	if *clientCommonName == "CertDX Client: {name}" {
 		*clientCommonName = fmt.Sprintf("CertDX Client: %s", *clientName)
 	}
+
+	paths.SetMtlsDir(*mtlsDir)
 
 	err := tools.MakeClientCert(*clientName, *clientOrganization, *clientCommonName, *clientDomains)
 	if err != nil {

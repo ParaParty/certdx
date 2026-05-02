@@ -29,12 +29,30 @@ const (
 	ServerCacheFile = "cache.json"
 )
 
+var mtlsDirOverride string
+
 // FileExists reports whether the file at path exists. It returns false on
 // any stat error, including permission errors, so callers should not rely on
 // FileExists to distinguish "missing" from "unreadable".
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// SetMtlsDir sets a process-local mtls directory override. It is mainly used
+// by --mtls-dir flags.
+func SetMtlsDir(dir string) {
+	mtlsDirOverride = dir
+}
+
+func ensureMtlsDir(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 // findFile looks up file under the cwd, then under the directory containing
@@ -65,9 +83,13 @@ func findFile(file string) (string, error) {
 // creates a fresh mtls directory under the directory containing the
 // running executable and returns the new path.
 func MakeMtlsCertDir() (string, error) {
+	if mtlsDirOverride != "" {
+		return ensureMtlsDir(mtlsDirOverride)
+	}
+
 	dir, err := findFile(MtlsCertificateDir)
 	if err == nil {
-		return dir, nil
+		return ensureMtlsDir(dir)
 	}
 
 	exec, err := os.Executable()
@@ -78,14 +100,14 @@ func MakeMtlsCertDir() (string, error) {
 
 	dir = path.Join(dir, MtlsCertificateDir)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.Mkdir(dir, 0o777); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
 	} else if err != nil {
 		return "", err
 	}
 
-	return dir, nil
+	return ensureMtlsDir(dir)
 }
 
 // MtlsCAPath returns the on-disk paths to the mtls CA certificate (PEM) and
