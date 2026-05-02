@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"sync"
@@ -40,7 +39,12 @@ type ServerCertCacheEntry struct {
 	cert    CertT
 	mutex   sync.Mutex
 
-	Subscribing atomic.Uint64
+	// Subscribing tracks the number of consumers that have called
+	// Subscribe and not yet Released. The renewal goroutine starts on the
+	// 0→1 transition and stops on the 1→0 transition, both detected by
+	// the Add result. A signed Int64 is used so Release can express
+	// decrement as Add(-1) instead of an unsigned underflow trick.
+	Subscribing atomic.Int64
 	Updated     atomic.Pointer[chan struct{}]
 	Stop        atomic.Pointer[chan struct{}]
 }
@@ -56,7 +60,12 @@ type CertDXServer struct {
 	acme      acme.Obtainer
 	certCache ServerCertCache
 	cacheFile ServerCacheFile
-	stop      chan struct{}
+
+	// stop is closed exactly once via stopOnce. It is never reassigned,
+	// so concurrent readers (HttpSrv, SDSSrv, etc.) can safely select on
+	// it without racing the close.
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 func MakeCertDXServer() *CertDXServer {
@@ -292,7 +301,7 @@ func (s *CertDXServer) Subscribe(c *ServerCertCacheEntry) {
 }
 
 func (s *CertDXServer) Release(c *ServerCertCacheEntry) {
-	if c.Subscribing.Add(math.MaxUint64) == 0 {
+	if c.Subscribing.Add(-1) == 0 {
 		*c.Stop.Load() <- struct{}{}
 	}
 }
@@ -301,7 +310,9 @@ func (s *CertDXServer) IsSubcribing(c *ServerCertCacheEntry) bool {
 	return c.Subscribing.Load() != 0
 }
 
+// Stop signals every server goroutine to wind down. It is safe to call
+// concurrently and from any number of callers; only the first call closes
+// the stop channel.
 func (s *CertDXServer) Stop() {
-	close(s.stop)
-	s.stop = nil
+	s.stopOnce.Do(func() { close(s.stop) })
 }

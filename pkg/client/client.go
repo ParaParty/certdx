@@ -24,9 +24,13 @@ type CertDXClientDaemon struct {
 	Config    *config.ClientConfig
 	ClientOpt []CertDXHttpClientOption
 
-	certs    map[domain.Key]*watchingCert
-	wg       sync.WaitGroup
+	certs map[domain.Key]*watchingCert
+	wg    sync.WaitGroup
+
+	// stopChan is closed exactly once via stopOnce. Multiple Stop callers
+	// (signal handlers, Caddy app teardown, etc.) are safe.
 	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
 type certData struct {
@@ -50,8 +54,11 @@ func WithCertificateHandlerOption(handler CertificateUpdateHandler) WatchingCert
 	}
 }
 
+// watchUpdate runs in its own goroutine and forwards cert updates to any
+// registered handlers until Stop fires. Callers must Add(1) on the wait
+// group BEFORE spawning watchUpdate; otherwise the parent goroutine could
+// race a concurrent Wait and miss the worker.
 func (c *watchingCert) watchUpdate(wg *sync.WaitGroup) {
-	wg.Add(1)
 	defer wg.Done()
 	for {
 		select {
@@ -125,6 +132,7 @@ func (r *CertDXClientDaemon) ClientInit() {
 		cert.Stop.Store(&stop)
 
 		r.certs[domain.AsKey(c.Domains)] = cert
+		r.wg.Add(1)
 		go cert.watchUpdate(&r.wg)
 	}
 }
@@ -148,6 +156,7 @@ func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, op
 	cert.Stop.Store(&stop)
 
 	r.certs[domain.AsKey(domains)] = cert
+	r.wg.Add(1)
 	go cert.watchUpdate(&r.wg)
 
 	return nil
@@ -453,7 +462,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 }
 
 func (r *CertDXClientDaemon) Stop() {
-	close(r.stopChan)
+	r.stopOnce.Do(func() { close(r.stopChan) })
 }
 
 func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash domain.Key) (*tls.Certificate, error) {
