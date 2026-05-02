@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"pkg.para.party/certdx/pkg/acmeprovider"
+	"pkg.para.party/certdx/pkg/acme/acmeproviders"
 )
 
 type ServerConfig struct {
@@ -30,7 +30,7 @@ func (c *ServerConfig) Validate() error {
 
 	// The mock provider is hermetic and does not require any DNS/HTTP
 	// challenge provider configuration.
-	if !acmeprovider.IsACMEProviderMock(c.ACME.Provider) {
+	if !acmeproviders.IsMock(c.ACME.Provider) {
 		switch c.ACME.ChallengeType {
 		case ChallengeTypeDns01:
 			if c.DnsProvider != nil {
@@ -100,7 +100,7 @@ func (c *ACMEConfig) Validate() error {
 		return fmt.Errorf("AllowedDomains is empty")
 	}
 
-	if acmeprovider.IsACMEProviderMock(c.Provider) {
+	if acmeproviders.IsMock(c.Provider) {
 		// Mock provider skips ACME-specific validation entirely.
 		return nil
 	}
@@ -113,7 +113,7 @@ func (c *ACMEConfig) Validate() error {
 		return fmt.Errorf("challenge type: %s not supported", c.ChallengeType)
 	}
 
-	if !acmeprovider.ACMEProviderSupported(c.Provider) {
+	if !acmeproviders.Supported(c.Provider) {
 		return fmt.Errorf("ACME provider not supported: %s", c.Provider)
 	}
 
