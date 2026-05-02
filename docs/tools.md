@@ -11,26 +11,32 @@ rotate expiring Tencent Cloud certificates.
 certdx_tools <command> [options]
 ```
 
-The top-level help and version flags use a capital first letter
-(`-h`, `--Help`; `-v`, `--Version`) so they don't shadow the per-command
-`-h` / `-help`.
+`-h` / `--help` and `-v` / `--version` are consistent across the root
+command and every subcommand.
 
 Available commands:
 
-| Command | Purpose |
+| Command (and aliases) | Purpose |
 | --- | --- |
 | [`show-cache`](#show-cache) | Print the contents of the server's certificate cache. |
 | [`google-account`](#google-account) | Register a Google ACME EAB account. |
 | [`make-ca`](#make-ca) | Create the mTLS CA. |
 | [`make-server`](#make-server) | Issue an mTLS server certificate. |
 | [`make-client`](#make-client) | Issue an mTLS client certificate. |
-| [`tencent-cloud-certificate-updater`](#tencent-cloud-certificate-updater) | Pull a cert from a certdx server and replace expiring Tencent Cloud certificates. |
-| [`kubernetes-certificate-updater`](#kubernetes-certificate-updater) | Pull a cert from a certdx server and patch annotated Kubernetes TLS secrets. |
+| [`tencent-cloud-certificate-updater`](#tencent-cloud-certificate-updater) (alias: `tx-update`, `tencent-cloud-certificates-updater`) | Pull a cert from a certdx server and replace expiring Tencent Cloud certificates. |
+| [`kubernetes-certificate-updater`](#kubernetes-certificate-updater) (alias: `k8s-update`, `k8s-certificate-updater`) | Pull a cert from a certdx server and patch annotated Kubernetes TLS secrets. |
 
 The mTLS commands write into an `mtls/` directory next to the executable
 (or the current working directory). Run them in the same directory you run
 `certdx_server` from — typically `/opt/certdx` — so the server picks them
-up automatically.
+up automatically. To override the location explicitly, pass `--mtls-dir
+<path>`; the flag is honored by `make-ca`, `make-server`, `make-client`,
+and `certdx_server` itself. When a command ensures the directory exists,
+it is chmod'd to `0700`. Cert PEMs are written with mode `0644` and
+private keys with mode `0600`.
+
+`make-client` reserves the names `ca` and `server` (case-insensitive,
+trimmed) so a typo cannot silently overwrite the CA or server material.
 
 ---
 
@@ -60,9 +66,9 @@ Cloud credentials).
 | --- | --- | --- |
 | `-e`, `--email` | yes | Email address to register. |
 | `-k`, `--kid` | yes | EAB key id. |
-| `-h`, `--hmac` | yes | EAB B64 HMAC. |
+| `-m`, `--hmac` | yes | EAB B64 HMAC. |
 | `-t`, `--test-account` | | Register against the Google staging endpoint (`googletest`). |
-| `--Help` | | Print help. |
+| `-h`, `--help` | | Print help. |
 
 Example:
 
@@ -77,11 +83,14 @@ certdx_tools google-account \
 
 Creates the private CA used by certdx mTLS. Writes `mtls/ca.pem`,
 `mtls/ca.key`, and `mtls/counter.txt`. Refuses to overwrite existing files.
+The directory is created with mode `0700`, the CA cert with `0644`, and
+the CA key with `0600`.
 
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-o`, `--organization` | `CertDX Private` | Subject `O`. |
 | `-c`, `--common-name` | `CertDX Private Certificate Authority` | Subject `CN`. |
+| `--mtls-dir` | *(empty: discover via cwd → exec dir)* | Override the mTLS material directory. |
 
 ## `make-server`
 
@@ -93,6 +102,7 @@ signed by the CA. Run after `make-ca`.
 | `-d`, `--dns-names` | yes | Comma-separated SANs. Must include every name a client will dial. |
 | `-o`, `--organization` | | Subject `O`. Default `CertDX Private`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Secret Discovery Service`. |
+| `--mtls-dir` | | Override the mTLS material directory. |
 
 Example:
 
@@ -105,12 +115,16 @@ certdx_tools make-server -d certdxserver.example.com,sds.example.com
 Issues a client certificate (`mtls/<name>.pem`, `mtls/<name>.key`) signed by
 the CA. Run once per consumer (`certdx_client`, Caddy host, Envoy, etc.).
 
+The names `ca` and `server` are reserved (case-insensitive, trimmed) so a
+typo cannot silently overwrite the CA or server material.
+
 | Flag | Required | Description |
 | --- | --- | --- |
-| `-n`, `--name` | yes | Logical client name. Becomes the file name. |
+| `-n`, `--name` | yes | Logical client name. Becomes the file name. Must not be `ca` or `server`. |
 | `-d`, `--dns-names` | | Optional SANs. |
 | `-o`, `--organization` | | Subject `O`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Client: <name>`. |
+| `--mtls-dir` | | Override the mTLS material directory. |
 
 Example:
 
@@ -125,7 +139,7 @@ to the client.
 
 ## `tencent-cloud-certificate-updater`
 
-Aliases: `tencent-cloud-certificates-updater`.
+Aliases: `tx-update`, `tencent-cloud-certificates-updater`.
 
 Acts as a one-shot certdx client: connects to a certdx server, pulls the
 configured certificates, then calls the Tencent Cloud SSL API to replace
@@ -184,7 +198,7 @@ Sections:
 
 ## `kubernetes-certificate-updater`
 
-Aliases: `k8s-certificate-updater`.
+Aliases: `k8s-update`, `k8s-certificate-updater`.
 
 Acts as a one-shot certdx client targeting Kubernetes. It lists every
 `kubernetes.io/tls` secret across the cluster, picks the ones annotated

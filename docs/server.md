@@ -114,10 +114,16 @@ The HTTPS endpoint that `certdx_client` and the Caddy plugin call into.
 
 When `authMethod = "mtls"`, the server loads its certificate from
 `mtls/server.pem` and `mtls/server.key`, and trusts client certificates
-signed by `mtls/ca.pem`. The `mtls/` directory is resolved next to the
-executable, or under the current working directory. Generate the contents
-with `certdx_tools` (`make-ca`, `make-server`, `make-client`); see
-[tools.md](tools.md).
+signed by `mtls/ca.pem`. The `mtls/` directory is resolved in this order:
+
+1. `--mtls-dir <path>` flag, if passed.
+2. `mtls/` under the current working directory.
+3. `mtls/` next to the running executable.
+
+The directory is created with mode `0700` if it doesn't exist; certs are
+written with mode `0644` and private keys with mode `0600`. Generate the
+contents with `certdx_tools` (`make-ca`, `make-server`, `make-client`);
+see [tools.md](tools.md).
 
 ### `[gRPCSDSServer]`
 
