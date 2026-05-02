@@ -43,8 +43,14 @@ type CertDXgRPCClient struct {
 	server  *config.ClientGRPCServer
 	certs   map[domain.Key]*watchingCert
 
-	kill     chan struct{}
-	Running  atomic.Bool
+	kill    chan struct{}
+	Running atomic.Bool
+
+	// Received is closed by the receive loop on each incoming message
+	// and replaced atomically with a fresh chan, so the fallback
+	// goroutine can wait for "next message arrived" without locking.
+	// Single-producer (receive loop) and single-consumer (fallback)
+	// makes the atomic.Pointer swap-and-close pattern sufficient.
 	Received atomic.Pointer[chan struct{}]
 }
 
