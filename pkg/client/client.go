@@ -27,10 +27,13 @@ type CertDXClientDaemon struct {
 	certs map[domain.Key]*watchingCert
 	wg    sync.WaitGroup
 
-	// stopChan is closed exactly once via stopOnce. Multiple Stop callers
-	// (signal handlers, Caddy app teardown, etc.) are safe.
-	stopChan chan struct{}
-	stopOnce sync.Once
+	// rootCtx is the lifecycle parent for every daemon subgoroutine
+	// (watchers, pollers, the gRPC failover state machine). Stop cancels
+	// it exactly once via stopOnce. There is no separate stop chan —
+	// context cancellation is the single signal.
+	rootCtx    context.Context
+	rootCancel context.CancelFunc
+	stopOnce   sync.Once
 }
 
 type certData struct {
@@ -43,7 +46,6 @@ type watchingCert struct {
 	Config         config.ClientCertification
 	UpdateHandlers []CertificateUpdateHandler
 	UpdateChan     chan certData
-	Stop           atomic.Pointer[chan struct{}]
 }
 
 type WatchingCertsOption func(*watchingCert)
@@ -55,14 +57,14 @@ func WithCertificateHandlerOption(handler CertificateUpdateHandler) WatchingCert
 }
 
 // watchUpdate runs in its own goroutine and forwards cert updates to any
-// registered handlers until Stop fires. Callers must Add(1) on the wait
-// group BEFORE spawning watchUpdate; otherwise the parent goroutine could
-// race a concurrent Wait and miss the worker.
-func (c *watchingCert) watchUpdate(wg *sync.WaitGroup) {
-	defer wg.Done()
+// registered handlers until the daemon's rootCtx is done. Callers must
+// Add(1) on the wait group BEFORE spawning watchUpdate; otherwise the
+// parent goroutine could race a concurrent Wait and miss the worker.
+func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
+	defer r.wg.Done()
 	for {
 		select {
-		case <-*c.Stop.Load():
+		case <-r.rootCtx.Done():
 			return
 		case newCert := <-c.UpdateChan:
 			currentCert := c.Data.Load()
@@ -80,11 +82,13 @@ func (c *watchingCert) watchUpdate(wg *sync.WaitGroup) {
 }
 
 func MakeCertDXClientDaemon() *CertDXClientDaemon {
+	rootCtx, rootCancel := context.WithCancel(context.Background())
 	ret := &CertDXClientDaemon{
-		Config:    &config.ClientConfig{},
-		ClientOpt: make([]CertDXHttpClientOption, 0),
-		certs:     make(map[domain.Key]*watchingCert),
-		stopChan:  make(chan struct{}),
+		Config:     &config.ClientConfig{},
+		ClientOpt:  make([]CertDXHttpClientOption, 0),
+		certs:      make(map[domain.Key]*watchingCert),
+		rootCtx:    rootCtx,
+		rootCancel: rootCancel,
 	}
 	ret.Config.SetDefault()
 	return ret
@@ -111,6 +115,9 @@ func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertification) (fullc
 	return
 }
 
+// ClientInit prepares one watchingCert per Certifications entry and seeds
+// it with any cert previously written to disk. Watcher goroutines are not
+// launched until HttpMain or GRPCMain runs (they own the rootCtx).
 func (r *CertDXClientDaemon) ClientInit() {
 	for _, c := range r.Config.Certifications {
 		cd := certData{
@@ -128,15 +135,14 @@ func (r *CertDXClientDaemon) ClientInit() {
 			UpdateChan:     make(chan certData, 1),
 		}
 		cert.Data.Store(&cd)
-		stop := make(chan struct{})
-		cert.Stop.Store(&stop)
 
 		r.certs[domain.AsKey(c.Domains)] = cert
-		r.wg.Add(1)
-		go cert.watchUpdate(&r.wg)
 	}
 }
 
+// AddCertToWatchOpt registers an additional cert + handler set to be
+// watched. Must be called before HttpMain / GRPCMain runs; the watcher
+// goroutine is launched there with rootCtx.
 func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, options []WatchingCertsOption) error {
 	cd := certData{
 		Domains: domains,
@@ -152,12 +158,8 @@ func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, op
 	}
 
 	cert.Data.Store(&cd)
-	stop := make(chan struct{})
-	cert.Stop.Store(&stop)
 
 	r.certs[domain.AsKey(domains)] = cert
-	r.wg.Add(1)
-	go cert.watchUpdate(&r.wg)
 
 	return nil
 }
@@ -165,9 +167,12 @@ func (r *CertDXClientDaemon) AddCertToWatch(name string, domains []string) error
 	return r.AddCertToWatchOpt(name, domains, []WatchingCertsOption{})
 }
 
-func (r *CertDXClientDaemon) stopWatchingCert() {
+// startWatchers launches one watchUpdate goroutine per registered cert.
+// Each watcher exits when the daemon's rootCtx fires.
+func (r *CertDXClientDaemon) startWatchers() {
 	for _, c := range r.certs {
-		close(*c.Stop.Load())
+		r.wg.Add(1)
+		go r.watchUpdate(c)
 	}
 }
 
@@ -176,7 +181,7 @@ func (r *CertDXClientDaemon) httpRequestCert(domains []string) *api.HttpCertResp
 	err := retry.Do(r.Config.Common.RetryCount, func() error {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
 		var err error
-		resp, err = certdxClient.GetCert(domains)
+		resp, err = certdxClient.GetCertCtx(r.rootCtx, domains)
 		return err
 	})
 	if err == nil {
@@ -188,7 +193,7 @@ func (r *CertDXClientDaemon) httpRequestCert(domains []string) *api.HttpCertResp
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
 		err = retry.Do(r.Config.Common.RetryCount, func() error {
 			var err error
-			resp, err = certdxClient.GetCert(domains)
+			resp, err = certdxClient.GetCertCtx(r.rootCtx, domains)
 			return err
 		})
 		if err == nil {
@@ -209,26 +214,34 @@ func (r *CertDXClientDaemon) httpPollingCert(cert *watchingCert) {
 				logging.Error("Failed to request cert, err: %s", resp.Err)
 			} else {
 				sleepTime = resp.RenewTimeLeft / 4
-				cert.UpdateChan <- certData{
+				select {
+				case cert.UpdateChan <- certData{
 					Domains:   cert.Config.Domains,
 					Fullchain: resp.FullChain,
 					Key:       resp.Key,
+				}:
+				case <-r.rootCtx.Done():
+					return
 				}
 			}
 		} else {
 			logging.Error("Failed to request cert, retry next round.")
 		}
-		t := time.After(sleepTime)
+		t := time.NewTimer(sleepTime)
 		select {
-		case <-t:
+		case <-t.C:
 			// continue
-		case <-*cert.Stop.Load():
+		case <-r.rootCtx.Done():
+			t.Stop()
 			return
 		}
 	}
 }
 
+// HttpMain runs the HTTP polling client until Stop is called.
 func (r *CertDXClientDaemon) HttpMain() {
+	r.startWatchers()
+
 	for _, c := range r.certs {
 		r.wg.Add(1)
 		go func(_c *watchingCert) {
@@ -237,10 +250,9 @@ func (r *CertDXClientDaemon) HttpMain() {
 		}(c)
 	}
 
-	<-r.stopChan
+	<-r.rootCtx.Done()
 
 	logging.Info("Stopping Http client")
-	r.stopWatchingCert()
 	r.wg.Wait()
 }
 
@@ -278,7 +290,14 @@ const (
 	GRPC_STATE_RESTART_MAIN
 )
 
+// GRPCMain runs the gRPC SDS client (with failover) until Stop is called.
+//
+// The five-state failover machine itself is preserved verbatim; slice 6
+// rewrites its mechanics. Only the lifecycle plumbing (rootCtx, watchers)
+// changes here.
 func (r *CertDXClientDaemon) GRPCMain() {
+	r.startWatchers()
+
 	var standByClient *CertDXgRPCClient
 	standByExists := r.Config.GRPC.StandbyServer.Server != ""
 
@@ -340,7 +359,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 						case <-time.After(15 * time.Second):
 							stateChan <- GRPC_STATE_MAIN
 							return
-						case <-r.stopChan:
+						case <-r.rootCtx.Done():
 							return
 						}
 					}
@@ -448,12 +467,11 @@ func (r *CertDXClientDaemon) GRPCMain() {
 
 	stateChan <- GRPC_STATE_MAIN
 
-	<-r.stopChan
+	<-r.rootCtx.Done()
 
 	stateChan <- GRPC_STATE_STOP
 
 	logging.Info("Stopping gRPC client")
-	r.stopWatchingCert()
 	mainClient.Kill()
 	if standByClient != nil {
 		standByClient.Kill()
@@ -461,8 +479,10 @@ func (r *CertDXClientDaemon) GRPCMain() {
 	r.wg.Wait()
 }
 
+// Stop signals every daemon goroutine to wind down. Idempotent and safe
+// to call from any caller.
 func (r *CertDXClientDaemon) Stop() {
-	r.stopOnce.Do(func() { close(r.stopChan) })
+	r.stopOnce.Do(r.rootCancel)
 }
 
 func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash domain.Key) (*tls.Certificate, error) {

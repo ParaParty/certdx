@@ -81,7 +81,7 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 
 	cachedCert = s.GetCertCacheEntry(req.Domains)
 	if !s.IsSubcribing(cachedCert) {
-		_, err = s.Renew(cachedCert, false)
+		_, err = s.renew(r.Context(), cachedCert, false)
 		if err != nil {
 			goto ERR
 		}
@@ -108,17 +108,22 @@ ERR:
 }
 
 func (s *CertDXServer) serveHttps() {
+	ctx := s.rootCtx
 	entry := s.GetCertCacheEntry(s.Config.HttpServer.Names)
-	cert_ := entry.Cert()
 
 	s.Subscribe(entry)
+	defer s.Release(entry)
 
-	if !cert_.IsValid() {
-		<-*entry.Updated.Load()
+	cert, seen := entry.Snapshot()
+	if !cert.IsValid() {
+		seen = entry.WaitForUpdate(ctx, seen)
+		if ctx.Err() != nil {
+			return
+		}
+		cert, seen = entry.Snapshot()
 	}
 
 	for {
-		cert := entry.Cert()
 		certificate, err := tls.X509KeyPair(cert.FullChain, cert.Key)
 		if err != nil {
 			logging.Fatal("Failed to load cert, err: %s", err)
@@ -139,13 +144,12 @@ func (s *CertDXServer) serveHttps() {
 			logging.Info("Https server stopped: %s", err)
 		}()
 
-		select {
-		case <-*entry.Updated.Load():
-			server.Close()
-		case <-s.stop:
-			server.Close()
+		seen = entry.WaitForUpdate(ctx, seen)
+		server.Close()
+		if ctx.Err() != nil {
 			return
 		}
+		cert, seen = entry.Snapshot()
 	}
 }
 
@@ -160,7 +164,7 @@ func (s *CertDXServer) serveHttp() {
 		logging.Info("Http server stopped: %s", err)
 	}()
 
-	<-s.stop
+	<-s.rootCtx.Done()
 	server.Close()
 }
 
@@ -176,10 +180,11 @@ func (s *CertDXServer) serveHttpMtls() {
 		logging.Info("Http mtls server stopped: %s", err)
 	}()
 
-	<-s.stop
+	<-s.rootCtx.Done()
 	server.Close()
 }
 
+// HttpSrv runs the HTTP API endpoint until Stop is called.
 func (s *CertDXServer) HttpSrv() {
 	logging.Info("Start listening Http at %s%s", s.Config.HttpServer.Listen, s.Config.HttpServer.APIPath)
 
