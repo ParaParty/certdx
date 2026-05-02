@@ -39,7 +39,7 @@ func (certdx *CertDXTls) Provision(ctx caddy.Context) error {
 func (certdx *CertDXTls) Validate() error {
 	app, err := certdx.ctx.App("certdx")
 	if err != nil {
-		return fmt.Errorf("failed to get certdx app: %v", err)
+		return fmt.Errorf("failed to get certdx app: %w", err)
 	}
 
 	ok := false

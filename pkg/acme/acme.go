@@ -38,7 +38,7 @@ func (a *ACME) Obtain(domains []string, deadline time.Time) (fullchain, key []by
 
 	certificates, err := a.Client.Certificate.Obtain(request)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed obtaining cert: %s", err)
+		return nil, nil, fmt.Errorf("failed obtaining cert: %w", err)
 	}
 
 	return certificates.Certificate, certificates.PrivateKey, nil

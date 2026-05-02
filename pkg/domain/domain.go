@@ -6,9 +6,15 @@
 package domain
 
 import (
+	"errors"
 	"hash/fnv"
 	"strings"
 )
+
+// ErrNotAllowed is returned (or wrapped) when a domain or set of domains is
+// outside the configured allow-list. Callers can branch with errors.Is to
+// distinguish allow-list rejection from other failures.
+var ErrNotAllowed = errors.New("domain not allowed")
 
 // Key is a stable, order-insensitive hash of a set of domain names. Two slices
 // containing the same domains in any order produce the same Key, so it is safe

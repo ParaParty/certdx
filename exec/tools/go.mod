@@ -9,7 +9,6 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.90
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.52
-	google.golang.org/appengine v1.6.8
 	k8s.io/api v0.36.0
 	k8s.io/apimachinery v0.36.0
 	k8s.io/client-go v0.36.0
@@ -67,7 +66,6 @@ require (
 	github.com/go-openapi/swag/stringutils v0.26.0 // indirect
 	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
-	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect

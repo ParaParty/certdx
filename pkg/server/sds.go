@@ -116,7 +116,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 						return
 					}
 					if !domain.AllAllowed(sds.cdxsrv.Config.ACME.AllowedDomains, domains) {
-						errChan <- fmt.Errorf("domains %v not allowed", domains)
+						errChan <- fmt.Errorf("domains %v: %w", domains, domain.ErrNotAllowed)
 						return
 					}
 					packRequests[name] = domains

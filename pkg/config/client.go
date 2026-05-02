@@ -1,11 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"time"
 
-	"google.golang.org/appengine"
 	"pkg.para.party/certdx/pkg/paths"
 )
 
@@ -31,7 +31,7 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 		it(option)
 	}
 
-	ret := appengine.MultiError{}
+	var ret []error
 
 	if err := c.parseDuration(); err != nil {
 		ret = append(ret, err)
@@ -62,17 +62,14 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 		ret = append(ret, fmt.Errorf("unsupported mode: %s", c.Common.Mode))
 	}
 
-	if len(ret) > 0 {
-		return ret
-	}
-	return nil
+	return errors.Join(ret...)
 }
 
 func (c *ClientConfig) parseDuration() error {
 	var err error
 	c.Common.ReconnectDuration, err = time.ParseDuration(c.Common.ReconnectInterval)
 	if err != nil {
-		return fmt.Errorf("can not parse ReconnectInterval: %s", err)
+		return fmt.Errorf("can not parse ReconnectInterval: %w", err)
 	}
 	return nil
 }
