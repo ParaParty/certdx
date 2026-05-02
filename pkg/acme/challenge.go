@@ -2,14 +2,13 @@ package acme
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/lego"
-	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
-	"github.com/go-acme/lego/v4/providers/dns/tencentcloud"
-	"pkg.para.party/certdx/pkg/acme/http/s3"
+	"pkg.para.party/certdx/pkg/acme/challengeproviders/cloudflare"
+	"pkg.para.party/certdx/pkg/acme/challengeproviders/s3"
+	"pkg.para.party/certdx/pkg/acme/challengeproviders/tencentcloud"
 	"pkg.para.party/certdx/pkg/config"
 )
 
@@ -64,36 +63,12 @@ func getChallenger(legoCfg *lego.Config, p *config.ServerConfig) (string, challe
 }
 
 func makeCloudflareProvider(legoCfg *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
-	// zone token
-	if p.ZoneToken != "" && p.AuthToken != "" {
-		cloudflareConfig := cloudflare.NewDefaultConfig()
-		cloudflareConfig.ZoneToken = p.ZoneToken
-		cloudflareConfig.AuthToken = p.AuthToken
-		cloudflareDnsProvider, err := cloudflare.NewDNSProviderConfig(cloudflareConfig)
-		if err != nil {
-			return config.ChallengeTypeDns01, nil, err
-		}
-
-		return config.ChallengeTypeDns01, cloudflareDnsProvider, err
-	}
-
-	// global token
-	c, err := cloudflare.NewDNSProviderConfig(&cloudflare.Config{
-		AuthEmail:          p.Email,
-		AuthKey:            p.APIKey,
-		TTL:                120,
-		PropagationTimeout: 30 * time.Second,
-		PollingInterval:    2 * time.Second,
-		HTTPClient:         legoCfg.HTTPClient,
-	})
+	c, err := cloudflare.New(legoCfg, p)
 	return config.ChallengeTypeDns01, c, err
 }
 
 func makeTencentCloudProvider(_ *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
-	tencentCloudConfig := tencentcloud.NewDefaultConfig()
-	tencentCloudConfig.SecretID = p.SecretID
-	tencentCloudConfig.SecretKey = p.SecretKey
-	c, err := tencentcloud.NewDNSProviderConfig(tencentCloudConfig)
+	c, err := tencentcloud.New(p)
 	return config.ChallengeTypeDns01, c, err
 }
 

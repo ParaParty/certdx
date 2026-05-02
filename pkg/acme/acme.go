@@ -1,7 +1,7 @@
 package acme
 
 import (
-	"pkg.para.party/certdx/pkg/acmeprovider"
+	"pkg.para.party/certdx/pkg/acme/acmeproviders"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/retry"
 
@@ -55,7 +55,7 @@ func (a *ACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key
 }
 
 func MakeACME(c *config.ServerConfig) (Obtainer, error) {
-	if acmeprovider.IsACMEProviderMock(c.ACME.Provider) {
+	if acmeproviders.IsMock(c.ACME.Provider) {
 		return NewMockACME(c.ACME.CertLifeTimeDuration), nil
 	}
 
@@ -66,10 +66,10 @@ func MakeACME(c *config.ServerConfig) (Obtainer, error) {
 
 	instance := &ACME{
 		retry:        c.ACME.RetryCount,
-		needNotAfter: acmeprovider.IsACMEProviderGoogle(c.ACME.Provider),
+		needNotAfter: acmeproviders.IsGoogle(c.ACME.Provider),
 	}
 	config := lego.NewConfig(user)
-	config.CADirURL = acmeprovider.GetACMEURL(c.ACME.Provider)
+	config.CADirURL = acmeproviders.URL(c.ACME.Provider)
 	config.Certificate.KeyType = certcrypto.EC256
 
 	instance.Client, err = lego.NewClient(config)
