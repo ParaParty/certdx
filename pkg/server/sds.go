@@ -157,17 +157,19 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCertCacheEntry,
 	req chan *discoveryv3.DiscoveryRequest, resp chan *discoveryv3.DiscoveryResponse, peer string) {
 
-	cert_ := entry.Cert()
-
 	sds.cdxsrv.Subscribe(entry)
 	defer sds.cdxsrv.Release(entry)
 
-	if !cert_.IsValid() {
-		<-*entry.Updated.Load()
+	cert, seen := entry.Snapshot()
+	if !cert.IsValid() {
+		seen = entry.WaitForUpdate(ctx, seen)
+		if ctx.Err() != nil {
+			return
+		}
+		cert, seen = entry.Snapshot()
 	}
 
 	for {
-		cert := entry.Cert()
 
 		secret, err := anypb.New(&tlsv3.Secret{
 			Name: name,
@@ -219,13 +221,12 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCert
 			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
 		}
 
-		select {
-		case <-ctx.Done():
+		seen = entry.WaitForUpdate(ctx, seen)
+		if ctx.Err() != nil {
 			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
 			return
-		case <-*entry.Updated.Load():
-			// continue
 		}
+		cert, seen = entry.Snapshot()
 	}
 }
 
@@ -243,6 +244,7 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 	return handler(ctx, req)
 }
 
+// SDSSrv runs the gRPC SDS endpoint until Stop is called.
 func (s *CertDXServer) SDSSrv() {
 	logging.Info("Start listening GRPC at %s", s.Config.GRPCSDSServer.Listen)
 
@@ -276,7 +278,7 @@ func (s *CertDXServer) SDSSrv() {
 		}
 	}()
 
-	<-s.stop
+	<-s.rootCtx.Done()
 
 	close(sds.kill)
 	server.GracefulStop()
