@@ -40,7 +40,8 @@ func FileExists(path string) bool {
 }
 
 // SetMtlsDir sets a process-local mtls directory override. It is mainly used
-// by --mtls-dir flags.
+// by --mtls-dir flags. Call this during process setup; concurrent mutation is
+// not supported.
 func SetMtlsDir(dir string) {
 	mtlsDirOverride = dir
 }
