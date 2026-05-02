@@ -2,56 +2,42 @@ package txcCertificateUpdater
 
 import (
 	"fmt"
-	"os"
 
 	flag "github.com/spf13/pflag"
+
 	"pkg.para.party/certdx/pkg/logging"
 )
 
-func initCmd() (*txcCertsUpdateCmd, error) {
+// TencentCloudReplaceCertificate is the entrypoint for the
+// tencent-cloud-certificate-updater sub-command.
+func TencentCloudReplaceCertificate(name string, args []string) error {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	var (
-		clientCMD = flag.NewFlagSet(os.Args[1], flag.ExitOnError)
-
-		clientHelp = clientCMD.BoolP("help", "h", false, "Print help")
-		conf       = clientCMD.StringP("conf", "c", "./client.toml", "Config file path")
-		pDebug     = clientCMD.BoolP("debug", "d", false, "Enable debug log")
+		help     = fs.BoolP("help", "h", false, "Print help")
+		confPath = fs.StringP("conf", "c", "./client.toml", "Config file path")
+		debug    = fs.BoolP("debug", "d", false, "Enable debug log")
 	)
-	_ = clientCMD.Parse(os.Args[2:])
-
-	if *clientHelp {
-		clientCMD.PrintDefaults()
-		os.Exit(0)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *help {
+		fs.PrintDefaults()
+		return nil
+	}
+	if *confPath == "" {
+		return fmt.Errorf("--conf is required")
 	}
 
-	logging.SetDebug(*pDebug)
-	if conf == nil || len(*conf) == 0 {
-		logging.Error("Config file path is empty")
-		return nil, fmt.Errorf("config file path is empty")
+	logging.SetDebug(*debug)
+
+	cmd := &txcCertsUpdateCmd{confPath: confPath}
+	updater := MakeTencentCloudCertificateUpdater(cmd)
+
+	if err := updater.InitCertificateUpdater(); err != nil {
+		return fmt.Errorf("init updater: %w", err)
 	}
-
-	cfg := &txcCertsUpdateCmd{
-		confPath: conf,
+	if err := updater.InvokeCertificateUpdate(); err != nil {
+		return fmt.Errorf("update certificates: %w", err)
 	}
-
-	return cfg, nil
-}
-
-func TencentCloudReplaceCertificate() {
-	// init
-	cmdOpt, err := initCmd()
-	if err != nil {
-		logging.Fatal("Failed to initialize certdx: %s", err)
-	}
-
-	updater := MakeTencentCloudCertificateUpdater(cmdOpt)
-
-	err = updater.InitCertificateUpdater()
-	if err != nil {
-		logging.Fatal("Failed to initialize updating task: %s", err)
-	}
-
-	err = updater.InvokeCertificateUpdate()
-	if err != nil {
-		logging.Fatal("Failed to initialize tencent cloud: %s", err)
-	}
+	return nil
 }
