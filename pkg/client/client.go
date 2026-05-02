@@ -290,11 +290,10 @@ const (
 	GRPC_STATE_RESTART_MAIN
 )
 
-// GRPCMain runs the gRPC SDS client (with failover) until Stop is called.
-//
-// The five-state failover machine itself is preserved verbatim; slice 6
-// rewrites its mechanics. Only the lifecycle plumbing (rootCtx, watchers)
-// changes here.
+// GRPCMain runs the gRPC SDS client (with failover) until Stop is
+// called. State transitions are unchanged from the original five-state
+// machine; only the cancellation primitive moves from atomic.Pointer
+// reset chains to a session ctx derived from rootCtx.
 func (r *CertDXClientDaemon) GRPCMain() {
 	r.startWatchers()
 
@@ -311,23 +310,20 @@ func (r *CertDXClientDaemon) GRPCMain() {
 	go func() {
 		defer r.wg.Done()
 		mainRetryCount := 0
-		StandByActive := atomic.Bool{}
-		StandByActive.Store(false)
-		resetChan_ := make(chan struct{})
-		resetChan := atomic.Pointer[chan struct{}]{}
-		resetChan.Store(&resetChan_)
+		var standByActive atomic.Bool
 
-		resetFunc := func() {
-			newReset := make(chan struct{})
-			close(*resetChan.Swap(&newReset))
-		}
+		// Only the dispatcher writes sessionCtx / sessionCancel. The
+		// fallback only invokes the captured cancel; runStandby and
+		// runRestart only read sessionCtx.Done().
+		sessionCtx, sessionCancel := context.WithCancel(r.rootCtx)
+		defer sessionCancel()
 
 		for {
 			state := <-stateChan
 			logging.Debug("Process grpc client state: %d", state)
 			switch state {
 			case GRPC_STATE_STOP:
-				resetFunc()
+				sessionCancel()
 				return
 			case GRPC_STATE_MAIN:
 				r.wg.Add(1)
@@ -366,7 +362,7 @@ func (r *CertDXClientDaemon) GRPCMain() {
 
 					logging.Info("Retry limite for main stream reached")
 					mainRetryCount = 0
-					if standByExists && !StandByActive.Load() {
+					if standByExists && !standByActive.Load() {
 						logging.Info("Start trying standby stream")
 						stateChan <- GRPC_STATE_FAILOVER
 					} else {
@@ -375,92 +371,21 @@ func (r *CertDXClientDaemon) GRPCMain() {
 					}
 				}()
 			case GRPC_STATE_FAILOVER:
-				StandByActive.Store(true)
+				// Cancel any leftover cycle and start a fresh one.
+				sessionCancel()
+				sessionCtx, sessionCancel = context.WithCancel(r.rootCtx)
+
+				standByActive.Store(true)
 				r.wg.Add(1)
-				go func() {
-					defer func() {
-						r.wg.Done()
-						StandByActive.Store(false)
-						logging.Debug("Standby goroutine exit")
-					}()
-					standbyRetryCount := 0
-					for {
-						select {
-						case <-*resetChan.Load():
-							return
-						default:
-						}
-						logging.Info("Starting gRPC standby stream")
-						startTime := time.Now()
-						err := standByClient.Stream()
-						logging.Info("gRPC standby stream stopped: %s", err)
-						if _, ok := err.(*killed); ok {
-							return
-						}
-
-						if time.Now().Before(startTime.Add(5 * time.Minute)) {
-							standbyRetryCount += 1
-						} else {
-							standbyRetryCount = 0
-							continue
-						}
-
-						logging.Info("Current standby server retry count: %d", standbyRetryCount)
-						if standbyRetryCount < r.Config.Common.RetryCount {
-							select {
-							case <-time.After(15 * time.Second):
-								continue
-							case <-*resetChan.Load():
-								logging.Debug("Standby goroutine reset")
-								return
-							}
-						}
-
-						logging.Info("Retry limite for standby stream reached, sleep %s", r.Config.Common.ReconnectInterval)
-						standbyRetryCount = 0
-						select {
-						case <-time.After(r.Config.Common.ReconnectDuration):
-							continue
-						case <-*resetChan.Load():
-							logging.Debug("Standby goroutine reset")
-							return
-						}
-					}
-				}()
+				go r.runStandby(sessionCtx, standByClient, &standByActive)
 				stateChan <- GRPC_STATE_TRY_FALLBACK
 			case GRPC_STATE_TRY_FALLBACK:
 				r.wg.Add(1)
-				go func() {
-					defer func() {
-						r.wg.Done()
-						logging.Debug("Fallback goroutine exit")
-					}()
-					select {
-					case <-*mainClient.Received.Load():
-						standByClient.Kill()
-						resetFunc()
-					case <-*resetChan.Load():
-						logging.Debug("Fallback goroutine reset")
-						return
-					}
-				}()
+				go r.runFallback(sessionCtx, sessionCancel, mainClient, standByClient)
 				stateChan <- GRPC_STATE_RESTART_MAIN
 			case GRPC_STATE_RESTART_MAIN:
 				r.wg.Add(1)
-				go func() {
-					defer func() {
-						r.wg.Done()
-						logging.Debug("Restart goroutine exit")
-					}()
-					logging.Debug("Reconnect duration is: %s", r.Config.Common.ReconnectDuration)
-					select {
-					case <-time.After(r.Config.Common.ReconnectDuration):
-						stateChan <- GRPC_STATE_MAIN
-					case <-*resetChan.Load():
-						logging.Debug("Restart goroutine reset")
-						return
-					}
-				}()
+				go r.runRestart(sessionCtx, stateChan)
 			}
 		}
 	}()
@@ -477,6 +402,95 @@ func (r *CertDXClientDaemon) GRPCMain() {
 		standByClient.Kill()
 	}
 	r.wg.Wait()
+}
+
+// runStandby drives the standby gRPC stream while the main is dead,
+// retrying with the same backoff as the original failover state. It
+// exits when sessionCtx is cancelled (main recovered or daemon stopped).
+func (r *CertDXClientDaemon) runStandby(sessionCtx context.Context, standByClient *CertDXgRPCClient, standByActive *atomic.Bool) {
+	defer func() {
+		r.wg.Done()
+		standByActive.Store(false)
+		logging.Debug("Standby goroutine exit")
+	}()
+
+	standbyRetryCount := 0
+	for {
+		if sessionCtx.Err() != nil {
+			return
+		}
+		logging.Info("Starting gRPC standby stream")
+		startTime := time.Now()
+		err := standByClient.Stream()
+		logging.Info("gRPC standby stream stopped: %s", err)
+		if _, ok := err.(*killed); ok {
+			return
+		}
+
+		if time.Now().Before(startTime.Add(5 * time.Minute)) {
+			standbyRetryCount += 1
+		} else {
+			standbyRetryCount = 0
+			continue
+		}
+
+		logging.Info("Current standby server retry count: %d", standbyRetryCount)
+		if standbyRetryCount < r.Config.Common.RetryCount {
+			select {
+			case <-time.After(15 * time.Second):
+				continue
+			case <-sessionCtx.Done():
+				logging.Debug("Standby goroutine reset")
+				return
+			}
+		}
+
+		logging.Info("Retry limite for standby stream reached, sleep %s", r.Config.Common.ReconnectInterval)
+		standbyRetryCount = 0
+		select {
+		case <-time.After(r.Config.Common.ReconnectDuration):
+			continue
+		case <-sessionCtx.Done():
+			logging.Debug("Standby goroutine reset")
+			return
+		}
+	}
+}
+
+// runFallback waits for the main client to receive a message (i.e. main
+// is alive again). On recovery it kills the standby and cancels the
+// session, which signals every other session-bound goroutine
+// (runStandby, runRestart) to wind down. If sessionCtx fires first,
+// fallback exits without action.
+func (r *CertDXClientDaemon) runFallback(sessionCtx context.Context, sessionCancel context.CancelFunc, mainClient, standByClient *CertDXgRPCClient) {
+	defer func() {
+		r.wg.Done()
+		logging.Debug("Fallback goroutine exit")
+	}()
+	select {
+	case <-*mainClient.Received.Load():
+		standByClient.Kill()
+		sessionCancel()
+	case <-sessionCtx.Done():
+		logging.Debug("Fallback goroutine reset")
+	}
+}
+
+// runRestart sleeps for ReconnectDuration before signalling MAIN again.
+// Cancelled by sessionCtx; in that case it exits without re-entering MAIN.
+func (r *CertDXClientDaemon) runRestart(sessionCtx context.Context, stateChan chan<- GRPC_CLIENT_STATE) {
+	defer func() {
+		r.wg.Done()
+		logging.Debug("Restart goroutine exit")
+	}()
+	logging.Debug("Reconnect duration is: %s", r.Config.Common.ReconnectDuration)
+	select {
+	case <-time.After(r.Config.Common.ReconnectDuration):
+		stateChan <- GRPC_STATE_MAIN
+	case <-sessionCtx.Done():
+		logging.Debug("Restart goroutine reset")
+		return
+	}
 }
 
 // Stop signals every daemon goroutine to wind down. Idempotent and safe
