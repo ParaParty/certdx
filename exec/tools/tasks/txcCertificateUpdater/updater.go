@@ -12,7 +12,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	txprofile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
-	"google.golang.org/appengine"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
@@ -31,7 +30,7 @@ type TencentCloudCertificateUpdater struct {
 	client *txssl.Client
 
 	wg           sync.WaitGroup
-	taskErr      appengine.MultiError
+	taskErr      []error
 	taskErrMutex sync.Mutex
 
 	certDXDaemon *client.CertDXClientDaemon
@@ -45,7 +44,7 @@ func MakeTencentCloudCertificateUpdater(updaterCmd *txcCertsUpdateCmd) *TencentC
 		// client : in tencent cloud init
 
 		wg:           sync.WaitGroup{},
-		taskErr:      appengine.MultiError{},
+		taskErr:      nil,
 		taskErrMutex: sync.Mutex{},
 
 		// certDXDaemon : in certdx init
@@ -196,17 +195,17 @@ func (r *TencentCloudCertificateUpdater) WaitReplaceTask() error {
 
 	select {
 	case <-waitDeadlineCtx.Done():
-		s := "timeout waiting for certificates to be replaced"
+		const s = "timeout waiting for certificates to be replaced"
 		logging.Error(s)
-		return fmt.Errorf(s)
+		return errors.New(s)
 	case <-wgDone:
 		if len(r.taskErr) == 0 {
 			logging.Info("certificate replaced successfully")
 			return nil
-		} else {
-			logging.Error("certificate replaced failed: %v", r.taskErr)
-			return r.taskErr
 		}
+		joined := errors.Join(r.taskErr...)
+		logging.Error("certificate replaced failed: %v", joined)
+		return joined
 	}
 }
 func (r *TencentCloudCertificateUpdater) FetchTencentCloudCertificate(opt func(request *txssl.DescribeCertificatesRequest)) ([]*txssl.Certificates, error) {

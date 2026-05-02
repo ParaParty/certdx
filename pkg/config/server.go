@@ -1,11 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"google.golang.org/appengine"
 	"pkg.para.party/certdx/pkg/acmeprovider"
 )
 
@@ -22,7 +22,7 @@ type ServerConfig struct {
 }
 
 func (c *ServerConfig) Validate() error {
-	ret := appengine.MultiError{}
+	var ret []error
 
 	if err := c.ACME.Validate(); err != nil {
 		ret = append(ret, err)
@@ -64,22 +64,19 @@ func (c *ServerConfig) Validate() error {
 		ret = append(ret, err)
 	}
 
-	if len(ret) > 0 {
-		return ret
-	}
-	return nil
+	return errors.Join(ret...)
 }
 
 func (c *ServerConfig) parseDuration() error {
 	var err error
 	c.ACME.CertLifeTimeDuration, err = time.ParseDuration(c.ACME.CertLifeTime)
 	if err != nil {
-		return fmt.Errorf("can not parse CertLifeTime: %s", err)
+		return fmt.Errorf("can not parse CertLifeTime: %w", err)
 	}
 
 	c.ACME.RenewTimeLeftDuration, err = time.ParseDuration(c.ACME.RenewTimeLeft)
 	if err != nil {
-		return fmt.Errorf("can not parse RenewTimeLeft: %s", err)
+		return fmt.Errorf("can not parse RenewTimeLeft: %w", err)
 	}
 
 	return nil

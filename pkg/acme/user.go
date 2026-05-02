@@ -58,7 +58,7 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 		if acmeprovider.IsACMEProviderGoogle(c.ACME.Provider) {
 			account, err := google.CreateExternalAccountKeyRequest(c.GoogleCloudCredential)
 			if err != nil {
-				return nil, fmt.Errorf("failed to register google ca: %v", err)
+				return nil, fmt.Errorf("failed to register google ca: %w", err)
 			}
 			kid = account.KeyId
 			hmac = account.HmacEncoded
@@ -108,7 +108,7 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
-		return fmt.Errorf("fialed generating key: %s", err)
+		return fmt.Errorf("failed generating key: %w", err)
 	}
 
 	x509Encoded, _ := x509.MarshalECPrivateKey(privateKey)
@@ -148,7 +148,7 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 	}
 	if err != nil {
 		os.Remove(keyPath)
-		return fmt.Errorf("failed to register: %s", err)
+		return fmt.Errorf("failed to register: %w", err)
 	}
 
 	reg, err := json.Marshal(myUser.Registration)

@@ -85,7 +85,7 @@ func (s *CertDXServer) Init() error {
 
 	s.acme, err = acme.MakeACME(&s.Config)
 	if err != nil {
-		return fmt.Errorf("initailizing ACME failed, err: %s", err)
+		return fmt.Errorf("initailizing ACME failed: %w", err)
 	}
 
 	if err = s.loadCacheFile(); err != nil {
