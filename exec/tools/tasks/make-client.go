@@ -2,44 +2,44 @@ package tasks
 
 import (
 	"fmt"
-	"os"
+	"strings"
 
-	flag "github.com/spf13/pflag"
-	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
-func MakeClient() {
+// commonNameTemplate is the placeholder substituted with the client
+// name when the user does not override --common-name.
+const commonNameTemplate = "CertDX Client: {name}"
+
+// MakeClient generates a client certificate signed by the certdx CA.
+func MakeClient(name string, args []string) error {
+	fs := newFlagSet(name)
 	var (
-		clientCMD = flag.NewFlagSet(os.Args[1], flag.ExitOnError)
-
-		clientName         = clientCMD.StringP("name", "n", "", "CertDX grpc client name")
-		clientDomains      = clientCMD.StringSliceP("dns-names", "d", []string{}, "CertDX grpc client certificate dns names, combine multiple names with \",\"")
-		clientOrganization = clientCMD.StringP("organization", "o", "CertDX Private", "Subject Organization")
-		clientCommonName   = clientCMD.StringP("common-name", "c", "CertDX Client: {name}", "Subject Common Name")
-		mtlsDir            = clientCMD.String("mtls-dir", "", "mTLS material directory")
-		clientHelp         = clientCMD.BoolP("Help", "h", false, "Print Help")
+		clientName = fs.StringP("name", "n", "", "CertDX grpc client name")
+		domains    = fs.StringSliceP("dns-names", "d", []string{}, "Client certificate DNS names (comma-separated)")
+		org        = fs.StringP("organization", "o", "CertDX Private", "Subject Organization")
+		commonName = fs.StringP("common-name", "c", commonNameTemplate, "Subject Common Name")
+		mtlsDir    = fs.String("mtls-dir", "", "mTLS material directory")
+		help       = fs.BoolP("help", "h", false, "Print help")
 	)
-	clientCMD.Parse(os.Args[2:])
-
-	if *clientHelp {
-		clientCMD.PrintDefaults()
-		os.Exit(0)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *help {
+		fs.PrintDefaults()
+		return nil
 	}
 
 	if *clientName == "" {
-		logging.Fatal("client name is required")
+		return fmt.Errorf("--name is required")
 	}
-
-	if *clientCommonName == "CertDX Client: {name}" {
-		*clientCommonName = fmt.Sprintf("CertDX Client: %s", *clientName)
-	}
+	cn := strings.ReplaceAll(*commonName, "{name}", *clientName)
 
 	paths.SetMtlsDir(*mtlsDir)
 
-	err := tools.MakeClientCert(*clientName, *clientOrganization, *clientCommonName, *clientDomains)
-	if err != nil {
-		logging.Fatal("err: %s", err)
+	if err := tools.MakeClientCert(*clientName, *org, cn, *domains); err != nil {
+		return fmt.Errorf("create client cert: %w", err)
 	}
+	return nil
 }

@@ -78,7 +78,7 @@ func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 		req.FilterExpiring = txcommon.Uint64Ptr(1)               // 临期证书
 	})
 	if err != nil {
-		logging.Fatal("failed to fetch expiring certificates: %v", err)
+		return fmt.Errorf("fetch expiring certificates: %w", err)
 	}
 
 	logging.Info("retrieving expiring and normal certificates...")
@@ -89,7 +89,7 @@ func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 		req.FilterExpiring = txcommon.Uint64Ptr(0)               // 临期证书和非临期证书
 	})
 	if err != nil {
-		logging.Fatal("failed to fetch expiring certificates: %v", err)
+		return fmt.Errorf("fetch activating certificates: %w", err)
 	}
 
 	matchedCerts := make([]ClientCertification, 0)
@@ -272,34 +272,31 @@ func LogMissingCerts(a, b []ClientCertification) error {
 
 func (r *TencentCloudCertificateUpdater) InitCertDX() error {
 	r.certDXDaemon = client.MakeCertDXClientDaemon()
-	err := r.certDXDaemon.LoadConfigurationAndValidateOpt(*r.cmd.confPath, []config.ValidatingOption{
+	if err := r.certDXDaemon.LoadConfigurationAndValidateOpt(*r.cmd.confPath, []config.ValidatingOption{
 		config.WithAcceptEmptyCertificateSavePath(true),
 		config.WithAcceptEmptyCertificatesList(false),
-	})
-	if err != nil {
-		logging.Fatal("Invalid config: %s", err)
+	}); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
 	logging.Debug("Reconnect duration is: %s", r.certDXDaemon.Config.Common.ReconnectDuration)
-
 	return nil
 }
 
 func (r *TencentCloudCertificateUpdater) InitTencentCloud() error {
 	cfile, err := os.Open(*r.cmd.confPath)
 	if err != nil {
-		logging.Fatal("Open config file failed, err: %s", err)
-		return err
+		return fmt.Errorf("open config file: %w", err)
 	}
 	defer cfile.Close()
-	if b, err := io.ReadAll(cfile); err == nil {
-		if err := toml.Unmarshal(b, r.cfg); err == nil {
-			logging.Info("Config loaded")
-		} else {
-			logging.Fatal("Unmarshalling config failed, err: %s", err)
-		}
-	} else {
-		logging.Fatal("Reading config file failed, err: %s", err)
+
+	b, err := io.ReadAll(cfile)
+	if err != nil {
+		return fmt.Errorf("read config file: %w", err)
 	}
+	if err := toml.Unmarshal(b, r.cfg); err != nil {
+		return fmt.Errorf("unmarshal config: %w", err)
+	}
+	logging.Info("Config loaded")
 
 	credential := txcommon.NewCredential(r.cfg.Authorization.SecretID, r.cfg.Authorization.SecretKey)
 
@@ -309,37 +306,27 @@ func (r *TencentCloudCertificateUpdater) InitTencentCloud() error {
 
 	r.client, err = txssl.NewClient(credential, "", cpf)
 	if err != nil {
-		logging.Fatal("Fail to create tencent cloud client, err: %s", err)
+		return fmt.Errorf("create tencent cloud client: %w", err)
 	}
-
 	return nil
 }
 
 func (r *TencentCloudCertificateUpdater) InitCertificateUpdater() error {
-	err := r.InitCertDX()
-	if err != nil {
-		logging.Error("Failed to initialize certdx: %s", err)
-		return err
+	if err := r.InitCertDX(); err != nil {
+		return fmt.Errorf("init certdx: %w", err)
 	}
-
-	err = r.InitTencentCloud()
-	if err != nil {
-		logging.Error("Failed to initialize tencent cloud: %s", err)
-		return err
+	if err := r.InitTencentCloud(); err != nil {
+		return fmt.Errorf("init tencent cloud: %w", err)
 	}
-
 	return nil
 }
 
 func (r *TencentCloudCertificateUpdater) InvokeCertificateUpdate() error {
-	err := r.GetCertificateToUpdate()
-	if err != nil {
-		logging.Fatal("Failed to initialize tencent cloud: %s", err)
+	if err := r.GetCertificateToUpdate(); err != nil {
+		return fmt.Errorf("get certificates to update: %w", err)
 	}
-
-	err = r.AddReplaceTask()
-	if err != nil {
-		logging.Fatal("Failed to initialize tencent cloud: %s", err)
+	if err := r.AddReplaceTask(); err != nil {
+		return fmt.Errorf("add replace task: %w", err)
 	}
 
 	switch r.certDXDaemon.Config.Common.Mode {
@@ -348,7 +335,7 @@ func (r *TencentCloudCertificateUpdater) InvokeCertificateUpdate() error {
 	case config.CLIENT_MODE_GRPC:
 		go r.certDXDaemon.GRPCMain()
 	default:
-		logging.Fatal("Mode: \"%s\" is not supported", r.certDXDaemon.Config.Common.Mode)
+		return fmt.Errorf("unsupported mode: %s", r.certDXDaemon.Config.Common.Mode)
 	}
 
 	return r.WaitReplaceTask()
