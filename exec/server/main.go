@@ -10,6 +10,7 @@ import (
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/server"
 )
 
@@ -24,6 +25,7 @@ var (
 	version  = flag.BoolP("version", "v", false, "Print version")
 	pConf    = flag.StringP("conf", "c", "./server.toml", "Config file path")
 	pDebug   = flag.BoolP("debug", "d", false, "Enable debug log")
+	pMtlsDir = flag.String("mtls-dir", "", "mTLS material directory")
 )
 
 var cdxsrv *server.CertDXServer
@@ -44,6 +46,8 @@ func init() {
 	logging.SetLogFile(*pLogPath)
 	logging.SetDebug(*pDebug)
 	logging.Info("\nStarting certdx server %s, built at %s", buildCommit, buildDate)
+
+	paths.SetMtlsDir(*pMtlsDir)
 
 	cdxsrv = server.MakeCertDXServer()
 

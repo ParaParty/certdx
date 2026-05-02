@@ -19,10 +19,11 @@ import (
 // TestHTTPMutualTLS: HTTPS + mTLS client-cert authenticated cert delivery.
 func TestHTTPMutualTLS(t *testing.T) {
 	cwd := t.TempDir()
+	chainDir := t.TempDir()
 	port := harness.MustFreePort()
 	const apiPath = "/e2e"
 
-	chain := harness.GenerateChain(t, cwd, []string{"localhost", "127.0.0.1"}, "client1")
+	chain := harness.GenerateChain(t, chainDir, []string{"localhost", "127.0.0.1"}, "client1")
 
 	harness.WriteServerConfig(t, cwd, harness.ServerOpts{
 		AllowedDomains: []string{"example.test", "localhost"},
@@ -33,7 +34,7 @@ func TestHTTPMutualTLS(t *testing.T) {
 		HTTPNames:      []string{"localhost"},
 	})
 
-	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "-d")
+	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "--mtls-dir", filepath.Join(chainDir, "mtls"), "-d")
 	if err := harness.WaitListening("127.0.0.1", port, 5*time.Second); err != nil {
 		t.Fatalf("server not listening: %s\n%s", err, srv.CombinedOutput())
 	}

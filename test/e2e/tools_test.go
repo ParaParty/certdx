@@ -3,10 +3,13 @@
 package e2e
 
 import (
+	"context"
 	"crypto/x509"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"pkg.para.party/certdx/test/e2e/harness"
 )
@@ -27,11 +30,14 @@ func TestToolsMakeMTLSCertChain(t *testing.T) {
 		}
 	}
 
-	// CA key should not be world/group readable; tools writes it 0o600.
-	if info, err := os.Stat(chain.CAKey); err != nil {
-		t.Fatalf("stat ca key: %s", err)
-	} else if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		t.Logf("warning: ca.key world/group readable (%o); tooling should tighten this", perm)
+	assertPerm(t, filepath.Join(cwd, "mtls"), 0o700)
+	assertPerm(t, chain.CAPEM, 0o644)
+	assertPerm(t, chain.CAKey, 0o600)
+	assertPerm(t, chain.SrvPEM, 0o644)
+	assertPerm(t, chain.SrvKey, 0o600)
+	for name := range chain.ClientPEM {
+		assertPerm(t, chain.ClientPEM[name], 0o644)
+		assertPerm(t, chain.ClientKey[name], 0o600)
 	}
 
 	ca := harness.LoadCert(t, chain.CAPEM)
@@ -72,6 +78,55 @@ func TestToolsMakeMTLSCertChain(t *testing.T) {
 	}
 }
 
+func TestToolsMakeClientRejectsReservedMTLSNames(t *testing.T) {
+	cwd := t.TempDir()
+	chain := harness.GenerateChain(t, cwd, []string{"localhost"})
+	originalCA := mustReadFile(t, chain.CAPEM)
+	originalServer := mustReadFile(t, chain.SrvPEM)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for _, name := range []string{"ca", "server"} {
+		out, err := harness.RunTool(ctx, t, cwd, "make-client", "-n", name, "-o", "CertDX E2E")
+		if err == nil {
+			t.Fatalf("make-client %q succeeded; output:\n%s", name, out)
+		}
+		if !strings.Contains(out, "reserved") {
+			t.Fatalf("make-client %q output = %q; want reserved-name error", name, out)
+		}
+	}
+
+	if got := mustReadFile(t, chain.CAPEM); string(got) != string(originalCA) {
+		t.Fatalf("ca.pem changed after reserved-name make-client")
+	}
+	if got := mustReadFile(t, chain.SrvPEM); string(got) != string(originalServer) {
+		t.Fatalf("server.pem changed after reserved-name make-client")
+	}
+}
+
+func TestToolsMTLSDirFlagOverride(t *testing.T) {
+	cwd := t.TempDir()
+	mtlsDir := filepath.Join(t.TempDir(), "flag-mtls")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if out, err := harness.RunTool(ctx, t, cwd, "make-ca", "--mtls-dir", mtlsDir, "-o", "CertDX E2E", "-c", "CertDX E2E CA"); err != nil {
+		t.Fatalf("make-ca with --mtls-dir: %s\n%s", err, out)
+	}
+	if out, err := harness.RunTool(ctx, t, cwd, "make-server", "--mtls-dir", mtlsDir, "-d", "localhost", "-o", "CertDX E2E"); err != nil {
+		t.Fatalf("make-server with --mtls-dir: %s\n%s", err, out)
+	}
+	if out, err := harness.RunTool(ctx, t, cwd, "make-client", "--mtls-dir", mtlsDir, "-n", "alice", "-o", "CertDX E2E"); err != nil {
+		t.Fatalf("make-client with --mtls-dir: %s\n%s", err, out)
+	}
+
+	assertMTLSLayout(t, mtlsDir, "alice")
+	if _, err := os.Stat(filepath.Join(cwd, "mtls")); !os.IsNotExist(err) {
+		t.Fatalf("cwd mtls dir exists after --mtls-dir override: %v", err)
+	}
+}
+
 func containsAll(haystack, needles []string) bool {
 	set := map[string]struct{}{}
 	for _, h := range haystack {
@@ -83,4 +138,35 @@ func containsAll(haystack, needles []string) bool {
 		}
 	}
 	return true
+}
+
+func assertMTLSLayout(t *testing.T, mtlsDir string, clientName string) {
+	t.Helper()
+	assertPerm(t, mtlsDir, 0o700)
+	assertPerm(t, filepath.Join(mtlsDir, "ca.pem"), 0o644)
+	assertPerm(t, filepath.Join(mtlsDir, "ca.key"), 0o600)
+	assertPerm(t, filepath.Join(mtlsDir, "server.pem"), 0o644)
+	assertPerm(t, filepath.Join(mtlsDir, "server.key"), 0o600)
+	assertPerm(t, filepath.Join(mtlsDir, clientName+".pem"), 0o644)
+	assertPerm(t, filepath.Join(mtlsDir, clientName+".key"), 0o600)
+}
+
+func assertPerm(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %s", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s mode = %o; want %o", path, got, want)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %s", path, err)
+	}
+	return data
 }
