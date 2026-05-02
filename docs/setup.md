@@ -104,10 +104,14 @@ Consumers:
 
 ## mTLS
 
-The mTLS material lives in an `mtls/` directory next to the executable (or
-the current working directory). The server reads `mtls/server.pem`,
-`mtls/server.key` and `mtls/ca.pem`; clients use a per-client
-`<name>.pem` / `<name>.key` plus a copy of `ca.pem`.
+The mTLS material lives in an `mtls/` directory. By default it is
+discovered next to the executable, or under the current working directory.
+Override the location with the `--mtls-dir <path>` flag (passed to
+`certdx_server`, `make-ca`, `make-server`, or `make-client`). The
+directory is created with mode `0700`; certs land at `0644` and private
+keys at `0600`. The server reads
+`mtls/server.pem`, `mtls/server.key` and `mtls/ca.pem`; clients use a
+per-client `<name>.pem` / `<name>.key` plus a copy of `ca.pem`.
 
 Generate everything with `certdx_tools` on the server host:
 
@@ -121,7 +125,9 @@ certdx_tools make-client --name envoy-frontend
 
 `-d` on `make-server` must include every name a client will dial. Distribute
 `ca.pem` plus each `<name>.pem` / `<name>.key` to the matching consumer.
-Keep `ca.key` only on the server host.
+Keep `ca.key` only on the server host. The names `ca` and `server` are
+reserved for the CA and server-cert files; `make-client` rejects them so a
+typo cannot silently overwrite the CA or server material.
 
 See [tools.md](tools.md) for the full flag set.
 
