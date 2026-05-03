@@ -56,11 +56,11 @@ func init() {
 	}
 
 	if err := cdxsrv.Config.Validate(); err != nil {
-		logging.Fatal("Invalid config, err: %v", err)
+		logging.Fatal("Invalid config: %v", err)
 	}
 
 	if err := cdxsrv.Init(); err != nil {
-		logging.Fatal("Failed to init certdx server, err: %s", err)
+		logging.Fatal("Failed to init certdx server: %s", err)
 	}
 }
 

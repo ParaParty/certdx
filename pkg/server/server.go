@@ -57,12 +57,12 @@ func (s *CertDXServer) Init() error {
 
 	s.acme, err = acme.MakeACME(&s.Config)
 	if err != nil {
-		return fmt.Errorf("initailizing ACME failed: %w", err)
+		return fmt.Errorf("initialize ACME: %w", err)
 	}
 
 	if err = s.loadCertStore(); err != nil {
 		// It's okay that previous saved cert can not be loaded, just log and continue to run
-		logging.Warn("load cache file failed, err: %s", err)
+		logging.Warn("Load cache file failed: %s", err)
 	}
 	go s.certStore.listenUpdate(s.rootCtx)
 
@@ -92,7 +92,7 @@ func (s *CertDXServer) loadCertStore() error {
 	}
 	s.certCache.mutex.Unlock()
 
-	logging.Info("Previous cache loaded.")
+	logging.Info("Previous cache loaded")
 	return nil
 }
 

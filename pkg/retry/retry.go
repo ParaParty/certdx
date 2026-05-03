@@ -55,7 +55,7 @@ func Do(ctx context.Context, retryCount int, work func() error) error {
 			return fmt.Errorf("errored too fast, give up retry. last error is: %w", err)
 		}
 
-		logging.Warn("Retry %d/%d errored, err: %s", attempt, retryCount, err)
+		logging.Warn("Retry %d/%d errored: %s", attempt, retryCount, err)
 
 		if attempt >= retryCount {
 			break
