@@ -1,11 +1,9 @@
 package main
 
 import (
-	"io"
 	"os"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/cli"
 	"pkg.para.party/certdx/pkg/logging"
@@ -53,22 +51,11 @@ func init() {
 
 	cdxsrv = server.MakeCertDXServer()
 
-	cfile, err := os.Open(*pConf)
-	if err != nil {
-		logging.Fatal("Open config file failed, err: %s", err)
-	}
-	defer cfile.Close()
-	if b, err := io.ReadAll(cfile); err == nil {
-		if err := toml.Unmarshal(b, &cdxsrv.Config); err == nil {
-			logging.Info("Config loaded")
-		} else {
-			logging.Fatal("Unmarshaling config failed, err: %s", err)
-		}
-	} else {
-		logging.Fatal("Reading config file failed, err: %s", err)
+	if err := cli.LoadTOML(*pConf, &cdxsrv.Config); err != nil {
+		logging.Fatal("%s", err)
 	}
 
-	if err = cdxsrv.Config.Validate(); err != nil {
+	if err := cdxsrv.Config.Validate(); err != nil {
 		logging.Fatal("Invalid config, err: %v", err)
 	}
 
