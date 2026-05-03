@@ -78,17 +78,29 @@ func (s *CertStore) PrintCertInfo() {
 }
 
 // listenUpdate drains the cert-store update queue, persisting each renewed cert
-// to disk. It exits when ctx is done so it shares the server's lifecycle.
+// to disk. When ctx is done, it flushes queued updates before exiting so a
+// renewal that completed just before shutdown is not dropped.
 func (s *CertStore) listenUpdate(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case fe := <-s.update:
-			logging.Info("Update domains cache to file")
-			if err := s.saveEntry(fe); err != nil {
-				logging.Warn("Update domains cache to file failed, err: %s", err)
+			for {
+				select {
+				case fe := <-s.update:
+					s.logSaveEntry(fe)
+				default:
+					return
+				}
 			}
+		case fe := <-s.update:
+			s.logSaveEntry(fe)
 		}
+	}
+}
+
+func (s *CertStore) logSaveEntry(fe *certStoreEntry) {
+	logging.Info("Update domains cache to file")
+	if err := s.saveEntry(fe); err != nil {
+		logging.Warn("Update domains cache to file failed, err: %s", err)
 	}
 }

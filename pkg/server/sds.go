@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -31,14 +32,23 @@ type MySDS struct {
 func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSecretsServer) error {
 	ctx := server.Context()
 	peerInfo, _ := peer.FromContext(ctx)
-	peer := peerInfo.Addr.String()
+	peer := "unknown"
+	if peerInfo != nil && peerInfo.Addr != nil {
+		peer = peerInfo.Addr.String()
+	}
 
 	logging.Info("New gRPC connection from: %s", peer)
 
 	dispatch := map[string]chan *discoveryv3.DiscoveryRequest{}
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 
 	resp := make(chan *discoveryv3.DiscoveryResponse)
+	sendErr := func(err error) {
+		select {
+		case errChan <- err:
+		case <-ctx.Done():
+		}
+	}
 	go func() {
 		// goroutine for sending
 		for {
@@ -46,7 +56,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 			case r := <-resp:
 				if err := server.Send(r); err != nil {
 					// a failed in sending should make the context fail as well.
-					errChan <- fmt.Errorf("failed sending message: %w", err)
+					sendErr(fmt.Errorf("failed sending message: %w", err))
 					return
 				}
 			case <-ctx.Done():
@@ -70,24 +80,29 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 
 			req, err := server.Recv()
 			if err != nil {
-				errChan <- fmt.Errorf("failed receiving request from %s: %w", peer, err)
+				sendErr(fmt.Errorf("failed receiving request from %s: %w", peer, err))
 				return
 			}
 
 			if req.TypeUrl != typeUrl {
-				errChan <- fmt.Errorf("unexpected resource type: expect `%s` but requested `%s`", typeUrl, req.TypeUrl)
+				sendErr(fmt.Errorf("unexpected resource type: expect `%s` but requested `%s`", typeUrl, req.TypeUrl))
+				return
 			}
 
 			if domainSets == nil {
+				if req.Node == nil || req.Node.Metadata == nil {
+					sendErr(fmt.Errorf("bad metadata, no node metadata"))
+					return
+				}
 				if _domainSets, exist := req.Node.Metadata.Fields[domainKey]; exist {
 					if _domainSets, ok := _domainSets.AsInterface().(map[string]interface{}); ok {
 						domainSets = _domainSets
 					} else {
-						errChan <- fmt.Errorf("bad metadata, domains should be a map")
+						sendErr(fmt.Errorf("bad metadata, domains should be a map"))
 						return
 					}
 				} else {
-					errChan <- fmt.Errorf("bad metadata, no domains key in metadata")
+					sendErr(fmt.Errorf("bad metadata, no domains key in metadata"))
 					return
 				}
 			}
@@ -96,7 +111,10 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 			for _, name := range req.ResourceNames {
 				// this is an ack
 				if reqChan, ok := dispatch[name]; ok {
-					reqChan <- req
+					select {
+					case reqChan <- req:
+					case <-ctx.Done():
+					}
 					continue
 				}
 
@@ -107,21 +125,21 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 							if v, ok := v.(string); ok {
 								domains = append(domains, v)
 							} else {
-								errChan <- fmt.Errorf("bad metadata, domain should be string")
+								sendErr(fmt.Errorf("bad metadata, domain should be string"))
 								return
 							}
 						}
 					} else {
-						errChan <- fmt.Errorf("bad metadata, domain pack should be an array")
+						sendErr(fmt.Errorf("bad metadata, domain pack should be an array"))
 						return
 					}
 					if !domain.AllAllowed(sds.cdxsrv.Config.ACME.AllowedDomains, domains) {
-						errChan <- fmt.Errorf("domains %v: %w", domains, domain.ErrNotAllowed)
+						sendErr(fmt.Errorf("domains %v: %w", domains, domain.ErrNotAllowed))
 						return
 					}
 					packRequests[name] = domains
 				} else {
-					errChan <- fmt.Errorf("bad metadata, missing domain names for pack %s", name)
+					sendErr(fmt.Errorf("bad metadata, missing domain names for pack %s", name))
 					return
 				}
 			}
@@ -190,7 +208,8 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 		})
 
 		if err != nil {
-			logging.Panic("Unexpected error constructing response, err: %s", err)
+			logging.Error("Failed to construct SDS response: %s", err)
+			return
 		}
 
 		version := cert.RenewAt.Format(time.RFC3339)
@@ -203,6 +222,7 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 		}:
 		case <-ctx.Done():
 			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
+			return
 		}
 
 		logging.Info("Offered cert %v version %s to %s", entry.domains, version, peer)
@@ -219,6 +239,7 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 			}
 		case <-ctx.Done():
 			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
+			return
 		}
 
 		seen = entry.WaitForUpdate(ctx, seen)
@@ -245,11 +266,16 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 }
 
 // SDSSrv runs the gRPC SDS endpoint until Stop is called.
-func (s *CertDXServer) SDSSrv() {
+func (s *CertDXServer) SDSSrv() error {
 	logging.Info("Start listening GRPC at %s", s.Config.GRPCSDSServer.Listen)
 
+	mtlsConfig, err := getMtlsConfig()
+	if err != nil {
+		return err
+	}
+
 	server := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(getMtlsConfig())),
+		grpc.Creds(credentials.NewTLS(mtlsConfig)),
 		grpc.UnaryInterceptor(clientTLSLog),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             time.Second,
@@ -267,20 +293,30 @@ func (s *CertDXServer) SDSSrv() {
 	}
 	secretv3.RegisterSecretDiscoveryServiceServer(server, sds)
 
+	l, err := net.Listen("tcp", s.Config.GRPCSDSServer.Listen)
+	if err != nil {
+		return fmt.Errorf("listen at %s: %w", s.Config.GRPCSDSServer.Listen, err)
+	}
+
+	errChan := make(chan error, 1)
 	go func() {
-		l, err := net.Listen("tcp", s.Config.GRPCSDSServer.Listen)
-		if err != nil {
-			logging.Fatal("Failed to listen at %s, err: %s", s.Config.GRPCSDSServer.Listen, err)
-		}
 		logging.Info("SDS server started")
 		if err := server.Serve(l); err != nil {
-			logging.Fatal("%s", err)
+			errChan <- err
+			return
 		}
+		errChan <- nil
 	}()
 
-	<-s.rootCtx.Done()
-
-	close(sds.kill)
-	server.GracefulStop()
+	select {
+	case err := <-errChan:
+		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			return fmt.Errorf("serve SDS: %w", err)
+		}
+	case <-s.rootCtx.Done():
+		close(sds.kill)
+		server.GracefulStop()
+	}
 	logging.Info("SDS Stopped")
+	return nil
 }

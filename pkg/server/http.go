@@ -1,18 +1,23 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
 )
+
+const httpShutdownTimeout = 30 * time.Second
 
 func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == s.Config.HttpServer.APIPath {
@@ -107,7 +112,16 @@ ERR:
 	http.Error(*w, "", http.StatusInternalServerError)
 }
 
-func (s *CertDXServer) serveHttps() {
+func shutdownHTTPServer(server *http.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func (s *CertDXServer) serveHttps(handler http.Handler) error {
 	ctx := s.rootCtx
 	entry := s.certCache.get(s.Config.HttpServer.Names)
 
@@ -118,7 +132,7 @@ func (s *CertDXServer) serveHttps() {
 	if !cert.IsValid() {
 		seen = entry.WaitForUpdate(ctx, seen)
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 		cert, seen = entry.Snapshot()
 	}
@@ -126,77 +140,148 @@ func (s *CertDXServer) serveHttps() {
 	for {
 		certificate, err := tls.X509KeyPair(cert.FullChain, cert.Key)
 		if err != nil {
-			logging.Fatal("Failed to load cert, err: %s", err)
+			return fmt.Errorf("load HTTPS certificate: %w", err)
 		}
 
 		server := http.Server{
-			Addr: s.Config.HttpServer.Listen,
+			Addr:    s.Config.HttpServer.Listen,
+			Handler: handler,
+			TLSConfig: &tls.Config{
+				MinVersion:   tls.VersionTLS12,
+				Certificates: []tls.Certificate{certificate},
+			},
 		}
 
-		server.TLSConfig = &tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{certificate},
-		}
-
+		errChan := make(chan error, 1)
 		go func() {
 			logging.Info("Https server started")
 			err := server.ListenAndServeTLS("", "")
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errChan <- err
+				return
+			}
 			logging.Info("Https server stopped: %s", err)
+			errChan <- nil
 		}()
 
-		seen = entry.WaitForUpdate(ctx, seen)
-		server.Close()
-		if ctx.Err() != nil {
-			return
+		waitCtx, cancelWait := context.WithCancel(ctx)
+		update := make(chan uint64, 1)
+		go func() {
+			update <- entry.WaitForUpdate(waitCtx, seen)
+		}()
+
+		select {
+		case err := <-errChan:
+			cancelWait()
+			if err != nil {
+				return fmt.Errorf("serve HTTPS: %w", err)
+			}
+			return nil
+		case seen = <-update:
+			cancelWait()
+			if err := shutdownHTTPServer(&server); err != nil {
+				return fmt.Errorf("shutdown HTTPS server: %w", err)
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			cert, seen = entry.Snapshot()
+			continue
+		case <-ctx.Done():
+			cancelWait()
+			if err := shutdownHTTPServer(&server); err != nil {
+				return fmt.Errorf("shutdown HTTPS server: %w", err)
+			}
+			return nil
 		}
-		cert, seen = entry.Snapshot()
 	}
 }
 
-func (s *CertDXServer) serveHttp() {
+func (s *CertDXServer) serveHttp(handler http.Handler) error {
 	server := http.Server{
-		Addr: s.Config.HttpServer.Listen,
+		Addr:    s.Config.HttpServer.Listen,
+		Handler: handler,
 	}
 
+	errChan := make(chan error, 1)
 	go func() {
 		logging.Info("Http server started")
 		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errChan <- err
+			return
+		}
 		logging.Info("Http server stopped: %s", err)
+		errChan <- nil
 	}()
 
-	<-s.rootCtx.Done()
-	server.Close()
+	select {
+	case err := <-errChan:
+		if err != nil {
+			return fmt.Errorf("serve HTTP: %w", err)
+		}
+		return nil
+	case <-s.rootCtx.Done():
+		if err := shutdownHTTPServer(&server); err != nil {
+			return fmt.Errorf("shutdown HTTP server: %w", err)
+		}
+		return nil
+	}
 }
 
-func (s *CertDXServer) serveHttpMtls() {
-	server := http.Server{
-		Addr:      s.Config.HttpServer.Listen,
-		TLSConfig: getMtlsConfig(),
+func (s *CertDXServer) serveHttpMtls(handler http.Handler) error {
+	mtlsConfig, err := getMtlsConfig()
+	if err != nil {
+		return err
 	}
 
+	server := http.Server{
+		Addr:      s.Config.HttpServer.Listen,
+		Handler:   handler,
+		TLSConfig: mtlsConfig,
+	}
+
+	errChan := make(chan error, 1)
 	go func() {
 		logging.Info("Http mtls server started")
 		err := server.ListenAndServeTLS("", "")
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errChan <- err
+			return
+		}
 		logging.Info("Http mtls server stopped: %s", err)
+		errChan <- nil
 	}()
 
-	<-s.rootCtx.Done()
-	server.Close()
+	select {
+	case err := <-errChan:
+		if err != nil {
+			return fmt.Errorf("serve HTTP mTLS: %w", err)
+		}
+		return nil
+	case <-s.rootCtx.Done():
+		if err := shutdownHTTPServer(&server); err != nil {
+			return fmt.Errorf("shutdown HTTP mTLS server: %w", err)
+		}
+		return nil
+	}
 }
 
 // HttpSrv runs the HTTP API endpoint until Stop is called.
-func (s *CertDXServer) HttpSrv() {
+func (s *CertDXServer) HttpSrv() error {
 	logging.Info("Start listening Http at %s%s", s.Config.HttpServer.Listen, s.Config.HttpServer.APIPath)
 
+	mux := http.NewServeMux()
 	if s.Config.HttpServer.AuthMethod == config.HTTP_AUTH_TOKEN {
-		http.HandleFunc("/", s.apiWithTokenHandler)
+		mux.HandleFunc("/", s.apiWithTokenHandler)
 		if !s.Config.HttpServer.Secure {
-			s.serveHttp()
+			return s.serveHttp(mux)
 		} else {
-			s.serveHttps()
+			return s.serveHttps(mux)
 		}
 	} else if s.Config.HttpServer.AuthMethod == config.HTTP_AUTH_MTLS {
-		http.HandleFunc("/", s.apiHandler)
-		s.serveHttpMtls()
+		mux.HandleFunc("/", s.apiHandler)
+		return s.serveHttpMtls(mux)
 	}
+	return fmt.Errorf("unsupported HTTP auth method: %s", s.Config.HttpServer.AuthMethod)
 }

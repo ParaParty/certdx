@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -65,13 +67,42 @@ func init() {
 }
 
 func main() {
+	errChan := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	startServer := func(name string, run func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := run(); err != nil {
+				select {
+				case errChan <- fmt.Errorf("%s server: %w", name, err):
+				default:
+				}
+				cdxsrv.Stop()
+			}
+		}()
+	}
+
 	if cdxsrv.Config.HttpServer.Enabled {
-		go cdxsrv.HttpSrv()
+		startServer("http", cdxsrv.HttpSrv)
 	}
 
 	if cdxsrv.Config.GRPCSDSServer.Enabled {
-		go cdxsrv.SDSSrv()
+		startServer("grpc sds", cdxsrv.SDSSrv)
 	}
 
-	cli.WaitForShutdown(cdxsrv.Stop, shutdownTimeout)
+	shutdownDone := make(chan struct{})
+	go func() {
+		cli.WaitForShutdown(cdxsrv.Stop, shutdownTimeout)
+		close(shutdownDone)
+	}()
+
+	select {
+	case err := <-errChan:
+		wg.Wait()
+		logging.Fatal("%s", err)
+	case <-shutdownDone:
+		wg.Wait()
+	}
 }

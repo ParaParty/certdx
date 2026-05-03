@@ -3,35 +3,35 @@ package server
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"os"
 
-	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/paths"
 )
 
-func getMtlsConfig() *tls.Config {
+func getMtlsConfig() (*tls.Config, error) {
 	srvCertPath, srvKeyPath, err := paths.MtlsServerCertPath()
 	if err != nil {
-		logging.Fatal("err: %s", err)
+		return nil, fmt.Errorf("resolve mtls server certificate path: %w", err)
 	}
 
 	cert, err := tls.LoadX509KeyPair(srvCertPath, srvKeyPath)
 	if err != nil {
-		logging.Fatal("Invalid server cert, err: %s", err)
+		return nil, fmt.Errorf("load mtls server certificate: %w", err)
 	}
 
 	caPEMPath, _, err := paths.MtlsCAPath()
 	if err != nil {
-		logging.Fatal("%s", err)
+		return nil, fmt.Errorf("resolve mtls ca path: %w", err)
 	}
 	caPEM, err := os.ReadFile(caPEMPath)
 	if err != nil {
-		logging.Fatal("err: %s", err)
+		return nil, fmt.Errorf("read mtls ca certificate: %w", err)
 	}
 
 	capool := x509.NewCertPool()
 	if !capool.AppendCertsFromPEM(caPEM) {
-		logging.Fatal("Invalid ca cert")
+		return nil, fmt.Errorf("parse mtls ca certificate")
 	}
 
 	return &tls.Config{
@@ -40,5 +40,5 @@ func getMtlsConfig() *tls.Config {
 		ClientCAs:    capool,
 		MinVersion:   tls.VersionTLS13,
 		MaxVersion:   tls.VersionTLS13,
-	}
+	}, nil
 }
