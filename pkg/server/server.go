@@ -256,3 +256,11 @@ func (s *CertDXServer) isSubscribing(c *certEntry) bool {
 func (s *CertDXServer) Stop() {
 	s.stopOnce.Do(s.rootCancel)
 }
+
+// Wait blocks until Stop is called (by signal handler, by a failing
+// subserver, or by any other caller). main uses it as the single
+// blocking point so a subserver crash doesn't leave the process alive
+// with no listener.
+func (s *CertDXServer) Wait() {
+	<-s.rootCtx.Done()
+}
