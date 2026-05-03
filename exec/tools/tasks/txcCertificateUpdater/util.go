@@ -1,54 +1,49 @@
 package txcCertificateUpdater
 
-func isSameStrSetRejectNilItem(a []*string, b []string) bool {
+func isSameStrSetIgnoringNil(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 
-	setA := make(map[string]struct{}, len(a))
+	set := make(map[string]struct{}, len(a))
 	for _, v := range a {
-		if v == nil {
-			return false
-		}
-		setA[*v] = struct{}{}
+		set[v] = struct{}{}
 	}
-	setB := make(map[string]struct{}, len(b))
 	for _, v := range b {
-		setB[v] = struct{}{}
-	}
-
-	for key := range setA {
-		if _, ok := setB[key]; !ok {
+		if _, ok := set[v]; !ok {
 			return false
 		}
 	}
 	return true
 }
 
-func isSameStrSetRejectNilItemPtrArrPtrArr(a []*string, b []*string) bool {
-	if len(a) != len(b) {
+func derefAll(in []*string) ([]string, bool) {
+	out := make([]string, len(in))
+	for i, v := range in {
+		if v == nil {
+			return nil, false
+		}
+		out[i] = *v
+	}
+	return out, true
+}
+
+func isSameStrSetRejectNilItem(a []*string, b []string) bool {
+	deref, ok := derefAll(a)
+	if !ok {
 		return false
 	}
+	return isSameStrSetIgnoringNil(deref, b)
+}
 
-	setA := make(map[string]struct{}, len(a))
-	for _, v := range a {
-		if v == nil {
-			return false
-		}
-		setA[*v] = struct{}{}
+func isSameStrSetRejectNilItemPtrArrPtrArr(a []*string, b []*string) bool {
+	derefA, ok := derefAll(a)
+	if !ok {
+		return false
 	}
-	setB := make(map[string]struct{}, len(b))
-	for _, v := range b {
-		if v == nil {
-			return false
-		}
-		setB[*v] = struct{}{}
+	derefB, ok := derefAll(b)
+	if !ok {
+		return false
 	}
-
-	for key := range setA {
-		if _, ok := setB[key]; !ok {
-			return false
-		}
-	}
-	return true
+	return isSameStrSetIgnoringNil(derefA, derefB)
 }
