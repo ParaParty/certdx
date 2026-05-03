@@ -25,17 +25,9 @@ import (
 const typeUrl = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret"
 const domainKey = "domains"
 
-type killed struct {
-	Err string
-}
-
 type respData struct {
 	Version string
 	Secret  *tlsv3.Secret
-}
-
-func (e *killed) Error() string {
-	return e.Err
 }
 
 type CertDXgRPCClient struct {
@@ -81,7 +73,6 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 		c.cancel.Store(nil)
 	}()
 
-	c.Running.Store(true)
 	conn, err := grpc.NewClient(c.server.Server,
 		grpc.WithTransportCredentials(c.tlsCred),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -89,21 +80,23 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 			Timeout: 25 * time.Second,
 		}),
 	)
-
 	if err != nil {
 		return fmt.Errorf("new grpc client failed: %w", err)
 	}
-	defer func() {
-		conn.Close()
-		c.Running.Store(false)
-	}()
+	defer conn.Close()
+
+	// Running flips to true only after the ClientConn was constructed,
+	// so a caller observing Running=true sees a usable conn handle.
+	// (grpc.NewClient does no network I/O, so we don't claim the wire
+	// is up — only that conn isn't nil.)
+	c.Running.Store(true)
+	defer c.Running.Store(false)
 
 	client := secretv3.NewSecretDiscoveryServiceClient(conn)
 	stream, err := client.StreamSecrets(streamCtx)
 	if err != nil {
 		return fmt.Errorf("stream secrets failed: %w", err)
 	}
-	ctx = stream.Context()
 
 	dispatch := map[string]chan respData{}
 	ack := make(chan *discoveryv3.DiscoveryRequest)
@@ -111,26 +104,26 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 
 	for _, cert := range c.certs {
 		dispatch[cert.Config.Name] = make(chan respData)
-		go c.handleCert(ctx, cert, dispatch[cert.Config.Name], ack, errChan)
+		go c.handleCert(streamCtx, cert, dispatch[cert.Config.Name], ack, errChan)
 	}
 
 	go func() {
 		// goroutine for receiving
 		for {
 			select {
-			case <-ctx.Done():
-				logging.Debug("Receiving goroutine stopped due to ctx done: %s", ctx.Err())
+			case <-streamCtx.Done():
+				logging.Debug("Receiving goroutine stopped due to ctx done: %s", streamCtx.Err())
 				return
 			default:
 			}
 
 			resp, err := stream.Recv()
 			if err != nil {
-				sendStreamErr(ctx, errChan, fmt.Errorf("failed receiving request: %w", err))
+				sendStreamErr(streamCtx, errChan, fmt.Errorf("failed receiving request: %w", err))
 				return
 			}
 			if len(resp.Resources) == 0 {
-				sendStreamErr(ctx, errChan, fmt.Errorf("SDS response has no resources"))
+				sendStreamErr(streamCtx, errChan, fmt.Errorf("SDS response has no resources"))
 				return
 			}
 			newReceived := make(chan struct{})
@@ -139,13 +132,13 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 			secretResp := &tlsv3.Secret{}
 			err = anypb.UnmarshalTo(resp.Resources[0], secretResp, proto.UnmarshalOptions{})
 			if err != nil {
-				sendStreamErr(ctx, errChan, fmt.Errorf("can not unmarshal message from srv: %w", err))
+				sendStreamErr(streamCtx, errChan, fmt.Errorf("can not unmarshal message from srv: %w", err))
 				return
 			}
 
 			respChan, ok := dispatch[secretResp.Name]
 			if !ok {
-				sendStreamErr(ctx, errChan, fmt.Errorf("unexpected cert: %s", secretResp.Name))
+				sendStreamErr(streamCtx, errChan, fmt.Errorf("unexpected cert: %s", secretResp.Name))
 				return
 			}
 
@@ -154,7 +147,7 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 				Version: resp.VersionInfo,
 				Secret:  secretResp,
 			}:
-			case <-ctx.Done():
+			case <-streamCtx.Done():
 			}
 		}
 	}()
@@ -176,7 +169,7 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 			domainKey: domainSets,
 		})
 		if err != nil {
-			sendStreamErr(ctx, errChan, fmt.Errorf("failed constructing meta data struct: %w", err))
+			sendStreamErr(streamCtx, errChan, fmt.Errorf("failed constructing meta data struct: %w", err))
 			return
 		}
 
@@ -190,7 +183,7 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 
 		err = stream.Send(packReq)
 		if err != nil {
-			sendStreamErr(ctx, errChan, fmt.Errorf("failed sending request: %w", err))
+			sendStreamErr(streamCtx, errChan, fmt.Errorf("failed sending request: %w", err))
 			return
 		}
 
@@ -199,20 +192,20 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 			case a := <-ack:
 				if err := stream.Send(a); err != nil {
 					// a failed in sending should make the context fail as well.
-					sendStreamErr(ctx, errChan, fmt.Errorf("failed sending ack: %w", err))
+					sendStreamErr(streamCtx, errChan, fmt.Errorf("failed sending ack: %w", err))
 					return
 				}
-			case <-ctx.Done():
-				logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
+			case <-streamCtx.Done():
+				logging.Debug("Message sender stopped due to ctx done: %s", streamCtx.Err())
 				return
 			}
 		}
 	}()
 
 	select {
-	case <-ctx.Done():
-		logging.Debug("Stream end due to ctx Done: %s", ctx.Err())
-		return ctx.Err()
+	case <-streamCtx.Done():
+		logging.Debug("Stream end due to ctx Done: %s", streamCtx.Err())
+		return streamCtx.Err()
 	case err := <-errChan:
 		logging.Error("Stream end due to errored: %s", err)
 		return err
