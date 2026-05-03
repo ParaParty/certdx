@@ -12,7 +12,12 @@ import (
 
 type CertificateUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
 
-func checkFileAndCreate(file string) (exists bool, err error) {
+const (
+	certFileMode os.FileMode = 0o644
+	keyFileMode  os.FileMode = 0o600
+)
+
+func checkFileAndCreate(file string, fileMode os.FileMode) (exists bool, err error) {
 	exists = false
 	if _, err = os.Stat(file); os.IsNotExist(err) {
 		dir := filepath.Dir(file)
@@ -25,7 +30,7 @@ func checkFileAndCreate(file string) (exists bool, err error) {
 			return
 		}
 
-		err = os.WriteFile(file, []byte{}, 0o777)
+		err = os.WriteFile(file, []byte{}, fileMode)
 		if err != nil {
 			return
 		}
@@ -46,25 +51,35 @@ func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification)
 		logging.Debug("Failed to get full chain and key path")
 		return
 	}
-	ce, err = checkFileAndCreate(certPath)
+
+	ce, err = checkFileAndCreate(certPath, certFileMode)
 	if err != nil {
 		goto ERR
 	}
-	ke, err = checkFileAndCreate(keyPath)
+
+	ke, err = checkFileAndCreate(keyPath, keyFileMode)
 	if err != nil {
 		goto ERR
 	}
+
 	// if cert file is firstly created, don't do reload command
 	doCommand = ce && ke
 
-	err = os.WriteFile(certPath, fullchain, 0o777)
+	err = os.WriteFile(certPath, fullchain, certFileMode)
 	if err != nil {
 		goto ERR
 	}
-	err = os.WriteFile(keyPath, key, 0o777)
+
+	err = os.WriteFile(keyPath, key, keyFileMode)
 	if err != nil {
 		goto ERR
 	}
+
+	err = os.Chmod(keyPath, keyFileMode)
+	if err != nil {
+		goto ERR
+	}
+
 	if doCommand && c.ReloadCommand != "" {
 		args := strings.Fields(c.ReloadCommand)
 		err := exec.Command(args[0], args[1:]...).Run()
@@ -72,7 +87,9 @@ func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification)
 			logging.Error("Failed executing command %s, err: %s", c.ReloadCommand, err)
 		}
 	}
+
 	return
+
 ERR:
 	logging.Error("Failed to save cert file, err: %s", err)
 }
