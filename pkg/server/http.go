@@ -80,10 +80,11 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	}
 
 	if !domain.AllAllowed(s.Config.ACME.AllowedDomains, req.Domains) {
-		logging.Warn("Requested domains not allowed: %v", req.Domains)
-		(*w).Header().Set("Content-Type", "application/json")
-		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
-		return
+		// Wrap the sentinel so the response handler below can branch on
+		// errors.Is — same pattern as the SDS path, instead of two
+		// separate "domains not allowed" code sites.
+		err = fmt.Errorf("domains %v: %w", req.Domains, domain.ErrNotAllowed)
+		goto ERR
 	}
 
 	cachedCert = s.certCache.get(req.Domains)
@@ -110,7 +111,13 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	return
 
 ERR:
-	logging.Error("Handle http cert request failed, err: %s", err)
+	if errors.Is(err, domain.ErrNotAllowed) {
+		logging.Warn("Requested domains not allowed: %v", req.Domains)
+		(*w).Header().Set("Content-Type", "application/json")
+		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
+		return
+	}
+	logging.Error("Handle http cert request failed: %s", err)
 	http.Error(*w, "", http.StatusInternalServerError)
 }
 
