@@ -40,6 +40,12 @@ type KubernetesCertificateUpdater struct {
 
 	certDXDaemon *client.CertDXClientDaemon
 	kubeClient   kubernetes.Interface
+
+	// daemonErr is written exactly once by the goroutine that runs
+	// HttpMain / GRPCMain if the daemon fails to start (e.g. invalid
+	// mtls material). waitReplaceTask selects on it so an init failure
+	// surfaces immediately instead of hanging until waitDeadline.
+	daemonErr chan error
 }
 
 func MakeKubernetesReplaceCertificate(updaterCmd *k8sCertsUpdateCmd) *KubernetesCertificateUpdater {
@@ -48,6 +54,7 @@ func MakeKubernetesReplaceCertificate(updaterCmd *k8sCertsUpdateCmd) *Kubernetes
 
 		wg:           sync.WaitGroup{},
 		taskErrMutex: sync.Mutex{},
+		daemonErr:    make(chan error, 1),
 
 		// certDXDaemon : in certdx init
 	}
@@ -205,9 +212,13 @@ func (r *KubernetesCertificateUpdater) startCertDXDaemon() error {
 	}
 	go func() {
 		if err := run(); err != nil {
-			logging.Error("Daemon exited with error: %s", err)
-			// Cancel the daemon so the outer waitReplaceTask wakes up
-			// instead of hanging on its deadline.
+			// Surface the error to waitReplaceTask via daemonErr (so
+			// init failures do not silently hang the outer wait), then
+			// cancel the daemon so any other watchers wind down.
+			select {
+			case r.daemonErr <- err:
+			default:
+			}
 			r.certDXDaemon.Stop()
 		}
 	}()
@@ -225,6 +236,8 @@ func (r *KubernetesCertificateUpdater) waitReplaceTask() error {
 	}()
 
 	select {
+	case err := <-r.daemonErr:
+		return fmt.Errorf("certdx daemon failed: %w", err)
 	case <-waitCtx.Done():
 		return fmt.Errorf("timeout waiting for kubernetes secrets to be updated")
 	case <-wgDone:
