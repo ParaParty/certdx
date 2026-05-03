@@ -1,14 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/cli"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/server"
@@ -18,6 +17,8 @@ var (
 	buildCommit string
 	buildDate   string
 )
+
+const shutdownTimeout = 30 * time.Second
 
 var (
 	pLogPath = flag.StringP("log", "l", "", "Log file path")
@@ -33,19 +34,20 @@ var cdxsrv *server.CertDXServer
 func init() {
 	flag.Parse()
 
+	ver := cli.Version{Name: "server", Commit: buildCommit, Date: buildDate}
+
 	if *help {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
 
 	if *version {
-		fmt.Printf("Certdx server %s, built at %s\n", buildCommit, buildDate)
+		ver.Print()
 		os.Exit(0)
 	}
 
-	logging.SetLogFile(*pLogPath)
-	logging.SetDebug(*pDebug)
-	logging.Info("\nStarting certdx server %s, built at %s", buildCommit, buildDate)
+	cli.Bootstrap(cli.LogConfig{Path: *pLogPath, Debug: *pDebug})
+	logging.Info("\nStarting %s", ver)
 
 	paths.SetMtlsDir(*pMtlsDir)
 
@@ -84,15 +86,5 @@ func main() {
 		go cdxsrv.SDSSrv()
 	}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-
-	<-stop
-
-	go func() {
-		<-stop
-		logging.Fatal("Fast dying...")
-	}()
-
-	cdxsrv.Stop()
+	cli.WaitForShutdown(cdxsrv.Stop, shutdownTimeout)
 }
