@@ -3,10 +3,13 @@ package caddytls
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"go.uber.org/zap"
+
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
@@ -14,12 +17,30 @@ import (
 )
 
 func init() {
-	caddy.RegisterModule(CertDXCaddyDaemon{})
+	caddy.RegisterModule(&CertDXCaddyDaemon{})
 }
 
-// key: cert-id
-// value: domains
+// CertificateDef maps a user-defined cert id to the list of domains it should cover.
 type CertificateDef map[string][]string
+
+func (d CertificateDef) Add(id string, domains []string) error {
+	if id == "" {
+		return fmt.Errorf("certificate id must not be empty")
+	}
+	if len(domains) == 0 {
+		return fmt.Errorf("certificate %q has no domains", id)
+	}
+	if _, ok := d[id]; ok {
+		return fmt.Errorf("certificate %q already defined", id)
+	}
+	d[id] = domains
+	return nil
+}
+
+func (d CertificateDef) Lookup(id string) ([]string, bool) {
+	domains, ok := d[id]
+	return domains, ok
+}
 
 type CertDXCaddyConfig struct {
 	config.ClientCommonConfig
@@ -51,17 +72,17 @@ type CertDXCaddyDaemon struct {
 
 	certDXDaemon *client.CertDXClientDaemon
 	logger       *zap.Logger
+	wg           sync.WaitGroup
 }
 
 func MakeCertDXCaddyDaemon() *CertDXCaddyDaemon {
-	ret := &CertDXCaddyDaemon{}
-	ret.CertificateDefs = make(CertificateDef, 0)
-	ret.SetDefaultConfig()
-
-	return ret
+	d := &CertDXCaddyDaemon{}
+	d.CertificateDefs = make(CertificateDef)
+	d.SetDefaultConfig()
+	return d
 }
 
-func (CertDXCaddyDaemon) CaddyModule() caddy.ModuleInfo {
+func (*CertDXCaddyDaemon) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID:  "certdx",
 		New: func() caddy.Module { return new(CertDXCaddyDaemon) },
@@ -73,49 +94,52 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	logging.SetLogger(zap.NewStdLog(m.logger))
 
 	m.certDXDaemon = client.MakeCertDXClientDaemon()
-
 	m.certDXDaemon.Config.Common = m.ClientCommonConfig
 	m.certDXDaemon.Config.Http.MainServer = m.Http.MainServer
 	m.certDXDaemon.Config.Http.StandbyServer = m.Http.StandbyServer
 	m.certDXDaemon.Config.GRPC.MainServer = m.GRPC.MainServer
 	m.certDXDaemon.Config.GRPC.StandbyServer = m.GRPC.StandbyServer
 
-	var err error
-	m.certDXDaemon.Config.Common.ReconnectDuration, err = time.ParseDuration(m.ReconnectInterval)
+	d, err := time.ParseDuration(m.ReconnectInterval)
 	if err != nil {
-		m.logger.Fatal("failed to parse interval", zap.Error(err))
-		return err
+		return fmt.Errorf("parse reconnect_interval %q: %w", m.ReconnectInterval, err)
 	}
+	m.certDXDaemon.Config.Common.ReconnectDuration = d
 
 	for certID, domains := range m.CertificateDefs {
 		if err := m.certDXDaemon.AddCertToWatch(certID, domains); err != nil {
-			return err
+			return fmt.Errorf("watch certificate %q: %w", certID, err)
 		}
 	}
-
 	return nil
 }
 
 func (m *CertDXCaddyDaemon) Start() error {
-	switch m.certDXDaemon.Config.Common.Mode {
-	case "http":
+	mode := m.certDXDaemon.Config.Common.Mode
+	switch mode {
+	case config.CLIENT_MODE_HTTP:
 		if m.certDXDaemon.Config.Http.MainServer.Url == "" {
-			m.logger.Fatal("http main server url should not be empty")
+			return fmt.Errorf("http main_server url is required")
 		}
-		go m.certDXDaemon.HttpMain()
-	case "grpc":
+		m.wg.Go(func() {
+			m.certDXDaemon.HttpMain()
+		})
+	case config.CLIENT_MODE_GRPC:
 		if m.certDXDaemon.Config.GRPC.MainServer.Server == "" {
-			m.logger.Fatal("GRPC main server url should not be empty")
+			return fmt.Errorf("grpc main_server is required")
 		}
-		go m.certDXDaemon.GRPCMain()
+		m.wg.Go(func() {
+			m.certDXDaemon.GRPCMain()
+		})
 	default:
-		m.logger.Fatal("not supported mode", zap.String("mode", m.certDXDaemon.Config.Common.Mode))
+		return fmt.Errorf("unsupported mode %q", mode)
 	}
 	return nil
 }
 
 func (m *CertDXCaddyDaemon) Stop() error {
 	m.certDXDaemon.Stop()
+	m.wg.Wait()
 	return nil
 }
 
