@@ -66,12 +66,25 @@ func init() {
 
 func main() {
 	if cdxsrv.Config.HttpServer.Enabled {
-		go cdxsrv.HttpSrv()
+		go func() {
+			if err := cdxsrv.HttpSrv(); err != nil {
+				logging.Error("HTTP server failed: %s", err)
+				cdxsrv.Stop()
+			}
+		}()
 	}
 
 	if cdxsrv.Config.GRPCSDSServer.Enabled {
-		go cdxsrv.SDSSrv()
+		go func() {
+			if err := cdxsrv.SDSSrv(); err != nil {
+				logging.Error("SDS server failed: %s", err)
+				cdxsrv.Stop()
+			}
+		}()
 	}
 
-	cli.WaitForShutdown(cdxsrv.Stop, shutdownTimeout)
+	// WaitForShutdown handles signal-driven Stop in a goroutine; main
+	// blocks on Wait() so subserver-driven Stop also unblocks it.
+	go cli.WaitForShutdown(cdxsrv.Stop, shutdownTimeout)
+	cdxsrv.Wait()
 }

@@ -1,18 +1,25 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
 )
+
+// httpShutdownTimeout caps how long graceful shutdown of the HTTP API
+// waits for in-flight requests to drain before forcing a close.
+const httpShutdownTimeout = 30 * time.Second
 
 func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == s.Config.HttpServer.APIPath {
@@ -107,96 +114,131 @@ ERR:
 	http.Error(*w, "", http.StatusInternalServerError)
 }
 
-func (s *CertDXServer) serveHttps() {
-	ctx := s.rootCtx
-	entry := s.certCache.get(s.Config.HttpServer.Names)
+// runHTTPServer starts a graceful-shutdown watcher tied to ctx and then
+// blocks on listen() until either the listener exits on its own or ctx
+// fires. On ctx fire, server.Shutdown is called with httpShutdownTimeout
+// using a fresh context.Background — caller's ctx is already done by
+// then, but in-flight requests still get the grace period to drain.
+func runHTTPServer(ctx context.Context, server *http.Server, listen func() error) error {
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
 
+	if err := listen(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// serveHttps runs the token-auth HTTPS API. On every cert update the
+// listener is shut down and re-bound with the fresh certificate, so the
+// active TLS keypair always matches the latest snapshot. The per-
+// iteration sub-ctx fires on either rootCtx or a fresh cert; runHTTPServer
+// drives the listener and the graceful shutdown for that iteration.
+func (s *CertDXServer) serveHttps(handler http.Handler) error {
+	entry := s.certCache.get(s.Config.HttpServer.Names)
 	s.subscribe(entry)
 	defer s.release(entry)
 
 	cert, seen := entry.Snapshot()
-	if !cert.IsValid() {
-		seen = entry.WaitForUpdate(ctx, seen)
-		if ctx.Err() != nil {
-			return
+	for !cert.IsValid() {
+		seen = entry.WaitForUpdate(s.rootCtx, seen)
+		if s.rootCtx.Err() != nil {
+			return nil
 		}
-		cert, seen = entry.Snapshot()
+		cert, _ = entry.Snapshot()
 	}
 
-	for {
+	for s.rootCtx.Err() == nil {
 		certificate, err := tls.X509KeyPair(cert.FullChain, cert.Key)
 		if err != nil {
-			logging.Fatal("Failed to load cert, err: %s", err)
+			return fmt.Errorf("load HTTPS certificate: %w", err)
 		}
 
-		server := http.Server{
-			Addr: s.Config.HttpServer.Listen,
+		server := &http.Server{
+			Addr:    s.Config.HttpServer.Listen,
+			Handler: handler,
+			TLSConfig: &tls.Config{
+				MinVersion:   tls.VersionTLS12,
+				Certificates: []tls.Certificate{certificate},
+			},
 		}
 
-		server.TLSConfig = &tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{certificate},
-		}
-
+		// iterCtx fires on either rootCtx or a fresh cert. WaitForUpdate
+		// runs in a goroutine that calls cancel() on update; cancel is
+		// also fired on iteration exit so the goroutine never leaks.
+		iterCtx, cancel := context.WithCancel(s.rootCtx)
 		go func() {
-			logging.Info("Https server started")
-			err := server.ListenAndServeTLS("", "")
-			logging.Info("Https server stopped: %s", err)
+			seen = entry.WaitForUpdate(iterCtx, seen)
+			cancel()
 		}()
 
-		seen = entry.WaitForUpdate(ctx, seen)
-		server.Close()
-		if ctx.Err() != nil {
-			return
+		logging.Info("Https server started")
+		err = runHTTPServer(iterCtx, server, func() error {
+			return server.ListenAndServeTLS("", "")
+		})
+		cancel()
+		logging.Info("Https server stopped")
+
+		if err != nil {
+			return err
 		}
-		cert, seen = entry.Snapshot()
+		cert, _ = entry.Snapshot()
 	}
+	return nil
 }
 
-func (s *CertDXServer) serveHttp() {
-	server := http.Server{
-		Addr: s.Config.HttpServer.Listen,
+// serveHttp runs the plain (unencrypted) token-auth HTTP API. Used only
+// when token auth is enabled and Secure is false.
+func (s *CertDXServer) serveHttp(handler http.Handler) error {
+	server := &http.Server{
+		Addr:    s.Config.HttpServer.Listen,
+		Handler: handler,
 	}
-
-	go func() {
-		logging.Info("Http server started")
-		err := server.ListenAndServe()
-		logging.Info("Http server stopped: %s", err)
-	}()
-
-	<-s.rootCtx.Done()
-	server.Close()
+	logging.Info("Http server started")
+	defer logging.Info("Http server stopped")
+	return runHTTPServer(s.rootCtx, server, server.ListenAndServe)
 }
 
-func (s *CertDXServer) serveHttpMtls() {
-	server := http.Server{
+// serveHttpMtls runs the mTLS-authenticated HTTP API.
+func (s *CertDXServer) serveHttpMtls(handler http.Handler) error {
+	mtlsConfig, err := getMtlsConfig()
+	if err != nil {
+		return err
+	}
+
+	server := &http.Server{
 		Addr:      s.Config.HttpServer.Listen,
-		TLSConfig: getMtlsConfig(),
+		Handler:   handler,
+		TLSConfig: mtlsConfig,
 	}
-
-	go func() {
-		logging.Info("Http mtls server started")
-		err := server.ListenAndServeTLS("", "")
-		logging.Info("Http mtls server stopped: %s", err)
-	}()
-
-	<-s.rootCtx.Done()
-	server.Close()
+	logging.Info("Http mtls server started")
+	defer logging.Info("Http mtls server stopped")
+	return runHTTPServer(s.rootCtx, server, func() error {
+		return server.ListenAndServeTLS("", "")
+	})
 }
 
-// HttpSrv runs the HTTP API endpoint until Stop is called.
-func (s *CertDXServer) HttpSrv() {
+// HttpSrv runs the HTTP API endpoint until Stop is called. Returns the
+// first listener / setup error or nil on graceful shutdown.
+func (s *CertDXServer) HttpSrv() error {
 	logging.Info("Start listening Http at %s%s", s.Config.HttpServer.Listen, s.Config.HttpServer.APIPath)
 
-	if s.Config.HttpServer.AuthMethod == config.HTTP_AUTH_TOKEN {
-		http.HandleFunc("/", s.apiWithTokenHandler)
-		if !s.Config.HttpServer.Secure {
-			s.serveHttp()
-		} else {
-			s.serveHttps()
+	mux := http.NewServeMux()
+	switch s.Config.HttpServer.AuthMethod {
+	case config.HTTP_AUTH_TOKEN:
+		mux.HandleFunc("/", s.apiWithTokenHandler)
+		if s.Config.HttpServer.Secure {
+			return s.serveHttps(mux)
 		}
-	} else if s.Config.HttpServer.AuthMethod == config.HTTP_AUTH_MTLS {
-		http.HandleFunc("/", s.apiHandler)
-		s.serveHttpMtls()
+		return s.serveHttp(mux)
+	case config.HTTP_AUTH_MTLS:
+		mux.HandleFunc("/", s.apiHandler)
+		return s.serveHttpMtls(mux)
+	default:
+		return fmt.Errorf("unsupported HTTP auth method: %q", s.Config.HttpServer.AuthMethod)
 	}
 }
