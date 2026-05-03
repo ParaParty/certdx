@@ -134,7 +134,9 @@ func (s *grpcStreamer) handleMain() {
 	startTime := time.Now()
 	err := s.mainClient.Stream(s.daemon.rootCtx)
 	logging.Info("gRPC main stream stopped: %s", err)
-	if _, ok := err.(*killed); ok {
+	if s.daemon.rootCtx.Err() != nil {
+		// Daemon shutdown was requested while we were on the wire — stop
+		// the dispatcher rather than re-entering the retry loop.
 		s.sendState(GRPC_STATE_STOP)
 		return
 	}
@@ -188,7 +190,10 @@ func (s *grpcStreamer) handleFailover() {
 		startTime := time.Now()
 		err := s.standbyClient.Stream(s.sessionCtx)
 		logging.Info("gRPC standby stream stopped: %s", err)
-		if _, ok := err.(*killed); ok {
+		if s.sessionCtx.Err() != nil {
+			// Session ended (failover resolved or daemon stopped); the
+			// loop-top check will exit on the next iteration anyway, but
+			// returning here skips the retry-window bookkeeping.
 			return
 		}
 
