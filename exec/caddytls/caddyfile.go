@@ -6,154 +6,150 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
+
 	"pkg.para.party/certdx/pkg/config"
 )
 
+const (
+	dirCertDX            = "certdx"
+	dirRetryCount        = "retry_count"
+	dirMode              = "mode"
+	dirReconnectInterval = "reconnect_interval"
+	dirHTTP              = "http"
+	dirGRPC              = "GRPC"
+	dirCertificate       = "certificate"
+
+	dirMainServer    = "main_server"
+	dirStandbyServer = "standby_server"
+
+	dirURL        = "url"
+	dirAuthMethod = "authMethod"
+	dirToken      = "token"
+	dirCA         = "ca"
+	dirCertFile   = "certificate"
+	dirKey        = "key"
+	dirServerAddr = "server"
+)
+
 func init() {
-	httpcaddyfile.RegisterGlobalOption("certdx", parseCertDXGlobalOptions)
+	httpcaddyfile.RegisterGlobalOption(dirCertDX, parseCertDXGlobalOptions)
 }
 
-// parseCertDXGlobalOptions configures the "certdx" global option from Caddyfile.
-func parseCertDXGlobalOptions(d *caddyfile.Dispenser, existingVal any) (any, error) {
+func expectArg1(d *caddyfile.Dispenser) (string, error) {
+	args := d.RemainingArgs()
+	if len(args) != 1 {
+		return "", d.Errf("expected 1 argument for %s, got %d", d.Val(), len(args))
+	}
+	return args[0], nil
+}
+
+// parseCertDXGlobalOptions configures the "certdx" global option.
+func parseCertDXGlobalOptions(d *caddyfile.Dispenser, _ any) (any, error) {
 	module := MakeCertDXCaddyDaemon()
 
 	for d.Next() {
 		if d.NextArg() {
-			return nil, d.Err("no argument excepted for certdx")
+			return nil, d.Errf("no argument expected for %s", dirCertDX)
 		}
 
 		for d.NextBlock(0) {
 			switch d.Val() {
-			case "retry_count":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return nil, d.Errf("expected 1 argument for retry_count, got %v", len(args))
-				}
-				v := args[0]
-				var err error
-				module.RetryCount, err = strconv.Atoi(v)
+			case dirRetryCount:
+				v, err := expectArg1(d)
 				if err != nil {
-					return nil, d.Errf("unexcepted value for retry_count: %v", v)
+					return nil, err
 				}
-			case "mode":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return nil, d.Errf("expected 1 argument for mode, got %v", len(args))
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return nil, d.Errf("invalid value for %s: %v", dirRetryCount, v)
 				}
-				v := args[0]
+				module.RetryCount = n
+			case dirMode:
+				v, err := expectArg1(d)
+				if err != nil {
+					return nil, err
+				}
 				module.Mode = v
-			case "reconnect_interval":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return nil, d.Errf("expected 1 argument for reconnect_interval, got %v", len(args))
+			case dirReconnectInterval:
+				v, err := expectArg1(d)
+				if err != nil {
+					return nil, err
 				}
-				v := args[0]
 				module.ReconnectInterval = v
-			case "http":
+			case dirHTTP:
 				if d.NextArg() {
-					return nil, d.Err("no argument expected for http")
+					return nil, d.Errf("no argument expected for %s", dirHTTP)
 				}
-				err := module.UnmarshalHttpBlock(d.NewFromNextSegment())
-				if err != nil {
-					return nil, d.Errf("unexpected unmarshaling error for http: %w", err)
+				if err := module.UnmarshalHttpBlock(d.NewFromNextSegment()); err != nil {
+					return nil, d.Errf("failed unmarshaling %s block: %v", dirHTTP, err)
 				}
-			case "GRPC":
+			case dirGRPC:
 				if d.NextArg() {
-					return nil, d.Err("no argument expected for GRPC")
+					return nil, d.Errf("no argument expected for %s", dirGRPC)
 				}
-				err := module.UnmarshalGRPCBlock(d.NewFromNextSegment())
+				if err := module.UnmarshalGRPCBlock(d.NewFromNextSegment()); err != nil {
+					return nil, d.Errf("failed unmarshaling %s block: %v", dirGRPC, err)
+				}
+			case dirCertificate:
+				certID, err := expectArg1(d)
 				if err != nil {
-					return nil, d.Errf("unexpected unmarshaling error for GRPC: %w", err)
+					return nil, err
 				}
-			case "certificate":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return nil, d.Errf("expected 1 argument for certificate, got %v", len(args))
-				}
-				cert_id := args[0]
-				err := module.UnmarshalCertificateBlock(cert_id, d.NewFromNextSegment())
-				if err != nil {
-					return nil, d.Errf("unexpected unmarshaling error for certificate: %w", err)
+				if err := module.UnmarshalCertificateBlock(certID, d.NewFromNextSegment()); err != nil {
+					return nil, d.Errf("failed unmarshaling %s block: %v", dirCertificate, err)
 				}
 			default:
-				return nil, d.Errf("unrecognized subdirective for certdx: %s", d.Val())
+				return nil, d.Errf("unrecognized subdirective for %s: %s", dirCertDX, d.Val())
 			}
 		}
 	}
 
 	return httpcaddyfile.App{
-		Name:  "certdx",
+		Name:  dirCertDX,
 		Value: caddyconfig.JSON(module, nil),
 	}, nil
 }
 
+// UnmarshalHttpBlock parses the http { ... } sub-block.
 func (c *CertDXCaddyDaemon) UnmarshalHttpBlock(d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
 			switch d.Val() {
-			case "main_server":
-				err := c.UnmarshalHttpServerBlock(&c.Http.MainServer, d.NewFromNextSegment())
-				if err != nil {
+			case dirMainServer:
+				if err := c.unmarshalHttpServerBlock(&c.Http.MainServer, d.NewFromNextSegment()); err != nil {
 					return err
 				}
-			case "standby_server":
-				err := c.UnmarshalHttpServerBlock(&c.Http.StandbyServer, d.NewFromNextSegment())
-				if err != nil {
+			case dirStandbyServer:
+				if err := c.unmarshalHttpServerBlock(&c.Http.StandbyServer, d.NewFromNextSegment()); err != nil {
 					return err
 				}
 			default:
-				return d.Errf("unrecognized subdirective for http: %s", d.Val())
+				return d.Errf("unrecognized subdirective for %s: %s", dirHTTP, d.Val())
 			}
 		}
 	}
 	return nil
 }
 
-func (c *CertDXCaddyDaemon) UnmarshalHttpServerBlock(s *config.ClientHttpServer, d *caddyfile.Dispenser) error {
+func (c *CertDXCaddyDaemon) unmarshalHttpServerBlock(s *config.ClientHttpServer, d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
+			v, err := expectArg1(d)
+			if err != nil {
+				return err
+			}
 			switch d.Val() {
-			case "url":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for url, got %v", len(args))
-				}
-				v := args[0]
+			case dirURL:
 				s.Url = v
-			case "authMethod":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for token, got %v", len(args))
-				}
-				v := args[0]
+			case dirAuthMethod:
 				s.AuthMethod = v
-			case "token":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for token, got %v", len(args))
-				}
-				v := args[0]
+			case dirToken:
 				s.Token = v
-			case "ca":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for ca, got %v", len(args))
-				}
-				v := args[0]
+			case dirCA:
 				s.CA = v
-			case "certificate":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for certificate, got %v", len(args))
-				}
-				v := args[0]
+			case dirCertFile:
 				s.Certificate = v
-			case "key":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for key, got %v", len(args))
-				}
-				v := args[0]
+			case dirKey:
 				s.Key = v
 			default:
 				return d.Errf("unrecognized subdirective for http server: %s", d.Val())
@@ -163,18 +159,17 @@ func (c *CertDXCaddyDaemon) UnmarshalHttpServerBlock(s *config.ClientHttpServer,
 	return nil
 }
 
+// UnmarshalGRPCBlock parses the GRPC { ... } sub-block.
 func (c *CertDXCaddyDaemon) UnmarshalGRPCBlock(d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
 			switch d.Val() {
-			case "main_server":
-				err := c.UnmarshalGRPCServerBlock(&c.GRPC.MainServer, d.NewFromNextSegment())
-				if err != nil {
+			case dirMainServer:
+				if err := c.unmarshalGRPCServerBlock(&c.GRPC.MainServer, d.NewFromNextSegment()); err != nil {
 					return err
 				}
-			case "standby_server":
-				err := c.UnmarshalGRPCServerBlock(&c.GRPC.StandbyServer, d.NewFromNextSegment())
-				if err != nil {
+			case dirStandbyServer:
+				if err := c.unmarshalGRPCServerBlock(&c.GRPC.StandbyServer, d.NewFromNextSegment()); err != nil {
 					return err
 				}
 			default:
@@ -185,37 +180,21 @@ func (c *CertDXCaddyDaemon) UnmarshalGRPCBlock(d *caddyfile.Dispenser) error {
 	return nil
 }
 
-func (c *CertDXCaddyDaemon) UnmarshalGRPCServerBlock(s *config.ClientGRPCServer, d *caddyfile.Dispenser) error {
+func (c *CertDXCaddyDaemon) unmarshalGRPCServerBlock(s *config.ClientGRPCServer, d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
+			v, err := expectArg1(d)
+			if err != nil {
+				return err
+			}
 			switch d.Val() {
-			case "server":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for server, got %v", len(args))
-				}
-				v := args[0]
+			case dirServerAddr:
 				s.Server = v
-			case "ca":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for ca, got %v", len(args))
-				}
-				v := args[0]
+			case dirCA:
 				s.CA = v
-			case "certificate":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for certificate, got %v", len(args))
-				}
-				v := args[0]
+			case dirCertFile:
 				s.Certificate = v
-			case "key":
-				args := d.RemainingArgs()
-				if len(args) != 1 {
-					return d.Errf("expected 1 argument for key, got %v", len(args))
-				}
-				v := args[0]
+			case dirKey:
 				s.Key = v
 			default:
 				return d.Errf("unrecognized subdirective for grpc server: %s", d.Val())
@@ -225,19 +204,16 @@ func (c *CertDXCaddyDaemon) UnmarshalGRPCServerBlock(s *config.ClientGRPCServer,
 	return nil
 }
 
-func (c *CertDXCaddyDaemon) UnmarshalCertificateBlock(cert_id string, d *caddyfile.Dispenser) error {
+// UnmarshalCertificateBlock collects the domain list under one certificate block.
+func (c *CertDXCaddyDaemon) UnmarshalCertificateBlock(certID string, d *caddyfile.Dispenser) error {
 	var domains []string
-
 	for d.Next() {
 		for d.NextBlock(0) {
 			domains = append(domains, d.Val())
 		}
 	}
-
-	if len(domains) <= 0 {
-		return d.Err("no domains present in certificate definition")
+	if err := c.CertificateDefs.Add(certID, domains); err != nil {
+		return d.Err(err.Error())
 	}
-
-	c.CertificateDefs[cert_id] = domains
 	return nil
 }
