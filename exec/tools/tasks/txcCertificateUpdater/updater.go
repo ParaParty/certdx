@@ -334,6 +334,7 @@ func (r *TencentCloudCertificateUpdater) InvokeCertificateUpdate(ctx context.Con
 	default:
 		return fmt.Errorf("unsupported mode: %s", r.certDXDaemon.Config.Common.Mode)
 	}
+	defer r.certDXDaemon.Stop()
 
 	return r.WaitReplaceTask(ctx)
 }
