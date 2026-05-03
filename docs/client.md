@@ -97,6 +97,12 @@ The client polls the server on the same cadence as the server's renewal
 check (`ACME.renewTimeLeft / 4`). When the server returns a newer
 certificate, the client overwrites both files and runs `reloadCommand`.
 
+Writes are atomic via a temp-file-and-rename, so a downstream service
+reading the cert mid-update never observes a torn or partial file. The
+reload command runs only when both `<savePath>/<name>.pem` and `.key`
+already existed — the very first install is treated as a bootstrap
+where the downstream service is not yet up.
+
 ## Common validation errors
 
 - `no certification configured` — add at least one `[[Certifications]]`.
