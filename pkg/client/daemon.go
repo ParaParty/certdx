@@ -17,12 +17,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"sync/atomic"
 
-	"github.com/BurntSushi/toml"
+	"pkg.para.party/certdx/pkg/cli"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
@@ -210,22 +209,9 @@ func (r *CertDXClientDaemon) startWatchers() {
 // LoadConfigurationAndValidateOpt parses the TOML file at path into the
 // daemon's config and runs Validate with the supplied options.
 func (r *CertDXClientDaemon) LoadConfigurationAndValidateOpt(path string, options []config.ValidatingOption) error {
-	cfile, err := os.Open(path)
-	if err != nil {
-		logging.Fatal("Open config file failed, err: %s", err)
+	if err := cli.LoadTOML(path, r.Config); err != nil {
 		return err
 	}
-	defer cfile.Close()
-	if b, err := io.ReadAll(cfile); err == nil {
-		if err := toml.Unmarshal(b, r.Config); err == nil {
-			logging.Info("Config loaded")
-		} else {
-			logging.Fatal("Unmarshalling config failed, err: %s", err)
-		}
-	} else {
-		logging.Fatal("Reading config file failed, err: %s", err)
-	}
-
 	return r.Config.Validate(options)
 }
 
