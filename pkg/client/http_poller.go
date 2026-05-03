@@ -13,7 +13,7 @@ import (
 // retry budget. Returns nil only when both are unreachable.
 func (r *CertDXClientDaemon) httpRequestCert(domains []string) *api.HttpCertResp {
 	var resp *api.HttpCertResp
-	err := retry.Do(r.Config.Common.RetryCount, func() error {
+	err := retry.Do(r.rootCtx, r.Config.Common.RetryCount, func() error {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
 		var err error
 		resp, err = certdxClient.GetCertCtx(r.rootCtx, domains)
@@ -26,7 +26,7 @@ func (r *CertDXClientDaemon) httpRequestCert(domains []string) *api.HttpCertResp
 
 	if r.Config.Http.StandbyServer.Url != "" {
 		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
-		err = retry.Do(r.Config.Common.RetryCount, func() error {
+		err = retry.Do(r.rootCtx, r.Config.Common.RetryCount, func() error {
 			var err error
 			resp, err = certdxClient.GetCertCtx(r.rootCtx, domains)
 			return err
