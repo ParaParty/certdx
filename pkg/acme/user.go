@@ -36,12 +36,13 @@ func (u *ACMEUser) GetPrivateKey() crypto.PrivateKey {
 	return u.Key
 }
 
+// parsePEM decodes a PEM-encoded ACME account key. A corrupted file is
+// returned as an error rather than crashing the process.
 func parsePEM(pem []byte) (crypto.PrivateKey, error) {
 	key, err := certcrypto.ParsePEMPrivateKey(pem)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("parse ACME account key: %w", err)
 	}
-
 	return key, nil
 }
 
@@ -95,7 +96,7 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 
 	user.Registration, err = acmeClient.Registration.ResolveAccountByKey()
 	if err != nil {
-		return nil, fmt.Errorf("failed resolving account. Is account registered? Error: %w", err)
+		return nil, fmt.Errorf("resolve ACME account by key (is the account registered?): %w", err)
 	}
 	return user, nil
 }
@@ -111,12 +112,14 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 		return fmt.Errorf("failed generating key: %w", err)
 	}
 
-	x509Encoded, _ := x509.MarshalECPrivateKey(privateKey)
+	x509Encoded, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return fmt.Errorf("marshal ACME account key: %w", err)
+	}
 	pemEncoded := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: x509Encoded})
 
-	err = os.WriteFile(keyPath, pemEncoded, 0o600)
-	if err != nil {
-		return fmt.Errorf("failed saving key: %w", err)
+	if err := os.WriteFile(keyPath, pemEncoded, 0o600); err != nil {
+		return fmt.Errorf("save ACME account key: %w", err)
 	}
 
 	myUser := ACMEUser{
