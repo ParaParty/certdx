@@ -1,6 +1,7 @@
 package txcCertificateUpdater
 
 import (
+	"context"
 	"fmt"
 
 	flag "github.com/spf13/pflag"
@@ -36,7 +37,7 @@ func TencentCloudReplaceCertificate(name string, args []string) error {
 	if err := updater.InitCertificateUpdater(); err != nil {
 		return fmt.Errorf("init updater: %w", err)
 	}
-	if err := updater.InvokeCertificateUpdate(); err != nil {
+	if err := updater.InvokeCertificateUpdate(context.Background()); err != nil {
 		return fmt.Errorf("update certificates: %w", err)
 	}
 	return nil
