@@ -76,7 +76,13 @@ func (s *grpcStreamer) run() {
 	defer s.sessionCancel()
 
 	for {
-		state := <-s.stateChan
+		var state GRPC_CLIENT_STATE
+		select {
+		case state = <-s.stateChan:
+		case <-s.daemon.rootCtx.Done():
+			s.sessionCancel()
+			return
+		}
 		logging.Debug("Process grpc client state: %d", state)
 		switch state {
 		case GRPC_STATE_STOP:
@@ -93,15 +99,24 @@ func (s *grpcStreamer) run() {
 			s.standbyActive.Store(true)
 			s.daemon.wg.Add(1)
 			go s.handleFailover()
-			s.stateChan <- GRPC_STATE_TRY_FALLBACK
+			s.sendState(GRPC_STATE_TRY_FALLBACK)
 		case GRPC_STATE_TRY_FALLBACK:
 			s.daemon.wg.Add(1)
 			go s.handleFallback(s.sessionCtx, s.sessionCancel)
-			s.stateChan <- GRPC_STATE_RESTART_MAIN
+			s.sendState(GRPC_STATE_RESTART_MAIN)
 		case GRPC_STATE_RESTART_MAIN:
 			s.daemon.wg.Add(1)
 			go s.handleRestart(s.sessionCtx)
 		}
+	}
+}
+
+func (s *grpcStreamer) sendState(state GRPC_CLIENT_STATE) bool {
+	select {
+	case s.stateChan <- state:
+		return true
+	case <-s.daemon.rootCtx.Done():
+		return false
 	}
 }
 
@@ -112,15 +127,15 @@ func (s *grpcStreamer) run() {
 func (s *grpcStreamer) handleMain() {
 	defer func() {
 		s.daemon.wg.Done()
-		logging.Debug("Main stream gorountine exit")
+		logging.Debug("Main stream goroutine exit")
 	}()
 
 	logging.Info("Starting gRPC main stream")
 	startTime := time.Now()
-	err := s.mainClient.Stream()
+	err := s.mainClient.Stream(s.daemon.rootCtx)
 	logging.Info("gRPC main stream stopped: %s", err)
 	if _, ok := err.(*killed); ok {
-		s.stateChan <- GRPC_STATE_STOP
+		s.sendState(GRPC_STATE_STOP)
 		return
 	}
 
@@ -128,7 +143,7 @@ func (s *grpcStreamer) handleMain() {
 		s.mainRetryCount++
 	} else {
 		s.mainRetryCount = 0
-		s.stateChan <- GRPC_STATE_MAIN
+		s.sendState(GRPC_STATE_MAIN)
 		return
 	}
 
@@ -136,21 +151,21 @@ func (s *grpcStreamer) handleMain() {
 	if s.mainRetryCount < s.daemon.Config.Common.RetryCount {
 		select {
 		case <-time.After(grpcRetryBackoff):
-			s.stateChan <- GRPC_STATE_MAIN
+			s.sendState(GRPC_STATE_MAIN)
 			return
 		case <-s.daemon.rootCtx.Done():
 			return
 		}
 	}
 
-	logging.Info("Retry limite for main stream reached")
+	logging.Info("Retry limit for main stream reached")
 	s.mainRetryCount = 0
 	if s.standbyExists && !s.standbyActive.Load() {
 		logging.Info("Start trying standby stream")
-		s.stateChan <- GRPC_STATE_FAILOVER
+		s.sendState(GRPC_STATE_FAILOVER)
 	} else {
 		logging.Info("Sleep %s", s.daemon.Config.Common.ReconnectInterval)
-		s.stateChan <- GRPC_STATE_RESTART_MAIN
+		s.sendState(GRPC_STATE_RESTART_MAIN)
 	}
 }
 
@@ -171,7 +186,7 @@ func (s *grpcStreamer) handleFailover() {
 		}
 		logging.Info("Starting gRPC standby stream")
 		startTime := time.Now()
-		err := s.standbyClient.Stream()
+		err := s.standbyClient.Stream(s.sessionCtx)
 		logging.Info("gRPC standby stream stopped: %s", err)
 		if _, ok := err.(*killed); ok {
 			return
@@ -195,7 +210,7 @@ func (s *grpcStreamer) handleFailover() {
 			}
 		}
 
-		logging.Info("Retry limite for standby stream reached, sleep %s", s.daemon.Config.Common.ReconnectInterval)
+		logging.Info("Retry limit for standby stream reached, sleep %s", s.daemon.Config.Common.ReconnectInterval)
 		standbyRetryCount = 0
 		select {
 		case <-time.After(s.daemon.Config.Common.ReconnectDuration):
@@ -237,7 +252,7 @@ func (s *grpcStreamer) handleRestart(sessionCtx context.Context) {
 	logging.Debug("Reconnect duration is: %s", s.daemon.Config.Common.ReconnectDuration)
 	select {
 	case <-time.After(s.daemon.Config.Common.ReconnectDuration):
-		s.stateChan <- GRPC_STATE_MAIN
+		s.sendState(GRPC_STATE_MAIN)
 	case <-sessionCtx.Done():
 		logging.Debug("Restart goroutine reset")
 		return
@@ -256,11 +271,11 @@ func (r *CertDXClientDaemon) GRPCMain() {
 	r.wg.Add(1)
 	go s.run()
 
-	s.stateChan <- GRPC_STATE_MAIN
+	s.sendState(GRPC_STATE_MAIN)
 
 	<-r.rootCtx.Done()
 
-	s.stateChan <- GRPC_STATE_STOP
+	s.sendState(GRPC_STATE_STOP)
 
 	logging.Info("Stopping gRPC client")
 	s.mainClient.Kill()
