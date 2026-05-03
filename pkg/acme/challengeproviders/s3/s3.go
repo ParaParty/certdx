@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -27,31 +26,36 @@ func (s *HTTPProvider) Client() *s3.Client {
 }
 
 // NewHTTPProvider returns a HTTPProvider instance with a configured s3 bucket and aws session.
-// Credentials must be passed in the environment variables.
-func NewHTTPProvider(config config.S3Client) (*HTTPProvider, error) {
-	credential := credentials.NewStaticCredentialsProvider(config.AccessKeyId, config.AccessKeySecret, config.SessionToken)
+// Credentials must be passed in the environment variables. The bucket name
+// is required; an empty bucket fails fast rather than producing opaque
+// runtime errors deep inside an ACME challenge.
+func NewHTTPProvider(cfg config.S3Client) (*HTTPProvider, error) {
+	if cfg.Bucket == "" {
+		return nil, fmt.Errorf("s3 challenge provider: bucket is required")
+	}
+
+	credential := credentials.NewStaticCredentialsProvider(cfg.AccessKeyId, cfg.AccessKeySecret, cfg.SessionToken)
 	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 		return aws.Endpoint{
-			PartitionID:   config.PartitionID,
-			URL:           config.URL,
-			SigningRegion: config.Region,
+			PartitionID:   cfg.PartitionID,
+			URL:           cfg.URL,
+			SigningRegion: cfg.Region,
 		}, nil
 	})
 
-	cfg, err := awsConfig.LoadDefaultConfig(
-		context.TODO(),
+	awsCfg, err := awsConfig.LoadDefaultConfig(
+		context.Background(),
 		awsConfig.WithCredentialsProvider(credential),
 		awsConfig.WithEndpointResolverWithOptions(customResolver),
 		awsConfig.WithRegion("auto"),
 	)
 	if err != nil {
-		log.Printf("LoadDefaultConfig error: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("load AWS config: %w", err)
 	}
 
 	return &HTTPProvider{
-		bucket: config.Bucket,
-		client: s3.NewFromConfig(cfg, func(o *s3.Options) {
+		bucket: cfg.Bucket,
+		client: s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 			o.UsePathStyle = false
 		}),
 	}, nil
