@@ -79,7 +79,6 @@ func main() {
 				case errChan <- fmt.Errorf("%s server: %w", name, err):
 				default:
 				}
-				cdxsrv.Stop()
 			}
 		}()
 	}
@@ -92,17 +91,10 @@ func main() {
 		startServer("grpc sds", cdxsrv.SDSSrv)
 	}
 
-	shutdownDone := make(chan struct{})
-	go func() {
-		cli.WaitForShutdown(cdxsrv.Stop, shutdownTimeout)
-		close(shutdownDone)
-	}()
-
-	select {
-	case err := <-errChan:
+	if err := cli.WaitForShutdown(func() {
+		cdxsrv.Stop()
 		wg.Wait()
+	}, shutdownTimeout, errChan); err != nil {
 		logging.Fatal("%s", err)
-	case <-shutdownDone:
-		wg.Wait()
 	}
 }
