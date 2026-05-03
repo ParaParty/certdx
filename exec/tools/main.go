@@ -33,7 +33,7 @@ type command struct {
 // commands is the registry of sub-commands. Canonical names carry a
 // non-empty `help`; alias names point at the same `run` with `help: ""`.
 var commands = map[string]command{
-	"show-cache":                         {tasks.ShowCache, "Print server cert cache"},
+	"show-certs":                         {tasks.ShowCerts, "Print server cert cache"},
 	"google-account":                     {tasks.RegisterGoogleAccount, "Register Google ACME account"},
 	"make-ca":                            {tasks.MakeCA, "Make grpc mtls CA certificate and key"},
 	"make-server":                        {tasks.MakeServer, "Make grpc mtls server certificate and key"},

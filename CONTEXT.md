@@ -25,8 +25,8 @@ term enters the codebase.
 
 ## Lifecycle vocabulary
 
-- **Subscriber**: a goroutine that has called `Server.Subscribe(entry)`
-  on a cache entry and not yet `Release`d it. The renewal goroutine is
+- **Subscriber**: a goroutine registered through the server's internal
+  `subscribe(entry)` helper and not yet released. The renewal goroutine is
   alive while at least one subscriber is registered.
 - **Renewer**: the per-entry goroutine spawned by the first subscriber
   (the 0→1 transition). It re-checks expiry on `RenewTimeLeftDuration / 4`
@@ -42,7 +42,7 @@ term enters the codebase.
   certificate. The Envoy SDS protocol identifies cert packs by
   `ResourceName`; the HTTP API does not name them and just returns the
   cert for the requested domain set.
-- **Cache entry** (`ServerCertCacheEntry`): the in-memory record for one
+- **Cache entry** (`certEntry`): the in-memory record for one
   cert pack — current cert + version + subscriber refcount + the
   `updated` channel that broadcasts renewal events.
 - **Version**: a monotonically increasing renewal counter on each cache
@@ -91,9 +91,9 @@ term enters the codebase.
 - **`mtls/`**: the directory holding mTLS material. Discovery order is
   `--mtls-dir` flag, then `mtls/` under cwd, then `mtls/` next to the
   executable.
-- **`cache.json`**: the server's persisted cert cache, written next to
+- **`cache.json`**: the server's persisted cert store, written next to
   the executable. Schema is the JSON encoding of
-  `map[domain.Key]ServerCacheFileEntry`.
+  `map[domain.Key]certStoreEntry`.
 - **`private/`**: the directory holding ACME account private keys. One
   key per `(email, provider)` pair, named `<email>_<provider>.key`.
 - **Counter**: the `mtls/counter.txt` file holding the next CA serial

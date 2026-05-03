@@ -381,7 +381,7 @@ server and re-bind expiring ones. See [tools.md](tools.md#tencent-cloud-certific
 - **Logs:** pass `-l /path/to/log` to redirect, `-d` to enable debug.
 - **Test mode:** `certdx_client -t` skips TLS verification on the server URL,
   useful while bringing up `secure = true` for the first time.
-- **Cache:** inspect with `certdx_tools show-cache` in the server's working
+- **Cache:** inspect with `certdx_tools show-certs` in the server's working
   directory.
 - **Renewal cadence:** the server checks every `ACME.renewTimeLeft / 4` and
   renews when remaining lifetime drops below `renewTimeLeft`.

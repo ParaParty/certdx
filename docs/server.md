@@ -147,7 +147,7 @@ working directory — whichever exists):
 | --- | --- |
 | `mtls/` | CA, server and per-client certificates for mTLS / gRPC SDS. |
 | `private/` | ACME account private keys (one file per email + provider). |
-| `cache.json` | Issued-certificate cache. Inspect with `certdx_tools show-cache`. |
+| `cache.json` | Issued-certificate cache. Inspect with `certdx_tools show-certs`. |
 
 ## Common validation errors
 

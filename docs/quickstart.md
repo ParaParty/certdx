@@ -137,5 +137,5 @@ certificate — no further action is needed.
 ## Where to go next
 
 - Replace the bearer token with mTLS: [setup.md § mTLS](setup.md#mtls).
-- Inspect what the server has cached: `certdx_tools show-cache`
-  ([tools.md](tools.md#show-cache)).
+- Inspect what the server has cached: `certdx_tools show-certs`
+  ([tools.md](tools.md#show-certs)).

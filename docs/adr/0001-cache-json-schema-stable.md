@@ -9,7 +9,7 @@ Accepted.
 The v0.5 refactor (PRD #25) consolidates package layout, error handling,
 and concurrency. One of the candidate cleanups was the on-disk cert
 cache file (`cache.json`): it serializes
-`map[domain.Key]ServerCacheFileEntry` directly, with the `domain.Key`
+`map[domain.Key]certStoreEntry` directly, with the `domain.Key`
 hash as the JSON object key.
 
 Changing this format would let us drop the FNV hash key in favor of a
@@ -33,7 +33,7 @@ Concretely:
   refactor canonicalizes input domains before hashing: lower-case, strip
   trailing root dots, drop empty values, de-duplicate, sort, then FNV-1a
   the NUL-separated domain list.
-- The value shape (`ServerCacheFileEntry { Domains []string; Cert
+- The value shape (`certStoreEntry { Domains []string; Cert
   CertT }`) and `CertT` field tags stay so.
 - The file is written with `os.WriteFile` at mode `0o600` next to the
   executable. The file path discovery rules are unchanged.
