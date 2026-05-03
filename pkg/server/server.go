@@ -129,9 +129,9 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	var fullchain, key []byte
 	var err error
 	if retry {
-		fullchain, key, err = s.acme.RetryObtain(c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
+		fullchain, key, err = s.acme.RetryObtain(ctx, c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
 	} else {
-		fullchain, key, err = s.acme.Obtain(c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
+		fullchain, key, err = s.acme.Obtain(ctx, c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
 	}
 	if err != nil {
 		return false, err

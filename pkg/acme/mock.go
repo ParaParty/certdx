@@ -1,6 +1,7 @@
 package acme
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -47,7 +48,10 @@ func NewMockACME(lifetime time.Duration) *MockACME {
 	return m
 }
 
-func (m *MockACME) Obtain(domains []string, _ time.Time) (fullchain, key []byte, err error) {
+func (m *MockACME) Obtain(ctx context.Context, domains []string, _ time.Time) (fullchain, key []byte, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if len(domains) == 0 {
 		return nil, nil, fmt.Errorf("mock acme: no domains")
 	}
@@ -104,6 +108,6 @@ func (m *MockACME) Obtain(domains []string, _ time.Time) (fullchain, key []byte,
 	return fullchain, key, nil
 }
 
-func (m *MockACME) RetryObtain(domains []string, deadline time.Time) (fullchain, key []byte, err error) {
-	return m.Obtain(domains, deadline)
+func (m *MockACME) RetryObtain(ctx context.Context, domains []string, deadline time.Time) (fullchain, key []byte, err error) {
+	return m.Obtain(ctx, domains, deadline)
 }

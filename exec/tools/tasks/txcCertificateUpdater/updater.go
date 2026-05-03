@@ -146,7 +146,7 @@ func (r *TencentCloudCertificateUpdater) AddReplaceTask() error {
 				req.ExpiringNotificationSwitch = txcommon.Uint64Ptr(1)
 				req.Repeatable = txcommon.BoolPtr(false)
 
-				err := retry.Do(3, func() error {
+				err := retry.Do(context.Background(), 3, func() error {
 					resp, err := r.client.UpdateCertificateInstance(req)
 					if err != nil {
 						var tencentCloudSDKError *txerr.TencentCloudSDKError
@@ -221,7 +221,7 @@ func (r *TencentCloudCertificateUpdater) FetchTencentCloudCertificate(opt func(r
 		req.Limit = txcommon.Uint64Ptr(pageSize)
 
 		noMoreResult := false
-		err := retry.Do(3, func() error {
+		err := retry.Do(context.Background(), 3, func() error {
 			resp, err := r.client.DescribeCertificates(req)
 			if err != nil {
 				var tencentCloudSDKError *txerr.TencentCloudSDKError
