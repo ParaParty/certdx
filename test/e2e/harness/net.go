@@ -36,10 +36,6 @@ func MustFreePort() int {
 // fast-failing stand-in for a broken certdx_server: Stream() errors out
 // quickly and the client settles into its interruptible retry-sleep.
 //
-// A tarpit that holds connections open without completing the TLS
-// handshake would instead trigger a known limitation in pkg/client/sds.go
-// where StreamSecrets uses an uncancellable context.
-//
 // The listener is closed via tb.Cleanup.
 func StartTarpit(tb testing.TB, port int) net.Listener {
 	tb.Helper()
