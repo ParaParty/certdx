@@ -1,12 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
+	"time"
 
 	flag "github.com/spf13/pflag"
+	"pkg.para.party/certdx/pkg/cli"
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
@@ -16,6 +15,8 @@ var (
 	buildCommit string
 	buildDate   string
 )
+
+const shutdownTimeout = 30 * time.Second
 
 var (
 	test     = flag.BoolP("test", "t", false, "Test mode: skip http server certificate verification")
@@ -31,29 +32,27 @@ var certDXDaemon *client.CertDXClientDaemon
 func init() {
 	flag.Parse()
 
+	ver := cli.Version{Name: "client", Commit: buildCommit, Date: buildDate}
+
 	if *help {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
 
 	if *version {
-		fmt.Printf("Certdx client %s, built at %s\n", buildCommit, buildDate)
+		ver.Print()
 		os.Exit(0)
 	}
 
-	logging.SetLogFile(*pLogPath)
-	logging.SetDebug(*pDebug)
-	logging.Info("\nStarting certdx client %s, built at %s", buildCommit, buildDate)
+	cli.Bootstrap(cli.LogConfig{Path: *pLogPath, Debug: *pDebug})
+	logging.Info("\nStarting %s", ver)
 
 	certDXDaemon = client.MakeCertDXClientDaemon()
-
 	if *test {
 		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
 	}
 
-	certDXDaemon = client.MakeCertDXClientDaemon()
-	err := certDXDaemon.LoadConfigurationAndValidate(*conf)
-	if err != nil {
+	if err := certDXDaemon.LoadConfigurationAndValidate(*conf); err != nil {
 		logging.Fatal("Invalid config: %s", err)
 	}
 	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)
@@ -62,17 +61,7 @@ func init() {
 }
 
 func main() {
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-signalChan
-		certDXDaemon.Stop()
-
-		// TODO remove this feature later? Graceful stop is fast enough maybe...
-		<-signalChan
-		logging.Fatal("Fast dying...")
-	}()
+	go cli.WaitForShutdown(certDXDaemon.Stop, shutdownTimeout)
 
 	switch certDXDaemon.Config.Common.Mode {
 	case config.CLIENT_MODE_HTTP:
