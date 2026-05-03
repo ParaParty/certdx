@@ -129,7 +129,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 			for name, domains := range packRequests {
 				logging.Info("Handling pack %s with domains %v in response to %s", name, domains, peer)
 
-				entry := sds.cdxsrv.GetCertCacheEntry(domains)
+				entry := sds.cdxsrv.certCache.get(domains)
 
 				reqChan := make(chan *discoveryv3.DiscoveryRequest)
 				dispatch[name] = reqChan
@@ -154,11 +154,11 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 	return err
 }
 
-func (sds *MySDS) handleCert(ctx context.Context, name string, entry *ServerCertCacheEntry,
+func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 	req chan *discoveryv3.DiscoveryRequest, resp chan *discoveryv3.DiscoveryResponse, peer string) {
 
-	sds.cdxsrv.Subscribe(entry)
-	defer sds.cdxsrv.Release(entry)
+	sds.cdxsrv.subscribe(entry)
+	defer sds.cdxsrv.release(entry)
 
 	cert, seen := entry.Snapshot()
 	if !cert.IsValid() {

@@ -18,7 +18,7 @@ Available commands:
 
 | Command (and aliases) | Purpose |
 | --- | --- |
-| [`show-cache`](#show-cache) | Print the contents of the server's certificate cache. |
+| [`show-certs`](#show-certs) | Print the contents of the server's certificate cache. |
 | [`google-account`](#google-account) | Register a Google ACME EAB account. |
 | [`make-ca`](#make-ca) | Create the mTLS CA. |
 | [`make-server`](#make-server) | Issue an mTLS server certificate. |
@@ -40,14 +40,14 @@ trimmed) so a typo cannot silently overwrite the CA or server material.
 
 ---
 
-## `show-cache`
+## `show-certs`
 
 Reads `cache.json` from the working directory and prints the cached
 certificates' metadata. Use it to confirm the server has issued the expected
 domains.
 
 ```sh
-certdx_tools show-cache
+certdx_tools show-certs
 ```
 
 ## `google-account`

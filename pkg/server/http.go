@@ -61,7 +61,7 @@ func (s *CertDXServer) checkAuthorizationToken(r *http.Request) bool {
 func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	var req api.HttpCertReq
 	var resp []byte
-	var cachedCert *ServerCertCacheEntry
+	var cachedCert *certEntry
 	var cert CertT
 
 	err := json.NewDecoder(r.Body).Decode(&req)
@@ -79,8 +79,8 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cachedCert = s.GetCertCacheEntry(req.Domains)
-	if !s.IsSubcribing(cachedCert) {
+	cachedCert = s.certCache.get(req.Domains)
+	if !s.isSubscribing(cachedCert) {
 		_, err = s.renew(r.Context(), cachedCert, false)
 		if err != nil {
 			goto ERR
@@ -109,10 +109,10 @@ ERR:
 
 func (s *CertDXServer) serveHttps() {
 	ctx := s.rootCtx
-	entry := s.GetCertCacheEntry(s.Config.HttpServer.Names)
+	entry := s.certCache.get(s.Config.HttpServer.Names)
 
-	s.Subscribe(entry)
-	defer s.Release(entry)
+	s.subscribe(entry)
+	defer s.release(entry)
 
 	cert, seen := entry.Snapshot()
 	if !cert.IsValid() {

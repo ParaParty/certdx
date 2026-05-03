@@ -2,19 +2,14 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/paths"
 )
 
 type CertT struct {
@@ -24,57 +19,12 @@ type CertT struct {
 	RenewAt     time.Time `json:"renewAt"`
 }
 
-type ServerCacheFileEntry struct {
-	Domains []string `json:"domains"`
-	Cert    CertT    `json:"cert"`
-}
-
-type ServerCacheFile struct {
-	path    string
-	entries map[domain.Key]*ServerCacheFileEntry
-	update  chan *ServerCacheFileEntry
-}
-
-// ServerCertCacheEntry holds one domain bundle's cached cert, the
-// "renewed" broadcast channel, and the renewal-goroutine lifecycle.
-//
-// Concurrency:
-//
-//   - renewMu serializes concurrent Renew calls; held for the duration
-//     of the ACME obtain so a single in-flight call wins per renewal.
-//   - stateMu protects everything that is not the ACME call: the
-//     cert/version pair, the `updated` chan swap, and the cancelRenew
-//     handle that Subscribe / Release shuffle. It is held only briefly,
-//     so readers (Snapshot, WaitForUpdate) never block waiting on an
-//     ACME call to finish.
-//   - Subscribing is the consumer refcount. Subscribe transitions 0→1
-//     spawn the renewal goroutine; Release transitions 1→0 cancel it
-//     via cancelRenew.
-type ServerCertCacheEntry struct {
-	domains []string
-
-	renewMu sync.Mutex // serializes Renew (held during ACME)
-
-	stateMu     sync.Mutex // brief; guards everything below
-	cert        CertT
-	version     uint64
-	updated     chan struct{} // closed on each successful renewal, then replaced
-	cancelRenew context.CancelFunc
-
-	Subscribing atomic.Int64
-}
-
-type ServerCertCache struct {
-	entries map[domain.Key]*ServerCertCacheEntry
-	mutex   sync.Mutex
-}
-
 type CertDXServer struct {
 	Config config.ServerConfig
 
 	acme      acme.Obtainer
-	certCache ServerCertCache
-	cacheFile ServerCacheFile
+	certCache certCache
+	certStore CertStore
 
 	// rootCtx is the lifecycle parent for every server subgoroutine
 	// (HttpSrv, SDSSrv, the cache-file writer, every per-entry renewer).
@@ -88,8 +38,8 @@ type CertDXServer struct {
 func MakeCertDXServer() *CertDXServer {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	ret := &CertDXServer{
-		certCache:  makeServerCertCache(),
-		cacheFile:  MakeServerCacheFile(),
+		certCache:  makeCertCache(),
+		certStore:  NewCertStore(),
 		rootCtx:    rootCtx,
 		rootCancel: rootCancel,
 	}
@@ -102,12 +52,6 @@ func (c *CertT) IsValid() bool {
 	return time.Now().Before(c.ValidBefore)
 }
 
-func makeServerCertCache() ServerCertCache {
-	return ServerCertCache{
-		entries: make(map[domain.Key]*ServerCertCacheEntry),
-	}
-}
-
 func (s *CertDXServer) Init() error {
 	var err error
 
@@ -116,46 +60,17 @@ func (s *CertDXServer) Init() error {
 		return fmt.Errorf("initailizing ACME failed: %w", err)
 	}
 
-	if err = s.loadCacheFile(); err != nil {
+	if err = s.loadCertStore(); err != nil {
 		// It's okay that previous saved cert can not be loaded, just log and continue to run
 		logging.Warn("load cache file failed, err: %s", err)
 	}
-	go s.cacheFile.listenUpdate(s.rootCtx)
+	go s.certStore.listenUpdate(s.rootCtx)
 
 	return nil
 }
 
-func MakeServerCacheFile() ServerCacheFile {
-	cachePath := paths.ServerCacheSave()
-
-	return ServerCacheFile{
-		path:    cachePath,
-		entries: make(map[domain.Key]*ServerCacheFileEntry),
-		update:  make(chan *ServerCacheFileEntry, 10),
-	}
-}
-
-func (s *ServerCacheFile) ReadCacheFile() error {
-	exist := paths.FileExists(s.path)
-	if !exist {
-		return os.ErrNotExist
-	}
-
-	cfile, err := os.ReadFile(s.path)
-	if err != nil {
-		return fmt.Errorf("opening cache file failed: %w", err)
-	}
-
-	err = json.Unmarshal(cfile, &s.entries)
-	if err != nil {
-		return fmt.Errorf("unmarshaling cache file failed: %w", err)
-	}
-
-	return nil
-}
-
-func (s *CertDXServer) loadCacheFile() error {
-	err := s.cacheFile.ReadCacheFile()
+func (s *CertDXServer) loadCertStore() error {
+	err := s.certStore.Load()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -165,131 +80,20 @@ func (s *CertDXServer) loadCacheFile() error {
 	}
 
 	s.certCache.mutex.Lock()
-	for key, cache := range s.cacheFile.entries {
+	for key, cache := range s.certStore.entries {
 		if cache.Cert.IsValid() {
-			entry := s.getCertCacheEntryNoLock(cache.Domains)
+			entry := s.certCache.getNoLock(cache.Domains)
 			entry.stateMu.Lock()
 			entry.cert = cache.Cert
 			entry.stateMu.Unlock()
 		} else {
-			delete(s.cacheFile.entries, key)
+			delete(s.certStore.entries, key)
 		}
 	}
 	s.certCache.mutex.Unlock()
 
 	logging.Info("Previous cache loaded.")
 	return nil
-}
-
-func (s *ServerCacheFile) writeCacheFile() error {
-	jsonBytes, err := json.Marshal(s.entries)
-	if err != nil {
-		return fmt.Errorf("failed to marshal cache file: %w", err)
-	}
-
-	err = os.WriteFile(s.path, jsonBytes, 0o600)
-	if err != nil {
-		return fmt.Errorf("failed to write cache file: %w", err)
-	}
-
-	return nil
-}
-
-func (s *ServerCacheFile) updateCacheFileEntry(fe *ServerCacheFileEntry) error {
-	s.entries[domain.AsKey(fe.Domains)] = fe
-
-	return s.writeCacheFile()
-}
-
-func (s *ServerCacheFile) PrintCertInfo() {
-	for _, cert := range s.entries {
-		fmt.Printf("\nDomains:     %s\nRenewAt:     %s\nValidBefore: %s\n", strings.Join(cert.Domains, ", "), cert.Cert.RenewAt, cert.Cert.ValidBefore)
-	}
-}
-
-// listenUpdate drains the cache-file update queue, persisting each
-// renewed cert to disk. It exits when ctx is done so it shares the
-// server's lifecycle.
-func (s *ServerCacheFile) listenUpdate(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case fe := <-s.update:
-			logging.Info("Update domains cache to file")
-			if err := s.updateCacheFileEntry(fe); err != nil {
-				logging.Warn("Update domains cache to file failed, err: %s", err)
-			}
-		}
-	}
-}
-
-func (s *CertDXServer) getCertCacheEntryNoLock(domains []string) *ServerCertCacheEntry {
-	entryKey := domain.AsKey(domains)
-	entry, ok := s.certCache.entries[entryKey]
-	if ok {
-		return entry
-	}
-
-	entry = &ServerCertCacheEntry{
-		domains: domains,
-		updated: make(chan struct{}),
-	}
-
-	s.certCache.entries[entryKey] = entry
-	return entry
-}
-
-func (s *CertDXServer) GetCertCacheEntry(domains []string) *ServerCertCacheEntry {
-	s.certCache.mutex.Lock()
-	defer s.certCache.mutex.Unlock()
-	return s.getCertCacheEntryNoLock(domains)
-}
-
-// Snapshot returns the current cert and the version that minted it. The
-// pair is read atomically under stateMu so callers get a consistent
-// view: any subsequent renewal observed via WaitForUpdate is guaranteed
-// to be a strictly newer version than the one returned here.
-func (c *ServerCertCacheEntry) Snapshot() (CertT, uint64) {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
-	return c.cert, c.version
-}
-
-// Cert returns the current cached cert.
-func (c *ServerCertCacheEntry) Cert() CertT {
-	cert, _ := c.Snapshot()
-	return cert
-}
-
-// WaitForUpdate blocks until the entry's version moves past seen, or
-// until ctx is done. Returns the current version after waking. Callers
-// should check ctx.Err() to distinguish "new version" from "ctx fired".
-//
-// stateMu is held only briefly to snapshot the current `updated` chan;
-// the long blocking select happens with the mutex released. The
-// renewer's update of cert/version and the chan swap happen together
-// under stateMu, so a wait that observed an old version is guaranteed
-// to be sleeping on the same chan the renewer will close.
-func (c *ServerCertCacheEntry) WaitForUpdate(ctx context.Context, seen uint64) uint64 {
-	c.stateMu.Lock()
-	if c.version != seen {
-		v := c.version
-		c.stateMu.Unlock()
-		return v
-	}
-	ch := c.updated
-	c.stateMu.Unlock()
-
-	select {
-	case <-ch:
-	case <-ctx.Done():
-	}
-
-	c.stateMu.Lock()
-	v := c.version
-	c.stateMu.Unlock()
-	return v
 }
 
 // renew obtains a fresh cert from ACME if the cached cert has expired or
@@ -301,7 +105,7 @@ func (c *ServerCertCacheEntry) WaitForUpdate(ctx context.Context, seen uint64) u
 // ctx.Err() without contacting ACME (the underlying lego client is not
 // context-aware, so cancellation is checked between operations rather
 // than mid-flight).
-func (s *CertDXServer) renew(ctx context.Context, c *ServerCertCacheEntry, retry bool) (bool, error) {
+func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -356,7 +160,7 @@ func (s *CertDXServer) renew(ctx context.Context, c *ServerCertCacheEntry, retry
 	// honor ctx instead of blocking forever on a buffered send that no
 	// one will receive.
 	select {
-	case s.cacheFile.update <- &ServerCacheFileEntry{
+	case s.certStore.update <- &certStoreEntry{
 		Domains: c.domains,
 		Cert:    newCert,
 	}:
@@ -368,7 +172,7 @@ func (s *CertDXServer) renew(ctx context.Context, c *ServerCertCacheEntry, retry
 	return true, nil
 }
 
-func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *ServerCertCacheEntry) {
+func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry) {
 	logging.Info("Start subscribing cert: %v", c.domains)
 	defer logging.Info("Stopped subscribing cert: %v", c.domains)
 
@@ -397,8 +201,8 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *ServerCer
 // subscriber kicks off a per-entry renewal goroutine whose context is
 // derived from rootCtx (so server Stop drains it cleanly); further
 // subscribers just bump the refcount.
-func (s *CertDXServer) Subscribe(c *ServerCertCacheEntry) {
-	if c.Subscribing.Add(1) == 1 {
+func (s *CertDXServer) subscribe(c *certEntry) {
+	if c.subscribing.Add(1) == 1 {
 		ctx, cancel := context.WithCancel(s.rootCtx)
 		c.stateMu.Lock()
 		c.cancelRenew = cancel
@@ -409,8 +213,8 @@ func (s *CertDXServer) Subscribe(c *ServerCertCacheEntry) {
 
 // Release drops a consumer. When the last consumer leaves, the renewal
 // goroutine's context is cancelled and it winds down.
-func (s *CertDXServer) Release(c *ServerCertCacheEntry) {
-	if c.Subscribing.Add(-1) == 0 {
+func (s *CertDXServer) release(c *certEntry) {
+	if c.subscribing.Add(-1) == 0 {
 		c.stateMu.Lock()
 		cancel := c.cancelRenew
 		c.cancelRenew = nil
@@ -421,8 +225,8 @@ func (s *CertDXServer) Release(c *ServerCertCacheEntry) {
 	}
 }
 
-func (s *CertDXServer) IsSubcribing(c *ServerCertCacheEntry) bool {
-	return c.Subscribing.Load() != 0
+func (s *CertDXServer) isSubscribing(c *certEntry) bool {
+	return c.subscribing.Load() != 0
 }
 
 // Stop signals every server goroutine to wind down. It is safe to call
