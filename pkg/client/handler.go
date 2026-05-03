@@ -84,12 +84,12 @@ func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification)
 		args := strings.Fields(c.ReloadCommand)
 		err := exec.Command(args[0], args[1:]...).Run()
 		if err != nil {
-			logging.Error("Failed executing command %s, err: %s", c.ReloadCommand, err)
+			logging.Error("Failed executing command %s: %s", c.ReloadCommand, err)
 		}
 	}
 
 	return
 
 ERR:
-	logging.Error("Failed to save cert file, err: %s", err)
+	logging.Error("Failed to save cert file: %s", err)
 }

@@ -87,7 +87,7 @@ func (s *CertStore) listenUpdate(ctx context.Context) {
 		case fe := <-s.update:
 			logging.Info("Update domains cache to file")
 			if err := s.saveEntry(fe); err != nil {
-				logging.Warn("Update domains cache to file failed, err: %s", err)
+				logging.Warn("Update domains cache to file failed: %s", err)
 			}
 		}
 	}
