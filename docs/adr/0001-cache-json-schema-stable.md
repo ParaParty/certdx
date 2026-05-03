@@ -29,7 +29,10 @@ the post-refactor server.
 
 Concretely:
 
-- The map key type is `domain.Key` (`uint64`, FNV-1a sum) and stays so.
+- The map key type is `domain.Key` (`uint64`) and stays so. The v0.5
+  refactor canonicalizes input domains before hashing: lower-case, strip
+  trailing root dots, drop empty values, de-duplicate, sort, then FNV-1a
+  the NUL-separated domain list.
 - The value shape (`ServerCacheFileEntry { Domains []string; Cert
   CertT }`) and `CertT` field tags stay so.
 - The file is written with `os.WriteFile` at mode `0o600` next to the

@@ -8,6 +8,7 @@ package domain
 import (
 	"errors"
 	"hash/fnv"
+	"sort"
 	"strings"
 )
 
@@ -21,26 +22,40 @@ var ErrNotAllowed = errors.New("domain not allowed")
 // to use as a map key for cert-cache lookups.
 type Key uint64
 
-// AsKey hashes a slice of domain names into a Key. The hash is order-
-// insensitive: AsKey([]string{"a", "b"}) == AsKey([]string{"b", "a"}).
+// AsKey hashes a slice of domain names into a Key. The input is canonicalized
+// before hashing, so case, trailing root dots, duplicates, and input order do
+// not affect the result.
 func AsKey(domains []string) Key {
-	var h uint64 = 0
+	canon := make([]string, 0, len(domains))
+	seen := make(map[string]struct{}, len(domains))
 	for _, d := range domains {
-		hf := fnv.New64a()
-		hf.Write([]byte(d))
-		h += hf.Sum64()
+		d = normalizeName(d)
+		if d == "" {
+			continue
+		}
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
+		canon = append(canon, d)
 	}
-	return Key(h)
+	sort.Strings(canon)
+
+	h := fnv.New64a()
+	h.Write([]byte(strings.Join(canon, "\x00")))
+	return Key(h.Sum64())
 }
 
 // IsSubdomain reports whether domain is one of allowedDomains, or a subdomain
-// of any of them. Exact matches and dot-prefixed suffix matches both count.
+// of any of them. Matching is case-insensitive and ignores a trailing root dot.
 func IsSubdomain(domain string, allowedDomains []string) bool {
+	d := normalizeName(domain)
 	for _, allowedDomain := range allowedDomains {
-		if allowedDomain == domain {
+		parent := normalizeName(allowedDomain)
+		if d == parent {
 			return true
 		}
-		if strings.HasSuffix(domain, "."+allowedDomain) {
+		if strings.HasSuffix(d, "."+parent) {
 			return true
 		}
 	}
@@ -62,4 +77,8 @@ func AllAllowed(allowedList []string, toCheck []string) bool {
 // IsSubdomain.
 func Allowed(allowedList []string, toCheck string) bool {
 	return IsSubdomain(toCheck, allowedList)
+}
+
+func normalizeName(name string) string {
+	return strings.ToLower(strings.TrimSuffix(name, "."))
 }
