@@ -202,11 +202,22 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 // derived from rootCtx (so server Stop drains it cleanly); further
 // subscribers just bump the refcount.
 func (s *CertDXServer) subscribe(c *certEntry) {
-	if c.subscribing.Add(1) == 1 {
-		ctx, cancel := context.WithCancel(s.rootCtx)
-		c.stateMu.Lock()
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+		start  bool
+	)
+
+	c.stateMu.Lock()
+	if c.subscribing == 0 {
+		ctx, cancel = context.WithCancel(s.rootCtx)
 		c.cancelRenew = cancel
-		c.stateMu.Unlock()
+		start = true
+	}
+	c.subscribing++
+	c.stateMu.Unlock()
+
+	if start {
 		go s.subscribeCertCacheEntry(ctx, c)
 	}
 }
@@ -214,19 +225,29 @@ func (s *CertDXServer) subscribe(c *certEntry) {
 // Release drops a consumer. When the last consumer leaves, the renewal
 // goroutine's context is cancelled and it winds down.
 func (s *CertDXServer) release(c *certEntry) {
-	if c.subscribing.Add(-1) == 0 {
-		c.stateMu.Lock()
-		cancel := c.cancelRenew
+	var cancel context.CancelFunc
+
+	c.stateMu.Lock()
+	if c.subscribing > 0 {
+		c.subscribing--
+	}
+	if c.subscribing == 0 {
+		cancel = c.cancelRenew
 		c.cancelRenew = nil
 		c.stateMu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
+	} else {
+		c.stateMu.Unlock()
+	}
+
+	if cancel != nil {
+		cancel()
 	}
 }
 
 func (s *CertDXServer) isSubscribing(c *certEntry) bool {
-	return c.subscribing.Load() != 0
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return c.subscribing != 0
 }
 
 // Stop signals every server goroutine to wind down. It is safe to call
