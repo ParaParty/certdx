@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 
 	"pkg.para.party/certdx/pkg/domain"
 )
@@ -19,9 +18,9 @@ import (
 //     pair, the `updated` chan swap, and the cancelRenew handle that
 //     subscribe / release shuffle. It is held only briefly, so readers
 //     (Snapshot, WaitForUpdate) never block waiting on an ACME call to finish.
-//   - subscribing is the consumer refcount. subscribe transitions 0->1 spawn
-//     the renewal goroutine; release transitions 1->0 cancel it via
-//     cancelRenew.
+//   - subscribing is the consumer refcount, guarded by stateMu. subscribe
+//     transitions 0->1 spawn the renewal goroutine; release transitions 1->0
+//     cancel it via cancelRenew.
 type certEntry struct {
 	domains []string
 
@@ -33,7 +32,7 @@ type certEntry struct {
 	updated     chan struct{} // closed on each successful renewal, then replaced
 	cancelRenew context.CancelFunc
 
-	subscribing atomic.Int64
+	subscribing int64
 }
 
 type certCache struct {
