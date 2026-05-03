@@ -188,20 +188,29 @@ func (r *KubernetesCertificateUpdater) registerWatchAndHandlers(ctx context.Cont
 }
 
 func (r *KubernetesCertificateUpdater) startCertDXDaemon() error {
+	var run func() error
 	switch r.certDXDaemon.Config.Common.Mode {
 	case config.CLIENT_MODE_HTTP:
 		if r.certDXDaemon.Config.Http.MainServer.Url == "" {
 			return fmt.Errorf("http main server url should not be empty")
 		}
-		go r.certDXDaemon.HttpMain()
+		run = r.certDXDaemon.HttpMain
 	case config.CLIENT_MODE_GRPC:
 		if r.certDXDaemon.Config.GRPC.MainServer.Server == "" {
 			return fmt.Errorf("GRPC main server url should not be empty")
 		}
-		go r.certDXDaemon.GRPCMain()
+		run = r.certDXDaemon.GRPCMain
 	default:
 		return fmt.Errorf("not supported mode: %s", r.certDXDaemon.Config.Common.Mode)
 	}
+	go func() {
+		if err := run(); err != nil {
+			logging.Error("Daemon exited with error: %s", err)
+			// Cancel the daemon so the outer waitReplaceTask wakes up
+			// instead of hanging on its deadline.
+			r.certDXDaemon.Stop()
+		}
+	}()
 	return nil
 }
 

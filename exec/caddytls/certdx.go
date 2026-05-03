@@ -122,14 +122,18 @@ func (m *CertDXCaddyDaemon) Start() error {
 			return fmt.Errorf("http main_server url is required")
 		}
 		m.wg.Go(func() {
-			m.certDXDaemon.HttpMain()
+			if err := m.certDXDaemon.HttpMain(); err != nil {
+				caddy.Log().Named("certdx").Error("http daemon exited with error", zap.Error(err))
+			}
 		})
 	case config.CLIENT_MODE_GRPC:
 		if m.certDXDaemon.Config.GRPC.MainServer.Server == "" {
 			return fmt.Errorf("grpc main_server is required")
 		}
 		m.wg.Go(func() {
-			m.certDXDaemon.GRPCMain()
+			if err := m.certDXDaemon.GRPCMain(); err != nil {
+				caddy.Log().Named("certdx").Error("grpc daemon exited with error", zap.Error(err))
+			}
 		})
 	default:
 		return fmt.Errorf("unsupported mode %q", mode)

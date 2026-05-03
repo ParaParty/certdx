@@ -63,12 +63,16 @@ func init() {
 func main() {
 	go cli.WaitForShutdown(certDXDaemon.Stop, shutdownTimeout)
 
+	var err error
 	switch certDXDaemon.Config.Common.Mode {
 	case config.CLIENT_MODE_HTTP:
-		certDXDaemon.HttpMain()
+		err = certDXDaemon.HttpMain()
 	case config.CLIENT_MODE_GRPC:
-		certDXDaemon.GRPCMain()
+		err = certDXDaemon.GRPCMain()
 	default:
 		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Common.Mode)
+	}
+	if err != nil {
+		logging.Fatal("Daemon exited with error: %s", err)
 	}
 }

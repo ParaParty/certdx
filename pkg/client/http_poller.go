@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"time"
 
 	"pkg.para.party/certdx/pkg/api"
@@ -14,8 +15,10 @@ import (
 func (r *CertDXClientDaemon) httpRequestCert(domains []string) *api.HttpCertResp {
 	var resp *api.HttpCertResp
 	err := retry.Do(r.rootCtx, r.Config.Common.RetryCount, func() error {
-		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
-		var err error
+		certdxClient, err := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.MainServer))...)
+		if err != nil {
+			return fmt.Errorf("construct main http client: %w", err)
+		}
 		resp, err = certdxClient.GetCertCtx(r.rootCtx, domains)
 		return err
 	})
@@ -25,9 +28,11 @@ func (r *CertDXClientDaemon) httpRequestCert(domains []string) *api.HttpCertResp
 	logging.Warn("Failed to get cert %v from MainServer, err: %s", domains, err)
 
 	if r.Config.Http.StandbyServer.Url != "" {
-		certdxClient := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
 		err = retry.Do(r.rootCtx, r.Config.Common.RetryCount, func() error {
-			var err error
+			certdxClient, err := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(&r.Config.Http.StandbyServer))...)
+			if err != nil {
+				return fmt.Errorf("construct standby http client: %w", err)
+			}
 			resp, err = certdxClient.GetCertCtx(r.rootCtx, domains)
 			return err
 		})
@@ -79,8 +84,10 @@ func (r *CertDXClientDaemon) httpPollingCert(cert *watchingCert) {
 
 // HttpMain runs the HTTP polling client until Stop is called. It
 // launches one watchUpdate + one httpPollingCert per registered cert
-// and blocks until rootCtx is done.
-func (r *CertDXClientDaemon) HttpMain() {
+// and blocks until rootCtx is done. Returns nil today; the signature
+// matches GRPCMain so the entry-point dispatch is uniform and a
+// future http-side init failure can be surfaced the same way.
+func (r *CertDXClientDaemon) HttpMain() error {
 	r.startWatchers()
 
 	for _, c := range r.certs {
@@ -95,4 +102,5 @@ func (r *CertDXClientDaemon) HttpMain() {
 
 	logging.Info("Stopping Http client")
 	r.wg.Wait()
+	return nil
 }

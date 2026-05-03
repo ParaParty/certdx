@@ -54,16 +54,21 @@ type CertDXgRPCClient struct {
 	Received atomic.Pointer[chan struct{}]
 }
 
-func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]*watchingCert) *CertDXgRPCClient {
+func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]*watchingCert) (*CertDXgRPCClient, error) {
+	cfg, err := getMtlsConfig(server.CA, server.Certificate, server.Key)
+	if err != nil {
+		return nil, fmt.Errorf("configure mtls for %s: %w", server.Server, err)
+	}
+
 	c := &CertDXgRPCClient{
-		server: server,
-		certs:  certs,
+		server:  server,
+		certs:   certs,
+		tlsCred: credentials.NewTLS(cfg),
 	}
 	received := make(chan struct{})
 	c.Received.Store(&received)
 	c.Running.Store(false)
-	c.tlsCred = credentials.NewTLS(getMtlsConfig(server.CA, server.Certificate, server.Key))
-	return c
+	return c, nil
 }
 
 func sendStreamErr(ctx context.Context, errChan chan<- error, err error) {

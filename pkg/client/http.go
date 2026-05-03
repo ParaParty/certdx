@@ -18,31 +18,40 @@ type CertDXHttpClient struct {
 	Server     *config.ClientHttpServer
 }
 
-type CertDXHttpClientOption func(client *CertDXHttpClient)
+// CertDXHttpClientOption configures a CertDXHttpClient. Returning an
+// error lets options that do real I/O (e.g. loading mtls material) fail
+// the construction of the client instead of logging.Fatal-ing inside.
+type CertDXHttpClientOption func(client *CertDXHttpClient) error
 
 func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOption {
-	return func(client *CertDXHttpClient) {
+	return func(client *CertDXHttpClient) error {
 		client.Server = server
 
 		if server.AuthMethod == config.HTTP_AUTH_MTLS {
+			cfg, err := getMtlsConfig(server.CA, server.Certificate, server.Key)
+			if err != nil {
+				return fmt.Errorf("configure mtls for %s: %w", server.Url, err)
+			}
 			client.HttpClient.Transport = &http.Transport{
-				TLSClientConfig: getMtlsConfig(server.CA, server.Certificate, server.Key),
+				TLSClientConfig: cfg,
 			}
 		}
+		return nil
 	}
 }
 
 func WithCertDXInsecure() CertDXHttpClientOption {
-	return func(client *CertDXHttpClient) {
+	return func(client *CertDXHttpClient) error {
 		client.HttpClient.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
 			},
 		}
+		return nil
 	}
 }
 
-func MakeCertDXHttpClient(s ...CertDXHttpClientOption) *CertDXHttpClient {
+func MakeCertDXHttpClient(s ...CertDXHttpClientOption) (*CertDXHttpClient, error) {
 	ret := &CertDXHttpClient{
 		HttpClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -50,10 +59,12 @@ func MakeCertDXHttpClient(s ...CertDXHttpClientOption) *CertDXHttpClient {
 	}
 
 	for _, item := range s {
-		item(ret)
+		if err := item(ret); err != nil {
+			return nil, err
+		}
 	}
 
-	return ret
+	return ret, nil
 }
 
 func (c *CertDXHttpClient) makeGetCertRequest(ctx context.Context, domains []string) (*http.Request, error) {

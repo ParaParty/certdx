@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -55,18 +56,26 @@ type grpcStreamer struct {
 	sessionCancel context.CancelFunc
 }
 
-func newGRPCStreamer(d *CertDXClientDaemon) *grpcStreamer {
+func newGRPCStreamer(d *CertDXClientDaemon) (*grpcStreamer, error) {
+	mainClient, err := MakeCertDXgRPCClient(&d.Config.GRPC.MainServer, d.certs)
+	if err != nil {
+		return nil, fmt.Errorf("construct main grpc client: %w", err)
+	}
 	s := &grpcStreamer{
 		daemon:        d,
-		mainClient:    MakeCertDXgRPCClient(&d.Config.GRPC.MainServer, d.certs),
+		mainClient:    mainClient,
 		standbyExists: d.Config.GRPC.StandbyServer.Server != "",
 		stateChan:     make(chan GRPC_CLIENT_STATE, 1),
 	}
 	if s.standbyExists {
-		s.standbyClient = MakeCertDXgRPCClient(&d.Config.GRPC.StandbyServer, d.certs)
+		standbyClient, err := MakeCertDXgRPCClient(&d.Config.GRPC.StandbyServer, d.certs)
+		if err != nil {
+			return nil, fmt.Errorf("construct standby grpc client: %w", err)
+		}
+		s.standbyClient = standbyClient
 	}
 	s.sessionCtx, s.sessionCancel = context.WithCancel(d.rootCtx)
-	return s
+	return s, nil
 }
 
 // run is the dispatch loop. It reads state transitions off stateChan
@@ -262,11 +271,16 @@ func (s *grpcStreamer) handleRestart(sessionCtx context.Context) {
 // GRPCMain runs the gRPC SDS client (with failover) until Stop is
 // called. The five-state machine and its state transitions are
 // preserved; encapsulating it in grpcStreamer just makes the
-// dispatch loop and per-state logic easier to read.
-func (r *CertDXClientDaemon) GRPCMain() {
-	r.startWatchers()
+// dispatch loop and per-state logic easier to read. Returns an error
+// if the streamer cannot be constructed (e.g. mtls material missing
+// or invalid); a non-nil return means the daemon never started.
+func (r *CertDXClientDaemon) GRPCMain() error {
+	s, err := newGRPCStreamer(r)
+	if err != nil {
+		return err
+	}
 
-	s := newGRPCStreamer(r)
+	r.startWatchers()
 
 	r.wg.Add(1)
 	go s.run()
@@ -283,4 +297,5 @@ func (r *CertDXClientDaemon) GRPCMain() {
 		s.standbyClient.Kill()
 	}
 	r.wg.Wait()
+	return nil
 }
