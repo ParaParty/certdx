@@ -22,24 +22,13 @@ jobs:
           go-version: 1.26.0
           cache: true
 
-      - name: Test root module
-        run: go test -race -count=1 ./...
-
-      - name: Test exec/server
-        working-directory: exec/server
-        run: go test -race -count=1 ./...
-
-      - name: Test exec/client
-        working-directory: exec/client
-        run: go test -race -count=1 ./...
-
-      - name: Test exec/tools
-        working-directory: exec/tools
-        run: go test -race -count=1 ./...
-
-      - name: Test exec/caddytls
-        working-directory: exec/caddytls
-        run: go test -race -count=1 ./...
+      - name: Test all modules
+        run: |
+          set -e
+          for mod in . exec/server exec/client exec/tools exec/caddytls; do
+            echo "==> $mod"
+            (cd "$mod" && go test -race -count=1 ./...)
+          done
 
   e2e:
     name: end-to-end tests
