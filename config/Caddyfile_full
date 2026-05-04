@@ -1,7 +1,3 @@
-# certdx caddy
-
-## Caddyfile example
-```caddyfile
 {
     auto_https off
     certdx {
@@ -65,4 +61,3 @@ https://example.com {
         get_certificate certdx cert-id
      }
 }
-```

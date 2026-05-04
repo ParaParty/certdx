@@ -134,11 +134,12 @@ func (c *CertDXCaddyDaemon) UnmarshalHttpBlock(d *caddyfile.Dispenser) error {
 func (c *CertDXCaddyDaemon) unmarshalHttpServerBlock(s *config.ClientHttpServer, d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
+			directive := d.Val()
 			v, err := expectArg1(d)
 			if err != nil {
 				return err
 			}
-			switch d.Val() {
+			switch directive {
 			case dirURL:
 				s.Url = v
 			case dirAuthMethod:
@@ -152,7 +153,7 @@ func (c *CertDXCaddyDaemon) unmarshalHttpServerBlock(s *config.ClientHttpServer,
 			case dirKey:
 				s.Key = v
 			default:
-				return d.Errf("unrecognized subdirective for http server: %s", d.Val())
+				return d.Errf("unrecognized subdirective for http server: %s", directive)
 			}
 		}
 	}
@@ -183,11 +184,12 @@ func (c *CertDXCaddyDaemon) UnmarshalGRPCBlock(d *caddyfile.Dispenser) error {
 func (c *CertDXCaddyDaemon) unmarshalGRPCServerBlock(s *config.ClientGRPCServer, d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
+			directive := d.Val()
 			v, err := expectArg1(d)
 			if err != nil {
 				return err
 			}
-			switch d.Val() {
+			switch directive {
 			case dirServerAddr:
 				s.Server = v
 			case dirCA:
@@ -197,7 +199,7 @@ func (c *CertDXCaddyDaemon) unmarshalGRPCServerBlock(s *config.ClientGRPCServer,
 			case dirKey:
 				s.Key = v
 			default:
-				return d.Errf("unrecognized subdirective for grpc server: %s", d.Val())
+				return d.Errf("unrecognized subdirective for grpc server: %s", directive)
 			}
 		}
 	}
