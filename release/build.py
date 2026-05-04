@@ -135,8 +135,14 @@ def main() -> None:
     # `-gcflags all=-N -l`, so the dev caddy binary is unstripped and
     # optimizer-friendly to attach a debugger to.
     caddy_env_extra = 'XCADDY_DEBUG=1 ' if dev_mode else ''
+    # GOWORK=off — xcaddy's temp build dir is created under release/, which
+    # lives inside the repo's go.work. Without this, Go enters workspace
+    # mode, finds ./exec/caddytls in the workspace, and bypasses the
+    # --replace directives we just passed (occasionally leading to
+    # "cannot find module" surprises). Setting GOWORK=off keeps xcaddy
+    # in module mode where the --replace flags actually take effect.
     subprocess.run(
-        f'''env {caddy_env_extra}GOOS="{goos}" GOARCH="{goarch}" CGO_ENABLED=0 '''
+        f'''env GOWORK=off {caddy_env_extra}GOOS="{goos}" GOARCH="{goarch}" CGO_ENABLED=0 '''
         f'''{xcaddy_exec} build '''
         f'''--with pkg.para.party/certdx/exec/caddytls=../exec/caddytls '''
         f'''--replace pkg.para.party/certdx=../ '''

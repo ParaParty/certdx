@@ -14,8 +14,44 @@ that includes it with [`xcaddy`](https://github.com/caddyserver/xcaddy):
 xcaddy build --with pkg.para.party/certdx/exec/caddytls
 ```
 
+That pulls the published version of the plugin and the matching
+`pkg.para.party/certdx` core from the module proxy.
+
 Official release archives `caddy_certdx_<os>_<arch>` already ship a Caddy
 binary built with this plugin.
+
+### Building from a local checkout
+
+If you are iterating on the plugin or on `pkg.para.party/certdx` itself,
+point xcaddy at both the plugin source AND the parent module. The two
+flags are needed together — without `--replace`, xcaddy resolves the
+parent `pkg.para.party/certdx` import via the registry instead of your
+checkout, and you'll silently build against the published version:
+
+```sh
+GOWORK=off xcaddy build \
+  --with pkg.para.party/certdx/exec/caddytls=./exec/caddytls \
+  --replace pkg.para.party/certdx=./
+```
+
+`GOWORK=off` is required because xcaddy creates its temp build dir
+inside the repo (which sits in the `go.work` workspace). Without it,
+Go enters workspace mode and bypasses the `--replace` flags, leading
+to "cannot find module" failures or silent fallback to the registry
+version. `release/build.py --dev` sets this for you.
+
+To verify the resulting binary actually picked up your local code,
+inspect its embedded build metadata:
+
+```sh
+go version -m ./caddy | grep certdx
+```
+
+Both `pkg.para.party/certdx` and `pkg.para.party/certdx/exec/caddytls`
+should show `=> /path/to/your/checkout (devel)` — the `=>` line is
+the proof that `--replace` was honored. The recorded version may
+still read `vX.Y.Z` (the latest registry tag), but the bound source
+is from your checkout.
 
 ## Caddyfile syntax
 

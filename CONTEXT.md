@@ -99,6 +99,35 @@ term enters the codebase.
 - **Counter**: the `mtls/counter.txt` file holding the next CA serial
   number. Only used by `certdx_tools make-server` / `make-client`.
 
+## Repository layout
+
+The repo is a Go workspace (`go.work` at the root) of six modules:
+
+- root (`pkg.para.party/certdx`) — the library packages under `pkg/`.
+- `exec/server`, `exec/client`, `exec/tools` — the standalone binaries.
+  Each has its own `go.mod` so heavy per-binary deps (e.g. k8s client in
+  `exec/tools`) stay out of the root module.
+- `exec/caddytls` — the Caddy plugin, kept as its own module so its
+  Caddy / certmagic dependency tree never leaks into the others.
+- `test/e2e` — the end-to-end harness, isolated so test deps stay out of
+  prod modules.
+
+Every submodule has a `replace pkg.para.party/certdx => ../..` directive
+for environments that don't load the workspace (e.g. xcaddy's temp
+build dir). For local development the `go.work` is what makes
+`go build ./...` from any subdirectory resolve `pkg.para.party/certdx`
+to the local checkout — no replace plumbing required.
+
+When iterating on the Caddy plugin, xcaddy must be told about the parent
+module explicitly (it does not honor `go.work`):
+
+    xcaddy build \
+      --with pkg.para.party/certdx/exec/caddytls=./exec/caddytls \
+      --replace pkg.para.party/certdx=./
+
+`release/build.py` does this for releases. See `docs/caddytls.md` for
+the full xcaddy invocation.
+
 ## Wire contracts (must-not-break)
 
 - **HTTP API**: `POST /` on the server with a JSON body
