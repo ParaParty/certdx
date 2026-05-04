@@ -50,7 +50,10 @@ def host_target() -> tuple[str, str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    doc_lines = (__doc__ or "").strip().splitlines()
+    parser = argparse.ArgumentParser(
+        description=doc_lines[0] if doc_lines else ""
+    )
     parser.add_argument('goos', nargs='?',
                         help="target GOOS (default: `go env GOOS`)")
     parser.add_argument('goarch', nargs='?',
