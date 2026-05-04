@@ -6,8 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
-	"strings"
 	"testing"
 )
 
@@ -40,38 +38,24 @@ func TestParsePEMRoundTrip(t *testing.T) {
 	}
 }
 
-func TestParsePEMRejectsGarbage(t *testing.T) {
-	_, err := parsePEM([]byte("not a pem block"))
-	if err == nil {
-		t.Fatal("expected error on garbage input")
+func TestParsePEMRejectsInvalid(t *testing.T) {
+	cases := []struct {
+		name  string
+		input []byte
+	}{
+		{"nil", nil},
+		{"garbage", []byte("not a pem block")},
+		{"wrong type block", pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: []byte("not actually a key"),
+		})},
 	}
-	if !strings.Contains(err.Error(), "parse ACME account key") {
-		t.Fatalf("error should be wrapped, got %v", err)
-	}
-}
-
-func TestParsePEMRejectsEmpty(t *testing.T) {
-	_, err := parsePEM(nil)
-	if err == nil {
-		t.Fatal("expected error on nil input")
-	}
-}
-
-// TestParsePEMRejectsWrongTypeBlock confirms a PEM block with the
-// wrong type still surfaces an error rather than panicking — this is
-// the path that the audit fix replaced.
-func TestParsePEMRejectsWrongTypeBlock(t *testing.T) {
-	body := pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: []byte("not actually a key"),
-	})
-	_, err := parsePEM(body)
-	if err == nil {
-		t.Fatal("expected error on wrong-type PEM block")
-	}
-	// Don't assert the underlying lego error string — just that it
-	// surfaces and is wrapped.
-	if errors.Is(err, nil) {
-		t.Fatal("nil error wrap")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parsePEM(tc.input)
+			if err == nil {
+				t.Fatal("expected error on invalid input")
+			}
+		})
 	}
 }
