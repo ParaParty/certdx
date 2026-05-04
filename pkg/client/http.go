@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
+	"io"
+	
 	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
 )
@@ -87,7 +88,10 @@ func (c *CertDXHttpClient) GetCertCtx(ctx context.Context, domains []string) (*a
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != 200 {
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, fmt.Errorf("POST '%s' status: %s", c.Server.Url, resp.Status)
 	}
 
