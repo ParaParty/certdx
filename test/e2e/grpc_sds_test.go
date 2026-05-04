@@ -22,7 +22,6 @@ func TestGRPCSDS(t *testing.T) {
 		AllowedDomains: []string{"example.test"},
 		GRPCEnabled:    true,
 		GRPCListen:     fmt.Sprintf(":%d", port),
-		GRPCNames:      []string{"localhost"},
 	})
 
 	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "-d")

@@ -80,4 +80,3 @@ token = "KFCCrazyThursdayVMe50"
 [gRPCSDSServer]
 enabled = true
 listen = ":11451"
-names = ["grpcserver.example.com"]

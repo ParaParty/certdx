@@ -35,7 +35,6 @@ type ServerOpts struct {
 	// gRPC SDS knobs.
 	GRPCEnabled bool
 	GRPCListen  string
-	GRPCNames   []string
 }
 
 const serverTOMLTpl = `[ACME]
@@ -59,7 +58,6 @@ token = "{{.HTTPToken}}"
 [gRPCSDSServer]
 enabled = {{.GRPCEnabled}}
 listen = "{{.GRPCListen}}"
-names = [{{range $i, $d := .GRPCNames}}{{if $i}}, {{end}}"{{$d}}"{{end}}]
 `
 
 // WriteServerConfig renders <dir>/server.toml and seeds an empty cache.json

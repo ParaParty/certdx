@@ -41,7 +41,6 @@ func grpcServerOpts(port int) harness.ServerOpts {
 		RenewTimeLeft:  16 * time.Second,
 		GRPCEnabled:    true,
 		GRPCListen:     fmt.Sprintf(":%d", port),
-		GRPCNames:      []string{"localhost"},
 	}
 }
 

@@ -92,8 +92,7 @@ certificates with `certdx_tools` (see [mtls](#mtls) below). Clients use
 
 ### gRPC SDS
 
-Set `gRPCSDSServer.enabled = true` and provide `names` for the SDS server
-certificate. mTLS is mandatory; reuse the same `mtls/` directory.
+Set `gRPCSDSServer.enabled = true`. mTLS is mandatory; reuse the same `mtls/` directory.
 
 Consumers:
 

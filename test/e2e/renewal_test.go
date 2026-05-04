@@ -83,7 +83,6 @@ func TestCertRenewalGRPC(t *testing.T) {
 		RenewTimeLeft:  renewLeft,
 		GRPCEnabled:    true,
 		GRPCListen:     fmt.Sprintf(":%d", port),
-		GRPCNames:      []string{"localhost"},
 	})
 
 	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "-d")

@@ -215,9 +215,8 @@ func (c *HttpServerConfig) Validate() error {
 }
 
 type GRPCServerConfig struct {
-	Enabled bool     `toml:"enabled" json:"enabled,omitempty"`
-	Listen  string   `toml:"listen" json:"listen,omitempty"`
-	Names   []string `toml:"names" json:"names,omitempty"`
+	Enabled bool   `toml:"enabled" json:"enabled,omitempty"`
+	Listen  string `toml:"listen" json:"listen,omitempty"`
 }
 
 func (c *GRPCServerConfig) Validate() error {
@@ -225,9 +224,6 @@ func (c *GRPCServerConfig) Validate() error {
 		return nil
 	}
 
-	if len(c.Names) == 0 {
-		return fmt.Errorf("no grpc server name")
-	}
 	return nil
 }
 

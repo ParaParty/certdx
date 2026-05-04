@@ -130,8 +130,7 @@ see [tools.md](tools.md).
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `enabled` | bool | `false` | Enable the gRPC SDS server. |
-| `listen` | string | `":10002"` | Listen address. |
-| `names` | string list | `[]` | SANs for the SDS server certificate (required when enabled). |
+| `listen` | string | `":10002"` | Listen address |
 
 The gRPC endpoint always uses mTLS. It loads its certificate from
 `mtls/server.pem` and `mtls/server.key` and trusts client certificates signed
@@ -157,6 +156,5 @@ The config is checked on startup; any failure aborts the process.
 - `challenge type: <x> not supported` — must be `dns` or `http`.
 - `ACME provider not supported: <x>` — see the table above.
 - `secure http server with no name` — set `HttpServer.names` when `secure = true`.
-- `no grpc server name` — set `gRPCSDSServer.names` when enabled.
 - `DnsProvider Cloudflare: empty Email or APIKey` — provide either the
   global key pair or the auth/zone token pair.
