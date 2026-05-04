@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,7 +49,7 @@ func TestHttpCertRespJSONRoundTrip(t *testing.T) {
 
 	// Spot-check tag names — drift here breaks mixed-version deploys.
 	for _, want := range []string{`"renewTimeLeft":`, `"fullchain":`, `"key":`, `"err":`} {
-		if !contains(string(b), want) {
+		if !strings.Contains(string(b), want) {
 			t.Errorf("missing wire tag %s in %s", want, b)
 		}
 	}
@@ -77,13 +78,4 @@ func TestHttpCertRespErrTagSurvives(t *testing.T) {
 	if len(resp.FullChain) != 0 || len(resp.Key) != 0 {
 		t.Fatalf("expected empty cert/key on rejection, got fullchain=%d key=%d", len(resp.FullChain), len(resp.Key))
 	}
-}
-
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }
