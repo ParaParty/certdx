@@ -46,6 +46,12 @@ func GenerateChain(tb testing.TB, cwd string, serverDNS []string, clientNames ..
 		tb.Fatalf("mkdir mtls: %s", err)
 	}
 
+	// Trigger the (potentially slow, one-shot) binary build before
+	// starting the per-command context timer; on a cold CI runner the
+	// initial `go build` of all binaries can otherwise consume the
+	// entire 30s budget.
+	ToolsBin(tb)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
