@@ -7,8 +7,8 @@ import (
 )
 
 type ResourceTypeRegions struct {
-	ResourceType string   `toml:"resourceType" json:"ResourceType,omitnil,omitempty" name:"resource_type"`
-	Regions      []string `toml:"regions" json:"Regions,omitnil,omitempty" name:"regions"`
+	ResourceType string   `toml:"resourceType" json:"ResourceType,omitempty" name:"resource_type"`
+	Regions      []string `toml:"regions" json:"Regions,omitempty" name:"regions"`
 }
 
 type ClientCertification struct {
