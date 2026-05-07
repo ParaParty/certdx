@@ -143,25 +143,31 @@ def build_certdx(repo_root: Path, output_dir: Path,
 def build_caddy(repo_root: Path, output_dir: Path,
                 goos: str, goarch: str, dev_mode: bool,
                 xcaddy_exec: Path) -> None:
-    # XCADDY_DEBUG=1 swaps xcaddy's default `-ldflags -w -s -trimpath` for
-    # `-gcflags all=-N -l`, so the dev caddy binary is unstripped and
-    # optimizer-friendly to attach a debugger to.
-    caddy_env_extra = 'XCADDY_DEBUG=1 ' if dev_mode else ''
+    plugin = 'pkg.para.party/certdx/exec/caddytls'
     ext = '.exe' if goos == 'windows' else ''
-    # GOWORK=off — xcaddy's temp build dir is created under release/, which
-    # lives inside the repo's go.work. Without this, Go enters workspace
-    # mode, finds ./exec/caddytls in the workspace, and bypasses the
-    # --replace directives we just passed (occasionally leading to
-    # "cannot find module" surprises). Setting GOWORK=off keeps xcaddy
-    # in module mode where the --replace flags actually take effect.
-    subprocess.run(
-        f'''env GOWORK=off {caddy_env_extra}GOOS="{goos}" GOARCH="{goarch}" CGO_ENABLED=0 '''
-        f'''{xcaddy_exec} build '''
-        f'''--with pkg.para.party/certdx/exec/caddytls={repo_root / 'exec' / 'caddytls'} '''
-        f'''--replace pkg.para.party/certdx={repo_root} '''
-        f'''--output {output_dir}/caddy{ext}''',
-        shell=True, check=True,
-    )
+
+    env = {
+        'GOOS': goos,
+        'GOARCH': goarch,
+        'CGO_ENABLED': '0',
+    }
+
+    cmd = [str(xcaddy_exec), 'build',
+           '--output', f'{output_dir}/caddy{ext}']
+
+    if dev_mode:
+        # Local source replacement for testing unreleased changes.
+        # GOWORK=off prevents workspace mode from overriding --replace.
+        # XCADDY_DEBUG=1 keeps debug symbols and disables optimisation.
+        env['GOWORK'] = 'off'
+        env['XCADDY_DEBUG'] = '1'
+        cmd += ['--with', f'{plugin}={repo_root / "exec" / "caddytls"}',
+                '--replace', f'pkg.para.party/certdx={repo_root}']
+    else:
+        # Release builds fetch the published module from the Go proxy.
+        cmd += ['--with', plugin]
+
+    subprocess.run(cmd, env={**os.environ, **env}, check=True)
 
     if not dev_mode:
         copy_release_files(repo_root, output_dir, CADDY_COPY)
