@@ -119,7 +119,7 @@ def copy_release_files(repo_root: Path, output_dir: Path,
 
 def build_certdx(repo_root: Path, output_dir: Path,
                  goos: str, goarch: str, dev_mode: bool,
-                 commit_id: str, build_time: str) -> None:
+                 build_tag: str, build_time: str) -> None:
     # Symbol-stripping ldflags. Dev builds keep symbols so stack traces
     # and debuggers stay useful; release builds strip them to shrink the
     # final binaries.
@@ -131,7 +131,7 @@ def build_certdx(repo_root: Path, output_dir: Path,
             f'''cd {repo_root / source} && '''
             f'''env GOOS="{goos}" GOARCH="{goarch}" CGO_ENABLED=0 '''
             f'''go build -ldflags="{strip_flags}'''
-            f'''-X main.buildCommit={commit_id} -X \'main.buildDate={build_time}\'" '''
+            f'''-X main.buildTag={build_tag} -X 'main.buildDate={build_time}'" '''
             f'''-o {output_dir}/certdx_{exec_name}{ext}''',
             shell=True, check=True,
         )
@@ -197,8 +197,11 @@ def main() -> None:
 
     dev_mode = args.dev
 
-    commit_id = subprocess.run(
-        ['git', 'rev-parse', '--short', 'HEAD'], check=True, capture_output=True,
+    # Derive a version tag from `git describe`. Falls back to the bare
+    # commit hash when no annotated tag is reachable.
+    build_tag = subprocess.run(
+        ['git', 'describe', '--tags', '--always', '--dirty', '--match', 'v[0-9]*'],
+        check=True, capture_output=True,
     ).stdout.decode().strip()
 
     build_time = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d %H:%M')
@@ -215,7 +218,7 @@ def main() -> None:
     output_dir_caddy = release_path / f'caddy_certdx_{goos}_{goarch}'
 
     build_certdx(repo_root, output_dir,
-                 goos, goarch, dev_mode, commit_id, build_time)
+                 goos, goarch, dev_mode, build_tag, build_time)
     build_caddy(repo_root, output_dir_caddy,
                 goos, goarch, dev_mode, xcaddy_exec)
 

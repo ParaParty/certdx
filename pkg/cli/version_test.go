@@ -6,20 +6,20 @@ import (
 )
 
 func TestVersionString(t *testing.T) {
-	v := Version{Name: "server", Commit: "abc123", Date: "2026-05-01"}
+	v := Version{Name: "server", Tag: "v0.4.5", Date: "2026-05-01"}
 	got := v.String()
-	want := "Certdx server abc123, built at 2026-05-01"
+	want := "Certdx server v0.4.5, built at 2026-05-01"
 	if got != want {
 		t.Fatalf("Version.String:\n got:  %s\n want: %s", got, want)
 	}
 }
 
 func TestVersionFprintWritesNewline(t *testing.T) {
-	v := Version{Name: "client", Commit: "deadbeef", Date: "2026-05-04"}
+	v := Version{Name: "client", Tag: "v0.4.5-dirty", Date: "2026-05-04"}
 	var buf bytes.Buffer
 	v.Fprint(&buf)
 	got := buf.String()
-	want := "Certdx client deadbeef, built at 2026-05-04\n"
+	want := "Certdx client v0.4.5-dirty, built at 2026-05-04\n"
 	if got != want {
 		t.Fatalf("Version.Fprint:\n got:  %q\n want: %q", got, want)
 	}

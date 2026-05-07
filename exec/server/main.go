@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	buildCommit string
-	buildDate   string
+	buildTag  string
+	buildDate string
 )
 
 const shutdownTimeout = 30 * time.Second
@@ -32,7 +32,7 @@ var cdxsrv *server.CertDXServer
 func init() {
 	flag.Parse()
 
-	ver := cli.Version{Name: "server", Commit: buildCommit, Date: buildDate}
+	ver := cli.Version{Name: "server", Tag: buildTag, Date: buildDate}
 
 	if *help {
 		flag.PrintDefaults()

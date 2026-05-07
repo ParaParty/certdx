@@ -13,15 +13,15 @@ import (
 // Version is the build-time identity of a certdx binary. The fields are
 // usually populated via `-ldflags` on the build target.
 type Version struct {
-	Name   string
-	Commit string
-	Date   string
+	Name string
+	Tag  string
+	Date string
 }
 
 // String formats the version like
-// "Certdx server abc123, built at 2026-05-01".
+// "Certdx server v0.4.5-dirty, built at 2026-05-07 07:55".
 func (v Version) String() string {
-	return fmt.Sprintf("Certdx %s %s, built at %s", v.Name, v.Commit, v.Date)
+	return fmt.Sprintf("Certdx %s %s, built at %s", v.Name, v.Tag, v.Date)
 }
 
 // Print writes the version to stdout followed by a newline.

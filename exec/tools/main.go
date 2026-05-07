@@ -14,8 +14,8 @@ import (
 
 // Populated via -ldflags at build time.
 var (
-	buildCommit string
-	buildDate   string
+	buildTag  string
+	buildDate string
 )
 
 // taskFunc is the shared signature implemented by every sub-command.
@@ -72,7 +72,7 @@ var groups = []commandGroup{
 }
 
 func main() {
-	ver := cli.Version{Name: "tools", Commit: buildCommit, Date: buildDate}
+	ver := cli.Version{Name: "tools", Tag: buildTag, Date: buildDate}
 
 	args := os.Args[1:]
 	if len(args) == 0 {

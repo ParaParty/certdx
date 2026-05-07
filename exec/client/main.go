@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	buildCommit string
-	buildDate   string
+	buildTag  string
+	buildDate string
 )
 
 const shutdownTimeout = 30 * time.Second
@@ -32,7 +32,7 @@ var certDXDaemon *client.CertDXClientDaemon
 func init() {
 	flag.Parse()
 
-	ver := cli.Version{Name: "client", Commit: buildCommit, Date: buildDate}
+	ver := cli.Version{Name: "client", Tag: buildTag, Date: buildDate}
 
 	if *help {
 		flag.PrintDefaults()
