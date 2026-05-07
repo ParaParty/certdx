@@ -6,7 +6,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 )
 
@@ -27,9 +26,4 @@ func (v Version) String() string {
 // Print writes the version to stdout followed by a newline.
 func (v Version) Print() {
 	fmt.Fprintln(os.Stdout, v.String())
-}
-
-// Fprint writes the version to w followed by a newline.
-func (v Version) Fprint(w io.Writer) {
-	fmt.Fprintln(w, v.String())
 }

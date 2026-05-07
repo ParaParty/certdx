@@ -210,7 +210,7 @@ def main() -> None:
         check=True, capture_output=True,
     ).stdout.decode().strip()
 
-    build_time = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d %H:%M')
+    build_time = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d %H:%M %Z')
 
     release_path = Path(__file__).resolve().parent
     repo_root = release_path.parent
