@@ -156,3 +156,75 @@ These are not active tasks, just likely next places to look:
 - Consider whether the client cert/key pair should become pair-atomic, not only
   per-file atomic. The current code prevents partial file writes, but readers
   can still observe a new cert with an old key between the two renames.
+
+## Code author notes
+
+The following captures the implementing agent's (Alphinaud) perspective on
+design decisions and known tricky areas. Cross-reference the sections above for
+factual context.
+
+### Design decisions worth knowing
+
+**`CertDXServer.Stop()` / `Wait()` shape (PR #61)**
+
+LDLDL asked for simplicity across three review rounds. The key request was to
+hide all ctx and goroutine management behind a minimal public API. The final
+shape: one root context, `Stop()` cancels it, `Wait()` blocks until drain. The
+HTTPS handler keeps swap-cert (`tls.Config.GetCertificate`) rather than a
+listener swap; SDS streams receive `rootCtx` directly so they exit on server
+shutdown without a separate kill channel. If this pattern gets extended, keep
+the rule: hidden ctx is better than exposing ctx via parameter or accessor.
+
+**gRPC stream ctx naming (PR #64)**
+
+The original code had ambiguous `ctx = stream.Context()` reassignments that
+silently shadowed the caller's context in some paths. The fix is naming
+discipline: distinguish the parent ctx (passed in) from the stream-local ctx at
+declaration time. Never reassign the caller's `ctx` inside `Stream()`. If
+future work adds a second stream or nests calls, follow the same discipline or
+the cancel propagation breaks in subtle ways.
+
+**Atomic cert/key writes (PR #65)**
+
+Standalone client uses temp-file + rename per file. This prevents partial-write
+races on individual files. The open gap: a reader between the two renames can
+see new cert + old key. This is low-risk today because cert rotation happens
+well before the pair matters in practice. If key pinning or mTLS is added for
+clients, upgrade to pair-atomic writes (staging dir rename, or a per-domain
+lockfile).
+
+**`GOWORK=off` for xcaddy builds (PR #66)**
+
+The `go.work` workspace is tracked intentionally, but xcaddy's module graph
+resolution doesn't understand workspace files. `release/build.py` sets
+`GOWORK=off` before invoking xcaddy so the build sees `go.mod`-declared
+replacements only. If `go.work` is ever restructured or a new module added,
+verify the xcaddy build still passes under `GOWORK=off` before merging.
+
+**Nested module tagging lockstep**
+
+When publishing a new `exec/caddytls` release, the root module tag and the
+nested tag (`exec/caddytls/vX.Y.Z`) must be pushed together. Pushing only the
+root tag leaves xcaddy consumers resolving the old nested version with no
+visible error. The tag recipe is in the section above; consider adding it to
+`docs/release.md` when that doc is written.
+
+### Tricky areas
+
+- The txc updater daemon runs in a goroutine after init. An init failure must
+  propagate via a dedicated error channel, not only `Stop()`, because the
+  `WaitGroup` counter does not drop until handlers fire. See PR #14 audit notes.
+- The retry helper off-by-one (PR #59) was subtle: the loop ran `n+1` times for
+  `maxRetry=n`. If retry logic is extended, add a table-driven test that counts
+  actual invocations.
+- `pkg/client/grpc_streamer.go` failover is session-scoped by design. Each
+  `Stream()` call gets its own send guard and error channel. Reintroducing a
+  shared sentinel or a cross-session cancel will break failover silently.
+
+### Things I would look at next
+
+- Pair-atomic cert/key writes (see above).
+- A `docs/release.md` covering the tag lockstep recipe so it isn't only in
+  commit messages and this handoff.
+- Expanding e2e coverage of the Caddy plugin: the current e2e tests do not
+  exercise the Caddy plugin path end-to-end.
