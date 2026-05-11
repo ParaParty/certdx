@@ -13,5 +13,6 @@ Reference:
 - [Client](client.md) — every option in `client_config.toml`.
 - [Caddy plugin](caddytls.md) — Caddyfile syntax.
 - [Tools](tools.md) — `certdx_tools` subcommands.
+- [Handoff](handoff.md) — current development state and continuation notes.
 
 External: [DeepWiki](https://deepwiki.com/ParaParty/certdx).
