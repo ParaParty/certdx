@@ -49,13 +49,17 @@ func TestEnsureParentDirReportsExisting(t *testing.T) {
 	}
 }
 
-func TestWriteFileAtomicCreatesAndChmods(t *testing.T) {
+func TestPrepareTempFileCreatesAndChmods(t *testing.T) {
 	root := t.TempDir()
 	p := filepath.Join(root, "cert.pem")
 	want := []byte("PEM-fullchain")
 
-	if err := writeFileAtomic(p, want, 0o600); err != nil {
-		t.Fatalf("writeFileAtomic: %v", err)
+	tmp, err := prepareTempFile(root, "cert.pem", want, 0o600)
+	if err != nil {
+		t.Fatalf("prepareTempFile: %v", err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		t.Fatalf("rename: %v", err)
 	}
 	got, err := os.ReadFile(p)
 	if err != nil {
@@ -73,14 +77,18 @@ func TestWriteFileAtomicCreatesAndChmods(t *testing.T) {
 	}
 }
 
-func TestWriteFileAtomicReplacesExisting(t *testing.T) {
+func TestPrepareTempFileReplacesExisting(t *testing.T) {
 	root := t.TempDir()
 	p := filepath.Join(root, "cert.pem")
 	if err := os.WriteFile(p, []byte("old"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := writeFileAtomic(p, []byte("new"), 0o600); err != nil {
-		t.Fatalf("writeFileAtomic: %v", err)
+	tmp, err := prepareTempFile(root, "cert.pem", []byte("new"), 0o600)
+	if err != nil {
+		t.Fatalf("prepareTempFile: %v", err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		t.Fatalf("rename: %v", err)
 	}
 	got, err := os.ReadFile(p)
 	if err != nil {
@@ -95,18 +103,15 @@ func TestWriteFileAtomicReplacesExisting(t *testing.T) {
 	}
 }
 
-// TestWriteFileAtomicCleansTempOnError exercises the deferred cleanup
-// path: pointing at a non-writable parent should fail rename and leave
-// no `.certdx-*` stragglers in the *target* dir. We can't easily force
-// a rename failure without root-owned dirs, so we instead point at a
-// non-existent dir and confirm the error surfaces cleanly.
-func TestWriteFileAtomicMissingDir(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "does-not-exist", "cert.pem")
-	err := writeFileAtomic(missing, []byte("x"), 0o600)
+// TestPrepareTempFileMissingDir exercises the error path: pointing at a
+// non-existent dir should fail on CreateTemp and surface a "create temp
+// file:" wrapped error, leaving no stray files behind.
+func TestPrepareTempFileMissingDir(t *testing.T) {
+	missingDir := filepath.Join(t.TempDir(), "does-not-exist")
+	_, err := prepareTempFile(missingDir, "cert.pem", []byte("x"), 0o600)
 	if err == nil {
 		t.Fatal("expected error for missing parent dir")
 	}
-	// Wrapped in "create temp file:" because os.CreateTemp fails first.
 	if !strings.Contains(err.Error(), "create temp file") {
 		t.Errorf("error wrap: %v", err)
 	}

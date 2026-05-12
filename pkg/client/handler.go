@@ -43,34 +43,56 @@ func ensureParentDir(file string) (exists bool, err error) {
 	return false, nil
 }
 
-// writeFileAtomic writes data to path with the given mode using a
-// temp-file-then-rename dance, so readers (e.g. an nginx reloading the
-// cert) never observe a torn file.
-func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".certdx-"+filepath.Base(path)+"-*")
+// prepareTempFile creates a temp file in dir, writes data with mode, and
+// returns its path. The caller is responsible for renaming or removing it.
+func prepareTempFile(dir, base string, data []byte, mode os.FileMode) (string, error) {
+	tmp, err := os.CreateTemp(dir, ".certdx-"+base+"-*")
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+		return "", fmt.Errorf("create temp file: %w", err)
 	}
-	tmpName := tmp.Name()
-	defer func() {
-		// If we never made it to rename, clean up the stray temp file.
-		_ = os.Remove(tmpName)
-	}()
-
+	name := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return fmt.Errorf("write temp file: %w", err)
+		os.Remove(name)
+		return "", fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
-		return fmt.Errorf("chmod temp file: %w", err)
+		os.Remove(name)
+		return "", fmt.Errorf("chmod temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
+		os.Remove(name)
+		return "", fmt.Errorf("close temp file: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("rename %s: %w", path, err)
+	return name, nil
+}
+
+// writeCertKeyPairAtomic writes fullchain and key to their respective paths
+// in a best-effort atomic fashion. Both temp files are fully prepared before
+// either rename is issued, so the window during which the on-disk cert/key
+// pair is inconsistent is reduced to the span of two sequential rename
+// syscalls rather than two full I/O operations.
+func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, key []byte) error {
+	certTmp, err := prepareTempFile(filepath.Dir(certPath), filepath.Base(certPath), fullchain, permCertFile)
+	if err != nil {
+		return fmt.Errorf("prepare cert: %w", err)
+	}
+	defer func() { _ = os.Remove(certTmp) }() // no-op after rename succeeds
+
+	keyTmp, err := prepareTempFile(filepath.Dir(keyPath), filepath.Base(keyPath), key, permKeyFile)
+	if err != nil {
+		return fmt.Errorf("prepare key: %w", err)
+	}
+	defer func() { _ = os.Remove(keyTmp) }() // no-op after rename succeeds
+
+	// Rename both as close together as possible to minimise the window of
+	// inconsistency between the cert and key files.
+	if err := os.Rename(certTmp, certPath); err != nil {
+		return fmt.Errorf("rename cert: %w", err)
+	}
+	if err := os.Rename(keyTmp, keyPath); err != nil {
+		return fmt.Errorf("rename key: %w", err)
 	}
 	return nil
 }
@@ -100,10 +122,7 @@ func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification)
 		goto ERR
 	}
 
-	if err = writeFileAtomic(certPath, fullchain, permCertFile); err != nil {
-		goto ERR
-	}
-	if err = writeFileAtomic(keyPath, key, permKeyFile); err != nil {
+	if err = writeCertKeyPairAtomic(certPath, fullchain, keyPath, key); err != nil {
 		goto ERR
 	}
 
