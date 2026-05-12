@@ -172,6 +172,7 @@ func (s *CertDXServer) serveHttps(handler http.Handler) error {
 				MinVersion:   tls.VersionTLS12,
 				Certificates: []tls.Certificate{certificate},
 			},
+			ErrorLog: logging.ErrorLogger(),
 		}
 
 		// iterCtx fires on either rootCtx or a fresh cert. WaitForUpdate
@@ -202,8 +203,9 @@ func (s *CertDXServer) serveHttps(handler http.Handler) error {
 // when token auth is enabled and Secure is false.
 func (s *CertDXServer) serveHttp(handler http.Handler) error {
 	server := &http.Server{
-		Addr:    s.Config.HttpServer.Listen,
-		Handler: handler,
+		Addr:     s.Config.HttpServer.Listen,
+		Handler:  handler,
+		ErrorLog: logging.ErrorLogger(),
 	}
 	logging.Info("Http server started")
 	defer logging.Info("Http server stopped")
@@ -221,6 +223,7 @@ func (s *CertDXServer) serveHttpMtls(handler http.Handler) error {
 		Addr:      s.Config.HttpServer.Listen,
 		Handler:   handler,
 		TLSConfig: mtlsConfig,
+		ErrorLog:  logging.ErrorLogger(),
 	}
 	logging.Info("Http mtls server started")
 	defer logging.Info("Http mtls server stopped")

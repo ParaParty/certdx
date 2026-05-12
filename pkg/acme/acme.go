@@ -8,9 +8,11 @@ import (
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/lego"
+	legolog "github.com/go-acme/lego/v4/log"
 
 	"pkg.para.party/certdx/pkg/acme/acmeproviders"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/retry"
 )
 
@@ -62,6 +64,8 @@ func (a *ACME) RetryObtain(ctx context.Context, domains []string, deadline time.
 }
 
 func MakeACME(c *config.ServerConfig) (Obtainer, error) {
+	legolog.Logger = &logging.LegoLogger{}
+
 	if acmeproviders.IsMock(c.ACME.Provider) {
 		return NewMockACME(c.ACME.CertLifeTimeDuration), nil
 	}

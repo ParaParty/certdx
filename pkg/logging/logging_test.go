@@ -120,3 +120,70 @@ func TestNoticePrefix(t *testing.T) {
 		t.Fatalf("missing [NOT] prefix: %q", buf.String())
 	}
 }
+
+func TestErrorLogger(t *testing.T) {
+	buf, restore := captureLogger(t)
+	defer restore()
+
+	el := ErrorLogger()
+	el.Print("http: TLS handshake error from 1.2.3.4:1234: EOF")
+
+	got := buf.String()
+	if !strings.Contains(got, "[WRN]") {
+		t.Fatalf("ErrorLogger output missing [WRN] prefix: %q", got)
+	}
+	if !strings.Contains(got, "http: TLS handshake error") {
+		t.Fatalf("ErrorLogger output missing message body: %q", got)
+	}
+}
+
+func TestLegoLoggerInfoPrefix(t *testing.T) {
+	buf, restore := captureLogger(t)
+	defer restore()
+
+	l := LegoLogger{}
+	l.Printf("[INFO] [example.com] acme: Obtaining bundled SAN certificate")
+
+	got := buf.String()
+	if !strings.Contains(got, "[INF]") {
+		t.Fatalf("LegoLogger [INFO] not mapped to [INF]: %q", got)
+	}
+	if strings.Contains(got, "[INFO]") {
+		t.Fatalf("LegoLogger did not strip [INFO] prefix: %q", got)
+	}
+	if !strings.Contains(got, "[example.com] acme: Obtaining bundled SAN certificate") {
+		t.Fatalf("LegoLogger lost message body: %q", got)
+	}
+}
+
+func TestLegoLoggerWarnPrefix(t *testing.T) {
+	buf, restore := captureLogger(t)
+	defer restore()
+
+	l := LegoLogger{}
+	l.Printf("[WARN] some acme warning")
+
+	got := buf.String()
+	if !strings.Contains(got, "[WRN]") {
+		t.Fatalf("LegoLogger [WARN] not mapped to [WRN]: %q", got)
+	}
+	if strings.Contains(got, "[WARN]") {
+		t.Fatalf("LegoLogger did not strip [WARN] prefix: %q", got)
+	}
+}
+
+func TestLegoLoggerPlainPrint(t *testing.T) {
+	buf, restore := captureLogger(t)
+	defer restore()
+
+	l := LegoLogger{}
+	l.Print("plain message")
+
+	got := buf.String()
+	if !strings.Contains(got, "[INF]") {
+		t.Fatalf("LegoLogger Print missing [INF] prefix: %q", got)
+	}
+	if !strings.Contains(got, "plain message") {
+		t.Fatalf("LegoLogger Print missing message: %q", got)
+	}
+}
