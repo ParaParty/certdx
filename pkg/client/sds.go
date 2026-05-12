@@ -13,8 +13,10 @@ import (
 	discoveryv3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	secretv3 "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -207,7 +209,11 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 		logging.Debug("Stream end due to ctx Done: %s", streamCtx.Err())
 		return streamCtx.Err()
 	case err := <-errChan:
-		logging.Error("Stream end due to errored: %s", err)
+		if status.Code(err) == codes.Canceled {
+			logging.Info("Stream cancelled by server: %s", err)
+		} else {
+			logging.Error("Stream end due to errored: %s", err)
+		}
 		return err
 	}
 }

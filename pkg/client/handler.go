@@ -107,11 +107,14 @@ func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification)
 		goto ERR
 	}
 
+	logging.Info("Saved cert %v", c.Domains)
+
 	if certExists && keyExists {
 		// strings.Fields collapses whitespace and skips empty inputs, so
 		// a whitespace-only ReloadCommand returns an empty slice — guard
 		// against args[0] panicking instead of just !=  "".
 		if args := strings.Fields(c.ReloadCommand); len(args) > 0 {
+			logging.Debug("Executing reload command: %s", c.ReloadCommand)
 			if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
 				logging.Error("Failed executing reload command %s: %s", c.ReloadCommand, err)
 			}

@@ -113,14 +113,14 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	c.renewMu.Lock()
 	defer c.renewMu.Unlock()
 
-	logging.Info("Renew cert: %v", c.domains)
+	logging.Info("Checking cert: %v", c.domains)
 	// Re-check under renewMu: if a concurrent caller already refreshed the
 	// cert while we were waiting on the mutex, observe the fresh cert and
 	// skip the ACME round-trip. This collapses concurrent expired-cert
 	// fetches into one ACME call.
 	current, _ := c.Snapshot()
 	if current.IsValid() {
-		logging.Info("Cert: %v not expired", c.domains)
+		logging.Info("Cert: %v is valid until %s", c.domains, current.ValidBefore)
 		return false, nil
 	}
 
@@ -168,7 +168,7 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 		return true, nil
 	}
 
-	logging.Info("Obtained cert: %v", c.domains)
+	logging.Info("Obtained new cert: %v", c.domains)
 	return true, nil
 }
 
@@ -177,7 +177,6 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 	defer logging.Info("Stopped subscribing cert: %v", c.domains)
 
 	for {
-		logging.Info("Server renew: %v", c.domains)
 		_, err := s.renew(ctx, c, true)
 		if err != nil {
 			if ctx.Err() != nil {

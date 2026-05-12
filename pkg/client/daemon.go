@@ -5,11 +5,11 @@
 // File layout:
 //
 //   - daemon.go        — daemon lifecycle, config loading, watcher
-//                        registration, and the cert-change fan-out.
+//     registration, and the cert-change fan-out.
 //   - http_poller.go   — HTTP-mode polling loop.
 //   - grpc_streamer.go — gRPC SDS failover state machine.
 //   - http.go / sds.go / mtls.go / handler.go — protocol clients and
-//                        the on-disk write/reload handler.
+//     the on-disk write/reload handler.
 package client
 
 import (
@@ -90,6 +90,7 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 		case <-r.rootCtx.Done():
 			return
 		case newCert := <-c.UpdateChan:
+			logging.Info("Received cert %v", newCert.Domains)
 			currentCert := c.Data.Load()
 			if !bytes.Equal(currentCert.Fullchain, newCert.Fullchain) || !bytes.Equal(currentCert.Key, newCert.Key) {
 				logging.Notice("Notify cert %v changed", newCert.Domains)
@@ -97,8 +98,6 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 				for _, handleFunc := range c.UpdateHandlers {
 					handleFunc(newCert.Fullchain, newCert.Key, &c.Config)
 				}
-			} else {
-				logging.Info("Cert %v not changed", newCert.Domains)
 			}
 		}
 	}
