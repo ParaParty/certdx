@@ -36,6 +36,8 @@ func NewCertStore() CertStore {
 
 // Load reads and unmarshals the persisted certificate store. It returns
 // os.ErrNotExist when the backing file hasn't been created yet.
+// Expired certificates are discarded and domain keys are re-generated
+// so that entries written by a previous key algorithm are migrated.
 func (s *CertStore) Load() error {
 	if !paths.FileExists(s.path) {
 		return os.ErrNotExist
@@ -46,8 +48,17 @@ func (s *CertStore) Load() error {
 		return fmt.Errorf("opening cert store: %w", err)
 	}
 
-	if err := json.Unmarshal(cfile, &s.entries); err != nil {
+	var raw map[domain.Key]*certStoreEntry
+	if err := json.Unmarshal(cfile, &raw); err != nil {
 		return fmt.Errorf("unmarshaling cert store: %w", err)
+	}
+
+	for _, entry := range raw {
+		if !entry.Cert.IsValid() {
+			logging.Info("Discarding expired cert for domains: %v", entry.Domains)
+			continue
+		}
+		s.entries[domain.AsKey(entry.Domains)] = entry
 	}
 
 	return nil
@@ -72,6 +83,13 @@ func (s *CertStore) saveEntry(fe *certStoreEntry) error {
 }
 
 func (s *CertStore) PrintCertInfo() {
+	fmt.Println()
+
+	if len(s.entries) == 0 {
+		fmt.Println("No valid cert in cache")
+		return
+	}
+
 	for _, cert := range s.entries {
 		fmt.Printf("\nDomains:     %s\nRenewAt:     %s\nValidBefore: %s\n", strings.Join(cert.Domains, ", "), cert.Cert.RenewAt, cert.Cert.ValidBefore)
 	}

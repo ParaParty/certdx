@@ -80,15 +80,11 @@ func (s *CertDXServer) loadCertStore() error {
 	}
 
 	s.certCache.mutex.Lock()
-	for key, cache := range s.certStore.entries {
-		if cache.Cert.IsValid() {
-			entry := s.certCache.getNoLock(cache.Domains)
-			entry.stateMu.Lock()
-			entry.cert = cache.Cert
-			entry.stateMu.Unlock()
-		} else {
-			delete(s.certStore.entries, key)
-		}
+	for _, cache := range s.certStore.entries {
+		entry := s.certCache.getNoLock(cache.Domains)
+		entry.stateMu.Lock()
+		entry.cert = cache.Cert
+		entry.stateMu.Unlock()
 	}
 	s.certCache.mutex.Unlock()
 
