@@ -83,6 +83,7 @@ func TestCertRenewalGRPC(t *testing.T) {
 		RenewTimeLeft:  renewLeft,
 		GRPCEnabled:    true,
 		GRPCListen:     fmt.Sprintf(":%d", port),
+		MTLSPEM:        chain.SrvBundle,
 	})
 
 	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "-d")
@@ -97,9 +98,7 @@ func TestCertRenewalGRPC(t *testing.T) {
 	harness.WriteGRPCClientConfig(t, clientDir, harness.GRPCClientOpts{
 		Main: harness.GRPCClientServer{
 			Server: fmt.Sprintf("localhost:%d", port),
-			CA:     chain.CAPEM,
-			Cert:   chain.ClientPEM["grpcclient"],
-			Key:    chain.ClientKey["grpcclient"],
+			PEM:    chain.ClientBundle["grpcclient"],
 		},
 		Certs: []harness.ClientCert{{
 			Name:     "site",

@@ -32,9 +32,10 @@ func TestHTTPMutualTLS(t *testing.T) {
 		HTTPApiPath:    apiPath,
 		HTTPAuth:       "mtls",
 		HTTPNames:      []string{"localhost"},
+		MTLSPEM:        chain.SrvBundle,
 	})
 
-	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "--mtls-dir", filepath.Join(chainDir, "mtls"), "-d")
+	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "-d")
 	if err := harness.WaitListening("127.0.0.1", port, 5*time.Second); err != nil {
 		t.Fatalf("server not listening: %s\n%s", err, srv.CombinedOutput())
 	}
@@ -47,9 +48,7 @@ func TestHTTPMutualTLS(t *testing.T) {
 		Main: harness.HTTPClientServer{
 			URL:        fmt.Sprintf("https://localhost:%d%s", port, apiPath),
 			AuthMethod: "mtls",
-			CA:         chain.CAPEM,
-			Cert:       chain.ClientPEM["client1"],
-			Key:        chain.ClientKey["client1"],
+			PEM:        chain.ClientBundle["client1"],
 		},
 		Certs: []harness.ClientCert{{
 			Name:     "site",
@@ -65,7 +64,7 @@ func TestHTTPMutualTLS(t *testing.T) {
 	harness.WaitForCertFile(t, certPath, 15*time.Second)
 
 	t.Run("rejects connection without client cert", func(t *testing.T) {
-		caPEM, err := os.ReadFile(chain.CAPEM)
+		caPEM, err := os.ReadFile(chain.CABundle)
 		if err != nil {
 			t.Fatalf("read CA: %s", err)
 		}

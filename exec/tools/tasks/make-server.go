@@ -11,6 +11,7 @@ import (
 func MakeServer(name string, args []string) error {
 	fs := newFlagSet(name)
 	var (
+		serverName = fs.StringP("name", "n", "", "Server certificate name (output filename)")
 		domains    = fs.StringSliceP("dns-names", "d", []string{}, "Server certificate DNS names (comma-separated)")
 		org        = fs.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		commonName = fs.StringP("common-name", "c", "CertDX Secret Discovery Service", "Subject Common Name")
@@ -25,13 +26,17 @@ func MakeServer(name string, args []string) error {
 		return nil
 	}
 
+	if *serverName == "" {
+		return fmt.Errorf("--name is required")
+	}
+
 	if len(*domains) == 0 {
 		return fmt.Errorf("--dns-names is required")
 	}
 
 	paths.SetMtlsDir(*mtlsDir)
 
-	if err := tools.MakeServerCert(*org, *commonName, *domains); err != nil {
+	if err := tools.MakeServerCert(*serverName, *org, *commonName, *domains); err != nil {
 		return fmt.Errorf("create server cert: %w", err)
 	}
 	return nil

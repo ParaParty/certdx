@@ -28,6 +28,7 @@ func TestCaddyTLS_GRPCMTLS(t *testing.T) {
 		AllowedDomains: []string{domain},
 		GRPCEnabled:    true,
 		GRPCListen:     fmt.Sprintf(":%d", serverPort),
+		MTLSPEM:        chain.SrvBundle,
 	})
 	srv := harness.Start(t, "server", harness.ServerBin(t), cwd, "-c", filepath.Join(cwd, "server.toml"), "-d")
 	if err := harness.WaitListening("127.0.0.1", serverPort, 5*time.Second); err != nil {
@@ -41,9 +42,7 @@ func TestCaddyTLS_GRPCMTLS(t *testing.T) {
 		ReconnectInterval: "10s",
 		GRPC: &harness.CaddyfileGRPCServer{
 			Server: fmt.Sprintf("localhost:%d", serverPort),
-			CA:     chain.CAPEM,
-			Cert:   chain.ClientPEM["caddyclient"],
-			Key:    chain.ClientKey["caddyclient"],
+			PEM:    chain.ClientBundle["caddyclient"],
 		},
 		Certificates: []harness.CaddyfileCertEntry{{
 			ID:      "site",

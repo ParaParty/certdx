@@ -14,24 +14,18 @@ authMethod = "token"
 token = "KFCCrazyThursdayVMe50"
 
 # authMethod = "mtls"
-# ca = "/path/to/grpc/mtls/ca.pem"
-# certificate = "/path/to/grpc/mtls/client/cert.pem"
-# key = "/path/to/grpc/mtls/client/private.key"
+# pem = "/path/to/mtls/client-bundle.pem"
 
 [Http.StandbyServer]
 url = "http://mybackupserver.local:11451/1919810"
 
 [GRPC.MainServer]
 server = "grpc.example.com:9999"
-ca = "/path/to/grpc/mtls/ca.pem"
-certificate = "/path/to/grpc/mtls/client/cert.pem"
-key = "/path/to/grpc/mtls/client/private.key"
+pem = "/path/to/mtls/client-bundle.pem"
 
 [GRPC.StandbyServer]
 server = "192.168.1.2:9090"
-ca = "/path/to/grpc/mtls/ca.pem"
-certificate = "/path/to/grpc/mtls/client/cert.pem"
-key = "/path/to/grpc/mtls/client/private.key"
+pem = "/path/to/mtls/client-bundle.pem"
 
 [[Certifications]]
 name = "certFileNameToSave"

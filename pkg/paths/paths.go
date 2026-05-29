@@ -111,17 +111,14 @@ func MakeMtlsCertDir() (string, error) {
 	return ensureMtlsDir(dir)
 }
 
-// MtlsCAPath returns the on-disk paths to the mtls CA certificate (PEM) and
-// CA private key.
-func MtlsCAPath() (caPEMPath, caKeyPath string, err error) {
+// MtlsCAPath returns the on-disk path to the mtls CA bundle (cert + key
+// in a single PEM file).
+func MtlsCAPath() (string, error) {
 	caDir, err := MakeMtlsCertDir()
 	if err != nil {
-		return
+		return "", err
 	}
-
-	caPEMPath = path.Join(caDir, "ca.pem")
-	caKeyPath = path.Join(caDir, "ca.key")
-	return
+	return path.Join(caDir, "ca.pem"), nil
 }
 
 // CACounterPath returns the on-disk path to the CA serial counter file.
@@ -135,30 +132,14 @@ func CACounterPath() (caCounterPath string, err error) {
 	return
 }
 
-// MtlsServerCertPath returns the on-disk paths to the mtls server certificate
-// (PEM) and server private key.
-func MtlsServerCertPath() (certPEMPath, certKeyPath string, err error) {
+// MtlsBundlePath returns the on-disk path to a named mtls entity bundle
+// (entity cert + entity key + CA cert in a single PEM file).
+func MtlsBundlePath(name string) (string, error) {
 	caDir, err := MakeMtlsCertDir()
 	if err != nil {
-		return
+		return "", err
 	}
-
-	certPEMPath = path.Join(caDir, "server.pem")
-	certKeyPath = path.Join(caDir, "server.key")
-	return
-}
-
-// MtlsClientCertPath returns the on-disk paths to a named mtls client
-// certificate (PEM) and client private key.
-func MtlsClientCertPath(name string) (certPEMPath, certKeyPath string, err error) {
-	caDir, err := MakeMtlsCertDir()
-	if err != nil {
-		return
-	}
-
-	certPEMPath = path.Join(caDir, fmt.Sprintf("%s.pem", name))
-	certKeyPath = path.Join(caDir, fmt.Sprintf("%s.key", name))
-	return
+	return path.Join(caDir, fmt.Sprintf("%s.pem", name)), nil
 }
 
 // ACMEPrivateKey returns the on-disk path to an ACME account private key

@@ -19,19 +19,16 @@ type MTLSChain struct {
 	// under <Dir>/mtls/.
 	Dir string
 
-	CAPEM  string
-	CAKey  string
-	SrvPEM string
-	SrvKey string
+	CABundle  string // ca.pem bundle (CA cert + CA key)
+	SrvBundle string // server bundle (server cert + key + CA cert)
 
-	// ClientPEM/ClientKey are keyed by client name (see GenerateChain).
-	ClientPEM map[string]string
-	ClientKey map[string]string
+	// ClientBundle is keyed by client name (see GenerateChain).
+	ClientBundle map[string]string
 }
 
 // GenerateChain runs certdx_tools make-ca, make-server and one make-client
 // per name in cwd, returning the resulting chain. Server SANs default to
-// ["localhost", "127.0.0.1"].
+// ["localhost", "127.0.0.1"]. The server bundle is named "server".
 func GenerateChain(tb testing.TB, cwd string, serverDNS []string, clientNames ...string) *MTLSChain {
 	tb.Helper()
 
@@ -60,26 +57,22 @@ func GenerateChain(tb testing.TB, cwd string, serverDNS []string, clientNames ..
 	}
 
 	dnsArg := joinDNS(serverDNS)
-	if out, err := RunTool(ctx, tb, cwd, "make-server", "-d", dnsArg, "-o", "CertDX E2E"); err != nil {
+	if out, err := RunTool(ctx, tb, cwd, "make-server", "-n", "server", "-d", dnsArg, "-o", "CertDX E2E"); err != nil {
 		tb.Fatalf("make-server: %s\n%s", err, out)
 	}
 
 	chain := &MTLSChain{
-		Dir:       cwd,
-		CAPEM:     filepath.Join(cwd, "mtls", "ca.pem"),
-		CAKey:     filepath.Join(cwd, "mtls", "ca.key"),
-		SrvPEM:    filepath.Join(cwd, "mtls", "server.pem"),
-		SrvKey:    filepath.Join(cwd, "mtls", "server.key"),
-		ClientPEM: map[string]string{},
-		ClientKey: map[string]string{},
+		Dir:          cwd,
+		CABundle:     filepath.Join(cwd, "mtls", "ca.pem"),
+		SrvBundle:    filepath.Join(cwd, "mtls", "server.pem"),
+		ClientBundle: map[string]string{},
 	}
 
 	for _, name := range clientNames {
 		if out, err := RunTool(ctx, tb, cwd, "make-client", "-n", name, "-o", "CertDX E2E"); err != nil {
 			tb.Fatalf("make-client %s: %s\n%s", name, err, out)
 		}
-		chain.ClientPEM[name] = filepath.Join(cwd, "mtls", name+".pem")
-		chain.ClientKey[name] = filepath.Join(cwd, "mtls", name+".key")
+		chain.ClientBundle[name] = filepath.Join(cwd, "mtls", name+".pem")
 	}
 
 	return chain

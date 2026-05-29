@@ -22,9 +22,8 @@ import (
 )
 
 const (
-	permPrivateKey os.FileMode = 0o600
-	permPublicCert os.FileMode = 0o644
-	permCounter    os.FileMode = 0o644
+	permBundle  os.FileMode = 0o600
+	permCounter os.FileMode = 0o644
 )
 
 // counter holds the serial number for the next certificate to be issued.
@@ -32,10 +31,11 @@ const (
 // successful signing.
 var counter big.Int
 
-// MakeCA creates a self-signed CA certificate/key pair at the default mTLS
-// paths. Fails if files already exist to avoid clobbering an in-use CA.
+// MakeCA creates a self-signed CA bundle (cert + key in a single PEM file)
+// at the default mTLS path. Fails if the file already exists to avoid
+// clobbering an in-use CA.
 func MakeCA(organization, commonName string) error {
-	caPEMPath, caKeyPath, err := paths.MtlsCAPath()
+	caPath, err := paths.MtlsCAPath()
 	if err != nil {
 		return err
 	}
@@ -44,11 +44,8 @@ func MakeCA(organization, commonName string) error {
 		return err
 	}
 
-	if paths.FileExists(caPEMPath) {
-		return fmt.Errorf("CA file already exists: %s", caPEMPath)
-	}
-	if paths.FileExists(caKeyPath) {
-		return fmt.Errorf("CA key already exists: %s", caKeyPath)
+	if paths.FileExists(caPath) {
+		return fmt.Errorf("CA file already exists: %s", caPath)
 	}
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -75,14 +72,15 @@ func MakeCA(organization, commonName string) error {
 		return fmt.Errorf("self-signing CA: %w", err)
 	}
 
-	if err := writePEM(caPEMPath, "CERTIFICATE", caBytes, permPublicCert); err != nil {
-		return err
-	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return fmt.Errorf("marshaling CA key: %w", err)
 	}
-	if err := writePEM(caKeyPath, "PRIVATE KEY", keyDER, permPrivateKey); err != nil {
+
+	if err := writeBundle(caPath,
+		pemBlock{"CERTIFICATE", caBytes},
+		pemBlock{"PRIVATE KEY", keyDER},
+	); err != nil {
 		return err
 	}
 
@@ -96,7 +94,7 @@ func MakeCA(organization, commonName string) error {
 }
 
 func loadCA() (*x509.Certificate, crypto.PrivateKey, error) {
-	caPEMPath, caKeyPath, err := paths.MtlsCAPath()
+	caPath, err := paths.MtlsCAPath()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -105,26 +103,22 @@ func loadCA() (*x509.Certificate, crypto.PrivateKey, error) {
 		return nil, nil, err
 	}
 
-	caPEMData, err := os.ReadFile(caPEMPath)
+	bundleData, err := os.ReadFile(caPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading CA cert: %w", err)
-	}
-	caKeyData, err := os.ReadFile(caKeyPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("reading CA key: %w", err)
+		return nil, nil, fmt.Errorf("reading CA bundle: %w", err)
 	}
 	caCounterData, err := os.ReadFile(caCounterPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading serial counter: %w", err)
 	}
 
-	caPEM, err := certcrypto.ParsePEMCertificate(caPEMData)
+	caPEM, err := certcrypto.ParsePEMCertificate(bundleData)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parsing CA cert: %w", err)
+		return nil, nil, fmt.Errorf("parsing CA cert from bundle: %w", err)
 	}
-	caKey, err := certcrypto.ParsePEMPrivateKey(caKeyData)
+	caKey, err := certcrypto.ParsePEMPrivateKey(bundleData)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parsing CA key: %w", err)
+		return nil, nil, fmt.Errorf("parsing CA key from bundle: %w", err)
 	}
 	if _, ok := counter.SetString(string(caCounterData), 10); !ok {
 		return nil, nil, fmt.Errorf("invalid serial number counter in %s", caCounterPath)
@@ -163,7 +157,7 @@ func splitIPsAndDNS(names []string) (dns []string, ips []net.IP) {
 	return
 }
 
-func makeCert(pemPath, keyPath, organization, commonName string,
+func makeCert(bundlePath, organization, commonName string,
 	domains []string, extKeyUsage []x509.ExtKeyUsage) error {
 
 	counterPath, err := paths.CACounterPath()
@@ -171,11 +165,8 @@ func makeCert(pemPath, keyPath, organization, commonName string,
 		return err
 	}
 
-	if paths.FileExists(pemPath) {
-		return fmt.Errorf("cert file already exists: %s", pemPath)
-	}
-	if paths.FileExists(keyPath) {
-		return fmt.Errorf("key file already exists: %s", keyPath)
+	if paths.FileExists(bundlePath) {
+		return fmt.Errorf("bundle file already exists: %s", bundlePath)
 	}
 
 	caCert, caKey, err := loadCA()
@@ -215,14 +206,17 @@ func makeCert(pemPath, keyPath, organization, commonName string,
 		return fmt.Errorf("signing certificate: %w", err)
 	}
 
-	if err := writePEM(pemPath, "CERTIFICATE", certBytes, permPublicCert); err != nil {
-		return err
-	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return fmt.Errorf("marshaling private key: %w", err)
 	}
-	if err := writePEM(keyPath, "PRIVATE KEY", keyDER, permPrivateKey); err != nil {
+
+	// Entity bundle: entity cert + entity key + CA cert.
+	if err := writeBundle(bundlePath,
+		pemBlock{"CERTIFICATE", certBytes},
+		pemBlock{"PRIVATE KEY", keyDER},
+		pemBlock{"CERTIFICATE", caCert.Raw},
+	); err != nil {
 		return err
 	}
 
@@ -236,37 +230,49 @@ func makeCert(pemPath, keyPath, organization, commonName string,
 	return nil
 }
 
-// writePEM PEM-encodes der under typ and installs it at path with the given
-// permissions.
-func writePEM(path, typ string, der []byte, mode os.FileMode) error {
-	encoded := pem.EncodeToMemory(&pem.Block{Type: typ, Bytes: der})
-	if err := os.WriteFile(path, encoded, mode); err != nil {
+// pemBlock pairs a PEM type with its DER-encoded bytes.
+type pemBlock struct {
+	typ   string
+	bytes []byte
+}
+
+// writeBundle writes one or more PEM blocks to path as a single file with
+// 0o600 permissions.
+func writeBundle(path string, blocks ...pemBlock) error {
+	var buf []byte
+	for _, b := range blocks {
+		buf = append(buf, pem.EncodeToMemory(&pem.Block{Type: b.typ, Bytes: b.bytes})...)
+	}
+	if err := os.WriteFile(path, buf, permBundle); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
 }
 
-// MakeServerCert issues a server certificate signed by the local CA.
-func MakeServerCert(organization, commonName string, domains []string) error {
-	pemPath, keyPath, err := paths.MtlsServerCertPath()
+// MakeServerCert issues a named server certificate signed by the local CA.
+func MakeServerCert(name, organization, commonName string, domains []string) error {
+	if strings.EqualFold(strings.TrimSpace(name), "ca") {
+		return fmt.Errorf("name %q is reserved for CA material", name)
+	}
+
+	bundlePath, err := paths.MtlsBundlePath(name)
 	if err != nil {
 		return err
 	}
-	return makeCert(pemPath, keyPath, organization, commonName, domains,
+	return makeCert(bundlePath, organization, commonName, domains,
 		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
 }
 
 // MakeClientCert issues a named client certificate signed by the local CA.
 func MakeClientCert(name, organization, commonName string, domains []string) error {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "ca", "server":
-		return fmt.Errorf("client name %q is reserved for mtls material", name)
+	if strings.EqualFold(strings.TrimSpace(name), "ca") {
+		return fmt.Errorf("name %q is reserved for CA material", name)
 	}
 
-	clientPEMPath, clientKeyPath, err := paths.MtlsClientCertPath(name)
+	bundlePath, err := paths.MtlsBundlePath(name)
 	if err != nil {
 		return err
 	}
-	return makeCert(clientPEMPath, clientKeyPath, organization, commonName, domains,
+	return makeCert(bundlePath, organization, commonName, domains,
 		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 }

@@ -74,8 +74,11 @@ names = ["certdxserver.example.com", "*.example.com"]
 token = "KFCCrazyThursdayVMe50"
 
 # authMethod = "mtls"
-# mtls mode will automatically load CA certificate key from
-# certdx_executable/mtls/
+
+# [MTLS] is required when authMethod = "mtls" or gRPCSDSServer is enabled.
+# pem is the path to the server PEM bundle (server cert + key + CA cert).
+# [MTLS]
+# pem = "/opt/certdx/mtls/certdx-server.pem"
 
 [gRPCSDSServer]
 enabled = true

@@ -56,7 +56,7 @@ func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]
 	received := make(chan struct{})
 	c.Received.Store(&received)
 	c.Running.Store(false)
-	c.tlsCred = credentials.NewTLS(getMtlsConfig(server.CA, server.Certificate, server.Key))
+	c.tlsCred = credentials.NewTLS(getMtlsConfig(server.PEM))
 	return c
 }
 

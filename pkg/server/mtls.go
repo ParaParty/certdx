@@ -3,39 +3,45 @@ package server
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
-
-	"pkg.para.party/certdx/pkg/paths"
 )
 
-// getMtlsConfig builds the gRPC SDS / HTTP mTLS server TLS config from
-// the on-disk material under the resolved mTLS directory. Each step
-// returns a wrapped error so the daemon entry point can surface the
-// failure to its caller instead of `logging.Fatal`-ing here.
-func getMtlsConfig() (*tls.Config, error) {
-	srvCertPath, srvKeyPath, err := paths.MtlsServerCertPath()
+// getMtlsConfig builds the gRPC SDS / HTTP mTLS server TLS config from a
+// PEM bundle file containing the server certificate, private key, and CA
+// certificate.
+func getMtlsConfig(bundlePath string) (*tls.Config, error) {
+	bundleData, err := os.ReadFile(bundlePath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve mtls server certificate path: %w", err)
+		return nil, fmt.Errorf("read mtls bundle %s: %w", bundlePath, err)
 	}
 
-	cert, err := tls.LoadX509KeyPair(srvCertPath, srvKeyPath)
+	cert, err := tls.X509KeyPair(bundleData, bundleData)
 	if err != nil {
-		return nil, fmt.Errorf("load mtls server certificate: %w", err)
+		return nil, fmt.Errorf("parse cert+key from mtls bundle: %w", err)
 	}
 
-	caPEMPath, _, err := paths.MtlsCAPath()
-	if err != nil {
-		return nil, fmt.Errorf("resolve mtls ca path: %w", err)
-	}
-	caPEM, err := os.ReadFile(caPEMPath)
-	if err != nil {
-		return nil, fmt.Errorf("read mtls ca certificate: %w", err)
-	}
-
+	// Extract the CA certificate: the CERTIFICATE block that is NOT the
+	// leaf (entity) certificate. The leaf is always the first CERTIFICATE
+	// block; subsequent ones are CA / intermediates.
 	capool := x509.NewCertPool()
-	if !capool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("parse mtls ca certificate")
+	rest := bundleData
+	first := true
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		if first {
+			first = false
+			continue // skip entity cert
+		}
+		capool.AppendCertsFromPEM(pem.EncodeToMemory(block))
 	}
 
 	return &tls.Config{

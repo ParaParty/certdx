@@ -89,45 +89,17 @@ func TestGenerateSubjectKeyIDDifferentKeys(t *testing.T) {
 	}
 }
 
-func TestWritePEMPermissionsAndRoundTrip(t *testing.T) {
+func TestWriteBundlePermissionsAndRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "test.pem")
-	data := []byte("test-der-data")
+	certData := []byte("test-cert-data")
+	keyData := []byte("test-key-data")
 
-	if err := writePEM(p, "CERTIFICATE", data, 0o644); err != nil {
-		t.Fatalf("writePEM: %v", err)
-	}
-
-	st, err := os.Stat(p)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if mode := st.Mode().Perm(); mode != 0o644 {
-		t.Fatalf("perm: got %o want 0644", mode)
-	}
-
-	content, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	block, _ := pem.Decode(content)
-	if block == nil {
-		t.Fatal("failed to decode PEM")
-	}
-	if block.Type != "CERTIFICATE" {
-		t.Fatalf("PEM type: got %q want CERTIFICATE", block.Type)
-	}
-	if string(block.Bytes) != string(data) {
-		t.Fatalf("PEM data mismatch")
-	}
-}
-
-func TestWritePEMPrivateKeyPermissions(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "key.pem")
-
-	if err := writePEM(p, "PRIVATE KEY", []byte("key-data"), 0o600); err != nil {
-		t.Fatalf("writePEM: %v", err)
+	if err := writeBundle(p,
+		pemBlock{"CERTIFICATE", certData},
+		pemBlock{"PRIVATE KEY", keyData},
+	); err != nil {
+		t.Fatalf("writeBundle: %v", err)
 	}
 
 	st, err := os.Stat(p)
@@ -137,15 +109,65 @@ func TestWritePEMPrivateKeyPermissions(t *testing.T) {
 	if mode := st.Mode().Perm(); mode != 0o600 {
 		t.Fatalf("perm: got %o want 0600", mode)
 	}
+
+	content, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	block, rest := pem.Decode(content)
+	if block == nil {
+		t.Fatal("failed to decode first PEM block")
+	}
+	if block.Type != "CERTIFICATE" {
+		t.Fatalf("first block type: got %q want CERTIFICATE", block.Type)
+	}
+	if string(block.Bytes) != string(certData) {
+		t.Fatalf("first block data mismatch")
+	}
+
+	block, _ = pem.Decode(rest)
+	if block == nil {
+		t.Fatal("failed to decode second PEM block")
+	}
+	if block.Type != "PRIVATE KEY" {
+		t.Fatalf("second block type: got %q want PRIVATE KEY", block.Type)
+	}
+	if string(block.Bytes) != string(keyData) {
+		t.Fatalf("second block data mismatch")
+	}
 }
 
 func TestMakeClientCertReservedNames(t *testing.T) {
-	for _, name := range []string{"ca", "CA", "server", "Server", " ca ", " SERVER "} {
+	for _, name := range []string{"ca", "CA", " ca ", " CA "} {
 		t.Run(name, func(t *testing.T) {
 			err := MakeClientCert(name, "org", "cn", []string{"example.com"})
 			if err == nil {
 				t.Fatalf("expected error for reserved name %q", name)
 			}
 		})
+	}
+}
+
+func TestMakeServerCertReservedNames(t *testing.T) {
+	for _, name := range []string{"ca", "CA", " ca "} {
+		t.Run(name, func(t *testing.T) {
+			err := MakeServerCert(name, "org", "cn", []string{"example.com"})
+			if err == nil {
+				t.Fatalf("expected error for reserved name %q", name)
+			}
+		})
+	}
+}
+
+func TestMakeClientCertServerNameAllowed(t *testing.T) {
+	// "server" is no longer reserved; this should fail only because
+	// there is no CA to sign against, not because the name is rejected.
+	err := MakeClientCert("server", "org", "cn", []string{"example.com"})
+	if err == nil {
+		t.Fatal("expected error (no CA), got nil")
+	}
+	if err.Error() == `name "server" is reserved for CA material` {
+		t.Fatal("'server' should no longer be reserved")
 	}
 }

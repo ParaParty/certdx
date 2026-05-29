@@ -106,14 +106,14 @@ Top-level directives:
 | `url` | Full URL including the server's `apiPath`. |
 | `authMethod` | `token` (default) or `mtls`. |
 | `token` | Bearer token for `authMethod token`. |
-| `ca`, `certificate`, `key` | mTLS material for `authMethod mtls`. |
+| `pem` | PEM bundle (client cert + key + CA cert) for `authMethod mtls`. |
 
 ### `GRPC { main_server | standby_server }` block
 
 | Directive | Notes |
 | --- | --- |
 | `server` | `host:port` of the certdx gRPC SDS endpoint. |
-| `ca`, `certificate`, `key` | mTLS material (always required for gRPC). |
+| `pem` | PEM bundle (client cert + key + CA cert). |
 
 ### Per-site usage
 
@@ -148,9 +148,7 @@ https://example.com {
         GRPC {
             main_server {
                 server sds.example.com:9801
-                ca   /opt/certdx/mtls/ca.pem
-                certificate /opt/certdx/mtls/caddy.pem
-                key  /opt/certdx/mtls/caddy.key
+                pem  /opt/certdx/mtls/caddy.pem
             }
         }
 

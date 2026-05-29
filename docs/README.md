@@ -14,4 +14,9 @@ Reference:
 - [Caddy plugin](caddytls.md) — Caddyfile syntax.
 - [Tools](tools.md) — `certdx_tools` subcommands.
 
+Upgrading:
+
+- [Breaking changes since v0.5.0](breaking-changes-v0.6.0.md) — PEM bundle
+  migration guide.
+
 External: [DeepWiki](https://deepwiki.com/ParaParty/certdx).
