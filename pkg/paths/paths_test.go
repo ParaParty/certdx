@@ -25,66 +25,81 @@ func TestFileExistsFalse(t *testing.T) {
 	}
 }
 
-// TestSetMtlsDirOverride covers the --mtls-dir flag path:
-// SetMtlsDir("/tmp/...") forces every Mtls*Path call to resolve under
-// that directory, regardless of cwd / executable layout.
-func TestSetMtlsDirOverride(t *testing.T) {
-	prev := mtlsDirOverride
-	t.Cleanup(func() { mtlsDirOverride = prev })
-
-	dir := t.TempDir()
-	override := filepath.Join(dir, "mtls-override")
-	SetMtlsDir(override)
-
-	got, err := MakeMtlsCertDir()
-	if err != nil {
-		t.Fatalf("MakeMtlsCertDir: %v", err)
-	}
-	if got != override {
-		t.Fatalf("override not honored: got %s want %s", got, override)
-	}
-
-	// Directory should be created with 0o700.
-	st, err := os.Stat(override)
-	if err != nil {
-		t.Fatalf("stat override dir: %v", err)
-	}
-	if !st.IsDir() {
-		t.Fatalf("override not a dir")
-	}
-	// Permission bits — mask out the dir bit.
-	if mode := st.Mode().Perm(); mode != 0o700 {
-		t.Fatalf("override dir perm: got %o want 0o700", mode)
-	}
+// withDataDir installs override for the duration of the test.
+func withDataDir(t *testing.T, dir string) {
+	t.Helper()
+	prev := dataDirOverride
+	SetDataDir(dir)
+	t.Cleanup(func() { SetDataDir(prev) })
 }
 
-func TestMtlsCAPathUnderOverride(t *testing.T) {
-	prev := mtlsDirOverride
-	t.Cleanup(func() { mtlsDirOverride = prev })
-	override := filepath.Join(t.TempDir(), "mtls")
-	SetMtlsDir(override)
+func TestSetDataDirOverride(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "data")
+	withDataDir(t, override)
 
-	caPath, err := MtlsCAPath()
+	mtls, err := MtlsDir()
 	if err != nil {
-		t.Fatalf("MtlsCAPath: %v", err)
+		t.Fatalf("MtlsDir: %v", err)
 	}
-	wantPEM := filepath.Join(override, "ca.pem")
-	if caPath != wantPEM {
-		t.Errorf("ca.pem path: got %s want %s", caPath, wantPEM)
+	if want := filepath.Join(override, "mtls"); mtls != want {
+		t.Errorf("MtlsDir=%s want %s", mtls, want)
+	}
+
+	st, err := os.Stat(mtls)
+	if err != nil {
+		t.Fatalf("stat mtls: %v", err)
+	}
+	if mode := st.Mode().Perm(); mode != 0o700 {
+		t.Errorf("mtls perm: got %o want 0o700", mode)
+	}
+
+	keyPath, err := ACMEPrivateKey("u@example.com", "r3")
+	if err != nil {
+		t.Fatalf("ACMEPrivateKey: %v", err)
+	}
+	if want := filepath.Join(override, "private", "u@example.com_r3.key"); keyPath != want {
+		t.Errorf("ACMEPrivateKey=%s want %s", keyPath, want)
+	}
+
+	cache, err := ServerCachePath()
+	if err != nil {
+		t.Fatalf("ServerCachePath: %v", err)
+	}
+	if want := filepath.Join(override, "cache.json"); cache != want {
+		t.Errorf("ServerCachePath=%s want %s", cache, want)
 	}
 }
 
 func TestMtlsBundlePathName(t *testing.T) {
-	prev := mtlsDirOverride
-	t.Cleanup(func() { mtlsDirOverride = prev })
-	override := filepath.Join(t.TempDir(), "mtls")
-	SetMtlsDir(override)
+	override := filepath.Join(t.TempDir(), "data")
+	withDataDir(t, override)
 
 	p, err := MtlsBundlePath("alice")
 	if err != nil {
 		t.Fatalf("MtlsBundlePath: %v", err)
 	}
-	if p != filepath.Join(override, "alice.pem") {
-		t.Errorf("bundle path: got %s", p)
+	if want := filepath.Join(override, "mtls", "alice.pem"); p != want {
+		t.Errorf("bundle path: got %s want %s", p, want)
+	}
+}
+
+func TestMtlsCAAndCounterPath(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "data")
+	withDataDir(t, override)
+
+	ca, err := MtlsCAPath()
+	if err != nil {
+		t.Fatalf("MtlsCAPath: %v", err)
+	}
+	if want := filepath.Join(override, "mtls", "ca.pem"); ca != want {
+		t.Errorf("MtlsCAPath=%s want %s", ca, want)
+	}
+
+	counter, err := CACounterPath()
+	if err != nil {
+		t.Fatalf("CACounterPath: %v", err)
+	}
+	if want := filepath.Join(override, "mtls", "counter.txt"); counter != want {
+		t.Errorf("CACounterPath=%s want %s", counter, want)
 	}
 }

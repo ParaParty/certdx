@@ -60,6 +60,11 @@ accessKeySecret = "xxxxxxxx"
 sessionToken = ""
 url = "https://cos.ap-beijing.myqcloud.com"
 
+# [MTLS] is required when authMethod = "mtls" or gRPCSDSServer is enabled.
+# pem is the path to the server PEM bundle (server cert + key + CA cert).
+[MTLS]
+pem = "/opt/certdx/mtls/certdx-server.pem"
+
 [HttpServer]
 enabled = true
 listen = ":19198"
@@ -74,11 +79,6 @@ names = ["certdxserver.example.com", "*.example.com"]
 token = "KFCCrazyThursdayVMe50"
 
 # authMethod = "mtls"
-
-# [MTLS] is required when authMethod = "mtls" or gRPCSDSServer is enabled.
-# pem is the path to the server PEM bundle (server cert + key + CA cert).
-# [MTLS]
-# pem = "/opt/certdx/mtls/certdx-server.pem"
 
 [gRPCSDSServer]
 enabled = true

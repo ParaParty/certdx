@@ -105,14 +105,15 @@ Consumers:
 
 ## mTLS
 
-The mTLS material lives in an `mtls/` directory. By default it is
-discovered next to the executable, or under the current working directory.
-Override the location with the `--mtls-dir <path>` flag (passed to
-`make-ca`, `make-server`, or `make-client`). The
-directory is created with mode `0700`; all bundles are written with mode
-`0600` (they contain private keys). The server reads its mTLS bundle
-from the `[MTLS].pem` config path; clients read theirs from the `pem`
-field in the server block.
+The mTLS material lives in an `mtls/` directory under the resolved data
+root (see [tools.md](tools.md) for the exact rule). For a tarball install
+that lives in `/opt/certdx/`, the directory is `/opt/certdx/mtls/`. For a
+deb/rpm (FHS) install it is `/var/lib/certdx/mtls/`. Override with
+`--data-dir <path>` (or `CERTDX_DATA_DIR`) when generating bundles in a
+different location. The directory is created with mode `0700`; all
+bundles are written with mode `0600` (they contain private keys). The
+server reads its mTLS bundle from the `[MTLS].pem` config path; clients
+read theirs from the `pem` field in the server block.
 
 Each bundle is a single PEM file:
 
@@ -140,8 +141,13 @@ See [tools.md](tools.md) for the full flag set.
 
 ## 4. Server-side install
 
-Download the release archive, unpack it and move the resulting directory to
-`/opt/certdx`:
+Two layouts are supported. Pick the one that matches how you ship the
+binary.
+
+### Tarball install (default for releases)
+
+Download the release archive, unpack it and move the resulting directory
+to `/opt/certdx`:
 
 ```sh
 tar -xzf certdx_linux_amd64.tar.gz
@@ -159,11 +165,14 @@ The directory contains everything the server needs:
 │   ├── server_config.toml
 │   └── ...
 ├── systemd-service/
+│   ├── certdx-server.service
+│   └── certdx-client.service
 └── LICENSE
 ```
 
-When the server runs from `/opt/certdx`, it creates these alongside the
-binary as needed:
+In this layout the binary runs in **Local install mode**: state files
+(`mtls/`, `private/`, `cache.json`) are created next to the executable as
+needed:
 
 ```
 /opt/certdx/
@@ -180,6 +189,31 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now certdx-server
 journalctl -u certdx-server -f
 ```
+
+The unit passes `--conf /opt/certdx/config/server_config.toml` and
+writes its log to `/tmp/certdx-server.log` via `--log`.
+
+### FHS install (`.deb` / `.rpm`)
+
+If you install via a system package that drops the binary at
+`/usr/bin/certdx_server`, the binary runs in **FHS install mode**:
+
+| Resource | FHS path |
+| --- | --- |
+| Binary | `/usr/bin/certdx_server` |
+| Config | `/etc/certdx/server.toml` |
+| State (`mtls/`, `private/`, `cache.json`) | `/var/lib/certdx/` |
+
+Use the `*-fhs.service` units, which pass `--conf /etc/certdx/server.toml`
+and run as the `certdx` system user with systemd `StateDirectory=certdx`.
+`--conf` is always required — there is no implicit default.
+
+### Overriding state location
+
+In either mode you can move the state root with `--data-dir <path>` (or
+`CERTDX_DATA_DIR=<path>`). This is what containers and tests use to
+isolate state per instance. It does not affect where the config file is
+read from — that is controlled by `--conf`.
 
 ## 5. Client-side install
 

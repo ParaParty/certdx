@@ -35,17 +35,21 @@ type CertDXServer struct {
 	stopOnce   sync.Once
 }
 
-func MakeCertDXServer() *CertDXServer {
+func MakeCertDXServer() (*CertDXServer, error) {
+	store, err := NewCertStore()
+	if err != nil {
+		return nil, err
+	}
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	ret := &CertDXServer{
 		certCache:  makeCertCache(),
-		certStore:  NewCertStore(),
+		certStore:  store,
 		rootCtx:    rootCtx,
 		rootCancel: rootCancel,
 	}
 	ret.Config.SetDefault()
 
-	return ret
+	return ret, nil
 }
 
 func (c *CertT) IsValid() bool {

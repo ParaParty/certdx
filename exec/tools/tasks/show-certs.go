@@ -10,6 +10,7 @@ import (
 // contents.
 func ShowCerts(name string, args []string) error {
 	fs := newFlagSet(name)
+	dataDir := registerDataDirFlag(fs)
 	help := fs.BoolP("help", "h", false, "Print help")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -19,7 +20,12 @@ func ShowCerts(name string, args []string) error {
 		return nil
 	}
 
-	certStore := server.NewCertStore()
+	applyDataDir(*dataDir)
+
+	certStore, err := server.NewCertStore()
+	if err != nil {
+		return fmt.Errorf("init cert store: %w", err)
+	}
 	if err := certStore.Load(); err != nil {
 		return fmt.Errorf("load cert store: %w", err)
 	}

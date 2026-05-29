@@ -72,9 +72,14 @@ func StartEnv(tb testing.TB, logTag, bin, cwd string, extraEnv []string, args ..
 
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = cwd
+	// Pin certdx server/client state (mtls/, private/, cache.json) to the
+	// test's cwd. Without this they would fall back to the shared tools
+	// build cache and collide across parallel tests.
+	env := append(os.Environ(), "CERTDX_DATA_DIR="+cwd)
 	if len(extraEnv) > 0 {
-		cmd.Env = append(os.Environ(), extraEnv...)
+		env = append(env, extraEnv...)
 	}
+	cmd.Env = env
 	stdout := &syncBuf{}
 	stderr := &syncBuf{}
 	cmd.Stdout = io.MultiWriter(stdout, stdoutFile)

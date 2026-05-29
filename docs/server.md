@@ -15,7 +15,8 @@ certdx_server [flags]
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-c`, `--conf` | `./server.toml` | Path to the TOML config file. |
+| `-c`, `--conf` | *(required)* | Path to the TOML config file. |
+| `--data-dir` | *(install-mode default)* | Collapses both config (`mtls/`) and state (`private/`, `cache.json`) roots onto this directory. Env: `CERTDX_DATA_DIR`. |
 | `-l`, `--log` | *(stderr)* | Path to a log file. |
 | `-d`, `--debug` | `false` | Enable debug logging. |
 | `-h`, `--help` | | Print help. |

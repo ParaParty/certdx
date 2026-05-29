@@ -3,7 +3,6 @@ package tasks
 import (
 	"fmt"
 
-	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -15,7 +14,7 @@ func MakeServer(name string, args []string) error {
 		domains    = fs.StringSliceP("dns-names", "d", []string{}, "Server certificate DNS names (comma-separated)")
 		org        = fs.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		commonName = fs.StringP("common-name", "c", "CertDX Secret Discovery Service", "Subject Common Name")
-		mtlsDir    = fs.String("mtls-dir", "", "mTLS material directory")
+		dataDir    = registerDataDirFlag(fs)
 		help       = fs.BoolP("help", "h", false, "Print help")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -34,7 +33,7 @@ func MakeServer(name string, args []string) error {
 		return fmt.Errorf("--dns-names is required")
 	}
 
-	paths.SetMtlsDir(*mtlsDir)
+	applyDataDir(*dataDir)
 
 	if err := tools.MakeServerCert(*serverName, *org, *commonName, *domains); err != nil {
 		return fmt.Errorf("create server cert: %w", err)

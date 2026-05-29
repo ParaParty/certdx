@@ -3,7 +3,6 @@ package tasks
 import (
 	"fmt"
 
-	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -14,7 +13,7 @@ func MakeCA(name string, args []string) error {
 	var (
 		org        = fs.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		commonName = fs.StringP("common-name", "c", "CertDX Private Certificate Authority", "Subject Common Name")
-		mtlsDir    = fs.String("mtls-dir", "", "mTLS material directory")
+		dataDir    = registerDataDirFlag(fs)
 		help       = fs.BoolP("help", "h", false, "Print help")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -25,7 +24,7 @@ func MakeCA(name string, args []string) error {
 		return nil
 	}
 
-	paths.SetMtlsDir(*mtlsDir)
+	applyDataDir(*dataDir)
 
 	if err := tools.MakeCA(*org, *commonName); err != nil {
 		return fmt.Errorf("create CA: %w", err)

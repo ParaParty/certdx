@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/mtls"
 )
 
 const typeUrl = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret"
@@ -56,7 +57,11 @@ func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]
 	received := make(chan struct{})
 	c.Received.Store(&received)
 	c.Running.Store(false)
-	c.tlsCred = credentials.NewTLS(getMtlsConfig(server.PEM))
+	cfg, err := mtls.LoadClient(server.PEM)
+	if err != nil {
+		logging.Fatal("load mtls bundle: %s", err)
+	}
+	c.tlsCred = credentials.NewTLS(cfg)
 	return c
 }
 

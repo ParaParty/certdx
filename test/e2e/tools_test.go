@@ -85,7 +85,7 @@ func TestToolsMakeClientRejectsReservedMTLSNames(t *testing.T) {
 	defer cancel()
 
 	for _, name := range []string{"ca"} {
-		out, err := harness.RunTool(ctx, t, cwd, "make-client", "-n", name, "-o", "CertDX E2E")
+		out, err := harness.RunTool(ctx, t, cwd, "make-client", "--data-dir", cwd, "-n", name, "-o", "CertDX E2E")
 		if err == nil {
 			t.Fatalf("make-client %q succeeded; output:\n%s", name, out)
 		}
@@ -102,25 +102,25 @@ func TestToolsMakeClientRejectsReservedMTLSNames(t *testing.T) {
 	}
 }
 
-func TestToolsMTLSDirFlagOverride(t *testing.T) {
+func TestToolsDataDirFlagOverride(t *testing.T) {
 	cwd := t.TempDir()
-	mtlsDir := filepath.Join(t.TempDir(), "flag-mtls")
+	dataDir := filepath.Join(t.TempDir(), "flag-data")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if out, err := harness.RunTool(ctx, t, cwd, "make-ca", "--mtls-dir", mtlsDir, "-o", "CertDX E2E", "-c", "CertDX E2E CA"); err != nil {
-		t.Fatalf("make-ca with --mtls-dir: %s\n%s", err, out)
+	if out, err := harness.RunTool(ctx, t, cwd, "make-ca", "--data-dir", dataDir, "-o", "CertDX E2E", "-c", "CertDX E2E CA"); err != nil {
+		t.Fatalf("make-ca with --data-dir: %s\n%s", err, out)
 	}
-	if out, err := harness.RunTool(ctx, t, cwd, "make-server", "--mtls-dir", mtlsDir, "-n", "server", "-d", "localhost", "-o", "CertDX E2E"); err != nil {
-		t.Fatalf("make-server with --mtls-dir: %s\n%s", err, out)
+	if out, err := harness.RunTool(ctx, t, cwd, "make-server", "--data-dir", dataDir, "-n", "server", "-d", "localhost", "-o", "CertDX E2E"); err != nil {
+		t.Fatalf("make-server with --data-dir: %s\n%s", err, out)
 	}
-	if out, err := harness.RunTool(ctx, t, cwd, "make-client", "--mtls-dir", mtlsDir, "-n", "alice", "-o", "CertDX E2E"); err != nil {
-		t.Fatalf("make-client with --mtls-dir: %s\n%s", err, out)
+	if out, err := harness.RunTool(ctx, t, cwd, "make-client", "--data-dir", dataDir, "-n", "alice", "-o", "CertDX E2E"); err != nil {
+		t.Fatalf("make-client with --data-dir: %s\n%s", err, out)
 	}
 
-	assertMTLSLayout(t, mtlsDir, "alice")
+	assertMTLSLayout(t, filepath.Join(dataDir, "mtls"), "alice")
 	if _, err := os.Stat(filepath.Join(cwd, "mtls")); !os.IsNotExist(err) {
-		t.Fatalf("cwd mtls dir exists after --mtls-dir override: %v", err)
+		t.Fatalf("cwd mtls dir exists after --data-dir override: %v", err)
 	}
 }
 

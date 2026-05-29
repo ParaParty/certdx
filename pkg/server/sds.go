@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/mtls"
 )
 
 const typeUrl = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret"
@@ -301,7 +302,7 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 func (s *CertDXServer) SDSSrv() error {
 	logging.Info("Start listening GRPC at %s", s.Config.GRPCSDSServer.Listen)
 
-	mtlsConfig, err := getMtlsConfig(s.Config.MTLS.PEM)
+	mtlsConfig, err := mtls.LoadServer(s.Config.MTLS.PEM)
 	if err != nil {
 		return err
 	}

@@ -6,12 +6,14 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
-	"io"
-	
+
 	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/mtls"
 )
 
 type CertDXHttpClient struct {
@@ -26,8 +28,12 @@ func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOptio
 		client.Server = server
 
 		if server.AuthMethod == config.HTTP_AUTH_MTLS {
+			cfg, err := mtls.LoadClient(server.PEM)
+			if err != nil {
+				logging.Fatal("load mtls bundle: %s", err)
+			}
 			client.HttpClient.Transport = &http.Transport{
-				TLSClientConfig: getMtlsConfig(server.PEM),
+				TLSClientConfig: cfg,
 			}
 		}
 	}

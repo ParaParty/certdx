@@ -1,52 +1,110 @@
 // Package paths centralizes how certdx resolves the on-disk locations it
-// reads and writes: the mtls directory (CA, server, client material), the
-// ACME account private-key directory, and the server cache file.
+// reads and writes.
 //
-// The discovery rule is unchanged from the previous pkg/utils.findFile
-// behavior: look in the current working directory first, then next to the
-// running executable. If neither exists, the create paths fall back to the
-// directory containing the executable. This preserves backward compatibility
-// with existing deployments that rely on either layout.
+// Two roots are distinguished:
+//
+//   - Config root: holds the mtls/ bundle directory (cert material is
+//     treated as configuration, not runtime state). FHS default
+//     /etc/certdx; Local default is the directory containing the
+//     resolved executable.
+//   - State root: holds runtime state (cache.json, private/ ACME
+//     account keys). FHS default /var/lib/certdx; Local default is the
+//     directory containing the resolved executable.
+//
+// SetDataDir provides a single override that collapses both roots to
+// the same directory; this is what --data-dir / CERTDX_DATA_DIR set,
+// and is what tarball installs and tests rely on.
+//
+// Config-file location is the caller's responsibility (--conf is
+// required) and is independent of these roots.
 package paths
 
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
+	"runtime"
 )
 
 const (
-	// MtlsCertificateDir is the conventional directory name for mtls
-	// material under either the cwd or the exec dir.
 	MtlsCertificateDir = "mtls"
+	ACMEPrivateKeyDir  = "private"
+	ServerCacheFile    = "cache.json"
 
-	// ACMEPrivateKeyDir is the conventional directory name for ACME
-	// account private keys.
-	ACMEPrivateKeyDir = "private"
-
-	// ServerCacheFile is the conventional file name for the server's
-	// persisted cert cache.
-	ServerCacheFile = "cache.json"
+	fhsConfigDir = "/etc/certdx"
+	fhsStateDir  = "/var/lib/certdx"
 )
 
-var mtlsDirOverride string
+var dataDirOverride string
 
-// FileExists reports whether the file at path exists. It returns false on
-// any stat error, including permission errors, so callers should not rely on
-// FileExists to distinguish "missing" from "unreadable".
-func FileExists(path string) bool {
-	_, err := os.Stat(path)
+// FileExists reports whether the file at p exists. Returns false on any
+// stat error, including permission errors.
+func FileExists(p string) bool {
+	_, err := os.Stat(p)
 	return err == nil
 }
 
-// SetMtlsDir sets a process-local mtls directory override. It is mainly used
-// by --mtls-dir flags. Call this during process setup; concurrent mutation is
-// not supported.
-func SetMtlsDir(dir string) {
-	mtlsDirOverride = dir
+// SetDataDir sets a process-local override that collapses both the
+// config and state roots onto dir. Used by --data-dir / CERTDX_DATA_DIR.
+// Call once during process setup; concurrent mutation is not supported.
+func SetDataDir(dir string) {
+	dataDirOverride = dir
 }
 
-func ensureMtlsDir(dir string) (string, error) {
+func isFHSInstall() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	switch filepath.Dir(exe) {
+	case "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin":
+		return true
+	}
+	return false
+}
+
+func localBaseDir() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	return filepath.Dir(exe), nil
+}
+
+func configRoot() (string, error) {
+	if dataDirOverride != "" {
+		return dataDirOverride, nil
+	}
+	if isFHSInstall() {
+		return fhsConfigDir, nil
+	}
+	return localBaseDir()
+}
+
+func stateRoot() (string, error) {
+	if dataDirOverride != "" {
+		return dataDirOverride, nil
+	}
+	if isFHSInstall() {
+		return fhsStateDir, nil
+	}
+	return localBaseDir()
+}
+
+// MtlsDir returns the directory for mtls material, creating it with
+// mode 0o700 if necessary.
+func MtlsDir() (string, error) {
+	root, err := configRoot()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(root, MtlsCertificateDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -56,135 +114,52 @@ func ensureMtlsDir(dir string) (string, error) {
 	return dir, nil
 }
 
-// findFile looks up file under the cwd, then under the directory containing
-// the running executable. It returns the first hit, or os.ErrNotExist if
-// neither exists.
-func findFile(file string) (string, error) {
-	cwd, err := os.Getwd()
-	if err == nil {
-		pa := path.Join(cwd, file)
-		if FileExists(pa) {
-			return pa, nil
-		}
-	}
-
-	exec, err := os.Executable()
-	if err == nil {
-		pa := path.Join(exec, file)
-		if FileExists(pa) {
-			return pa, nil
-		}
-	}
-
-	return "", os.ErrNotExist
-}
-
-// MakeMtlsCertDir resolves the mtls directory for read/write use. It
-// returns an existing directory if one is found via discovery; otherwise it
-// creates a fresh mtls directory under the directory containing the
-// running executable and returns the new path.
-func MakeMtlsCertDir() (string, error) {
-	if mtlsDirOverride != "" {
-		return ensureMtlsDir(mtlsDirOverride)
-	}
-
-	dir, err := findFile(MtlsCertificateDir)
-	if err == nil {
-		return ensureMtlsDir(dir)
-	}
-
-	exec, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	dir = path.Dir(exec)
-
-	dir = path.Join(dir, MtlsCertificateDir)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return "", err
-		}
-	} else if err != nil {
-		return "", err
-	}
-
-	return ensureMtlsDir(dir)
-}
-
-// MtlsCAPath returns the on-disk path to the mtls CA bundle (cert + key
-// in a single PEM file).
 func MtlsCAPath() (string, error) {
-	caDir, err := MakeMtlsCertDir()
+	dir, err := MtlsDir()
 	if err != nil {
 		return "", err
 	}
-	return path.Join(caDir, "ca.pem"), nil
+	return filepath.Join(dir, "ca.pem"), nil
 }
 
-// CACounterPath returns the on-disk path to the CA serial counter file.
-func CACounterPath() (caCounterPath string, err error) {
-	caDir, err := MakeMtlsCertDir()
+func CACounterPath() (string, error) {
+	dir, err := MtlsDir()
 	if err != nil {
-		return
+		return "", err
 	}
-
-	caCounterPath = path.Join(caDir, "counter.txt")
-	return
+	return filepath.Join(dir, "counter.txt"), nil
 }
 
-// MtlsBundlePath returns the on-disk path to a named mtls entity bundle
-// (entity cert + entity key + CA cert in a single PEM file).
 func MtlsBundlePath(name string) (string, error) {
-	caDir, err := MakeMtlsCertDir()
+	dir, err := MtlsDir()
 	if err != nil {
 		return "", err
 	}
-	return path.Join(caDir, fmt.Sprintf("%s.pem", name)), nil
+	return filepath.Join(dir, name+".pem"), nil
 }
 
-// ACMEPrivateKey returns the on-disk path to an ACME account private key
-// for the given email + provider pair.
 func ACMEPrivateKey(email, acmeProvider string) (string, error) {
-	keyName := fmt.Sprintf("%s_%s.key", email, acmeProvider)
-
-	saveDir, err := findFile(ACMEPrivateKeyDir)
-	if err == nil {
-		return path.Join(saveDir, keyName), nil
-	}
-
-	exec, err := os.Executable()
+	root, err := stateRoot()
 	if err != nil {
 		return "", err
 	}
-	saveDir = path.Dir(exec)
-
-	saveDir = path.Join(saveDir, ACMEPrivateKeyDir)
-
-	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
-		if err := os.Mkdir(saveDir, 0o755); err != nil {
-			return "", fmt.Errorf("cannot create path: %s to save account key: %w", saveDir, err)
-		}
-	} else if err != nil {
-		return "", err
+	saveDir := filepath.Join(root, ACMEPrivateKeyDir)
+	if err := os.MkdirAll(saveDir, 0o700); err != nil {
+		return "", fmt.Errorf("cannot create path: %s to save account key: %w", saveDir, err)
 	}
-
-	return path.Join(saveDir, keyName), nil
+	keyName := fmt.Sprintf("%s_%s.key", email, acmeProvider)
+	return filepath.Join(saveDir, keyName), nil
 }
 
-// ServerCacheSave returns the on-disk path to the server's persisted cert
-// cache. Discovery looks in the cwd, then next to the executable; if
-// neither exists, the cache file is placed next to the executable.
-func ServerCacheSave() string {
-	cacheFile, err := findFile(ServerCacheFile)
-	if err == nil {
-		return cacheFile
-	}
-
-	exec, err := os.Executable()
+// ServerCachePath returns the on-disk path to the server's persisted
+// cert cache, creating its parent directory if necessary.
+func ServerCachePath() (string, error) {
+	root, err := stateRoot()
 	if err != nil {
-		return ServerCacheFile
+		return "", err
 	}
-	saveDir := path.Dir(exec)
-
-	return path.Join(saveDir, ServerCacheFile)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ServerCacheFile), nil
 }
