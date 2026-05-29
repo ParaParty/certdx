@@ -16,14 +16,16 @@ var (
 	buildDate string
 )
 
-const shutdownTimeout = 30 * time.Second
+const (
+	shutdownTimeout = 30 * time.Second
+)
 
 var (
 	test     = flag.BoolP("test", "t", false, "Test mode: skip http server certificate verification")
 	pLogPath = flag.StringP("log", "l", "", "Log file path")
 	help     = flag.BoolP("help", "h", false, "Print help")
 	version  = flag.BoolP("version", "v", false, "Print version")
-	conf     = flag.StringP("conf", "c", "./client.toml", "Config file path")
+	conf     = flag.StringP("conf", "c", "", "Config file path (required)")
 	pDebug   = flag.BoolP("debug", "d", false, "Enable debug log")
 )
 
@@ -47,12 +49,17 @@ func init() {
 	cli.Bootstrap(cli.LogConfig{Path: *pLogPath, Debug: *pDebug})
 	logging.Info("\nStarting %s", ver)
 
+	confPath := *conf
+	if confPath == "" {
+		logging.Fatal("--conf is required")
+	}
+
 	certDXDaemon = client.MakeCertDXClientDaemon()
 	if *test {
 		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
 	}
 
-	if err := certDXDaemon.LoadConfigurationAndValidate(*conf); err != nil {
+	if err := certDXDaemon.LoadConfigurationAndValidate(confPath); err != nil {
 		logging.Fatal("Invalid config: %s", err)
 	}
 	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)

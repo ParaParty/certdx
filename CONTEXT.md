@@ -88,16 +88,26 @@ term enters the codebase.
 
 ## On-disk artifacts
 
-- **`mtls/`**: the directory holding mTLS material. Discovery order is
-  `--mtls-dir` flag, then `mtls/` under cwd, then `mtls/` next to the
-  executable.
-- **`cache.json`**: the server's persisted cert store, written next to
-  the executable. Schema is the JSON encoding of
-  `map[domain.Key]certStoreEntry`.
-- **`private/`**: the directory holding ACME account private keys. One
-  key per `(email, provider)` pair, named `<email>_<provider>.key`.
-- **Counter**: the `mtls/counter.txt` file holding the next CA serial
-  number. Only used by `certdx_tools make-server` / `make-client`.
+Path resolution is owned by `pkg/paths`. Two install modes:
+
+- **FHS**: linux + unresolved exe path in `/usr/bin/*` or `/usr/sbin/*`.
+  Config under `/etc/certdx/`, state (`mtls/`, `private/`, `cache.json`)
+  under `/var/lib/certdx/`.
+- **Local**: everything else. Config under `<exeDir>/config/`, state
+  next to the resolved binary.
+
+`--data-dir <path>` (or `CERTDX_DATA_DIR`) overrides the state root for
+all binaries. `--conf <path>` overrides the config-file location; when
+omitted, the binary uses `<ConfigDir>/{server,client}.toml`.
+
+- **`mtls/`**: directory holding mTLS material under the resolved data
+  root. Bundle files are `0600`; the directory is `0700`.
+- **`cache.json`**: server's persisted cert store, in the data root.
+  Schema is the JSON encoding of `map[domain.Key]certStoreEntry`.
+- **`private/`**: ACME account private keys under the data root. One key
+  per `(email, provider)` pair, named `<email>_<provider>.key`.
+- **`mtls/counter.txt`**: next CA serial number. Used only by
+  `certdx_tools make-server` / `make-client`.
 
 ## Repository layout
 

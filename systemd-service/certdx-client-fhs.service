@@ -1,0 +1,25 @@
+[Unit]
+Description=Certdx client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=certdx
+Group=certdx
+ExecStart=/usr/bin/certdx_client --conf /etc/certdx/client.toml
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/certdx
+StateDirectory=certdx
+
+[Install]
+WantedBy=multi-user.target

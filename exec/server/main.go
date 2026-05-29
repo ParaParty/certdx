@@ -7,6 +7,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"pkg.para.party/certdx/pkg/cli"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/server"
 )
 
@@ -15,14 +16,18 @@ var (
 	buildDate string
 )
 
-const shutdownTimeout = 30 * time.Second
+const (
+	shutdownTimeout = 30 * time.Second
+	dataDirEnv      = "CERTDX_DATA_DIR"
+)
 
 var (
 	pLogPath = flag.StringP("log", "l", "", "Log file path")
 	help     = flag.BoolP("help", "h", false, "Print help")
 	version  = flag.BoolP("version", "v", false, "Print version")
-	pConf    = flag.StringP("conf", "c", "./server.toml", "Config file path")
+	pConf    = flag.StringP("conf", "c", "", "Config file path (required)")
 	pDebug   = flag.BoolP("debug", "d", false, "Enable debug log")
+	pDataDir = flag.String("data-dir", "", "Data directory for mtls/, private/, cache.json (env: "+dataDirEnv+")")
 )
 
 var cdxsrv *server.CertDXServer
@@ -45,9 +50,26 @@ func init() {
 	cli.Bootstrap(cli.LogConfig{Path: *pLogPath, Debug: *pDebug})
 	logging.Info("\nStarting %s", ver)
 
-	cdxsrv = server.MakeCertDXServer()
+	dataDir := *pDataDir
+	if dataDir == "" {
+		dataDir = os.Getenv(dataDirEnv)
+	}
+	if dataDir != "" {
+		paths.SetDataDir(dataDir)
+	}
 
-	if err := cli.LoadTOML(*pConf, &cdxsrv.Config); err != nil {
+	confPath := *pConf
+	if confPath == "" {
+		logging.Fatal("--conf is required")
+	}
+
+	var err error
+	cdxsrv, err = server.MakeCertDXServer()
+	if err != nil {
+		logging.Fatal("%s", err)
+	}
+
+	if err := cli.LoadTOML(confPath, &cdxsrv.Config); err != nil {
 		logging.Fatal("%s", err)
 	}
 

@@ -88,8 +88,8 @@ func MakeCA(organization, commonName string) error {
 		return fmt.Errorf("writing serial counter: %w", err)
 	}
 
-	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes})
-	fmt.Println(string(caPEM))
+	fmt.Printf("Wrote CA bundle: %s\n", caPath)
+	fmt.Printf("Wrote serial counter: %s\n", caCounterPath)
 	return nil
 }
 
@@ -112,11 +112,18 @@ func loadCA() (*x509.Certificate, crypto.PrivateKey, error) {
 		return nil, nil, fmt.Errorf("reading serial counter: %w", err)
 	}
 
-	caPEM, err := certcrypto.ParsePEMCertificate(bundleData)
+	certPEM, keyPEM := splitCertAndKeyPEM(bundleData)
+	if certPEM == nil {
+		return nil, nil, fmt.Errorf("no CERTIFICATE block in CA bundle: %s", caPath)
+	}
+	if keyPEM == nil {
+		return nil, nil, fmt.Errorf("no PRIVATE KEY block in CA bundle: %s", caPath)
+	}
+	caPEM, err := certcrypto.ParsePEMCertificate(certPEM)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing CA cert from bundle: %w", err)
 	}
-	caKey, err := certcrypto.ParsePEMPrivateKey(bundleData)
+	caKey, err := certcrypto.ParsePEMPrivateKey(keyPEM)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing CA key from bundle: %w", err)
 	}
@@ -225,8 +232,7 @@ func makeCert(bundlePath, organization, commonName string,
 		return fmt.Errorf("writing serial counter: %w", err)
 	}
 
-	fmt.Println(string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})))
-	fmt.Println(string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})))
+	fmt.Printf("Wrote bundle: %s\n", bundlePath)
 	return nil
 }
 
@@ -234,6 +240,33 @@ func makeCert(bundlePath, organization, commonName string,
 type pemBlock struct {
 	typ   string
 	bytes []byte
+}
+
+// splitCertAndKeyPEM scans a multi-block PEM bundle and returns the first
+// CERTIFICATE block and the first PRIVATE KEY block, each re-encoded as a
+// standalone PEM document.
+func splitCertAndKeyPEM(data []byte) (certPEM, keyPEM []byte) {
+	rest := data
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			return
+		}
+		switch block.Type {
+		case "CERTIFICATE":
+			if certPEM == nil {
+				certPEM = pem.EncodeToMemory(block)
+			}
+		case "PRIVATE KEY", "EC PRIVATE KEY", "RSA PRIVATE KEY":
+			if keyPEM == nil {
+				keyPEM = pem.EncodeToMemory(block)
+			}
+		}
+		if certPEM != nil && keyPEM != nil {
+			return
+		}
+	}
 }
 
 // writeBundle writes one or more PEM blocks to path as a single file with

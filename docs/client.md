@@ -15,7 +15,7 @@ certdx_client [flags]
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-c`, `--conf` | `./client.toml` | Path to the TOML config file. |
+| `-c`, `--conf` | *(required)* | Path to the TOML config file. |
 | `-l`, `--log` | *(stderr)* | Path to a log file. |
 | `-d`, `--debug` | `false` | Enable debug logging. |
 | `-t`, `--test` | `false` | Test mode: skip TLS verification on the HTTP server. |

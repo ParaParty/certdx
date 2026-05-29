@@ -48,7 +48,8 @@ CERTDX_COPY = [
     'config/client_tencentcloud_certificate_updater.toml',
     'config/server_config.toml',
     'config/server_config_full.toml',
-    'systemd-service',
+    'systemd-service/certdx-client.service',
+    'systemd-service/certdx-server.service',
     'LICENSE',
 ]
 

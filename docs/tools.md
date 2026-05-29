@@ -26,14 +26,24 @@ Available commands:
 | [`tencent-cloud-certificate-updater`](#tencent-cloud-certificate-updater) (alias: `tx-update`, `tencent-cloud-certificates-updater`) | Pull a cert from a certdx server and replace expiring Tencent Cloud certificates. |
 | [`kubernetes-certificate-updater`](#kubernetes-certificate-updater) (alias: `k8s-update`, `k8s-certificate-updater`) | Pull a cert from a certdx server and patch annotated Kubernetes TLS secrets. |
 
-The mTLS commands write into an `mtls/` directory next to the executable
-(or the current working directory). Run them in the same directory you run
-`certdx_server` from — typically `/opt/certdx` — so bundles are easy to
-reference from the server config. To override the location explicitly, pass
-`--mtls-dir <path>`; the flag is honored by `make-ca`, `make-server` and
-`make-client`. When a command ensures the directory exists,
-it is chmod'd to `0700`. All bundles are written with mode `0600` (they
-contain private keys).
+The mTLS commands write into an `mtls/` directory under the resolved
+config root. The root is picked in this order:
+
+1. `--data-dir <path>` flag (honored by `make-ca`, `make-server`,
+   `make-client`, `show-certs`). Sets both the config root and the
+   state root to the same directory.
+2. `CERTDX_DATA_DIR` environment variable (same semantics).
+3. Install-mode default: for FHS installs (`/usr/bin/certdx_tools`),
+   config root is `/etc/certdx/` (mtls bundles) and state root is
+   `/var/lib/certdx/` (`cache.json`, `private/`). For Local installs,
+   both default to the directory containing the executable.
+
+`--data-dir` points at the **parent** of `mtls/`, not at `mtls/` itself.
+When a command ensures the directory exists, it is chmod'd to `0700`.
+All bundles are written with mode `0600` (they contain private keys).
+
+The `make-*` commands print the path of each file they wrote rather
+than dumping the PEM blocks to stdout.
 
 `make-client` and `make-server` reserve the name `ca` (case-insensitive,
 trimmed) so a typo cannot silently overwrite the CA bundle.
@@ -42,13 +52,17 @@ trimmed) so a typo cannot silently overwrite the CA bundle.
 
 ## `show-certs`
 
-Reads `cache.json` from the working directory and prints the cached
-certificates' metadata. Use it to confirm the server has issued the expected
-domains.
+Reads `cache.json` from the resolved data root (see `--data-dir`) and
+prints the cached certificates' metadata. Use it to confirm the server
+has issued the expected domains.
 
 ```sh
 certdx_tools show-certs
 ```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--data-dir` | *(install-mode default)* | Parent directory of `cache.json`. Env: `CERTDX_DATA_DIR`. |
 
 ## `google-account`
 
@@ -90,7 +104,7 @@ bundle with `0600`.
 | --- | --- | --- |
 | `-o`, `--organization` | `CertDX Private` | Subject `O`. |
 | `-c`, `--common-name` | `CertDX Private Certificate Authority` | Subject `CN`. |
-| `--mtls-dir` | *(empty: discover via cwd → exec dir)* | Override the mTLS material directory. |
+| `--data-dir` | *(install-mode default)* | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 ## `make-server`
 
@@ -103,7 +117,7 @@ server key + CA cert) signed by the CA. Run after `make-ca`.
 | `-d`, `--dns-names` | yes | Comma-separated SANs. Must include every name a client will dial. |
 | `-o`, `--organization` | | Subject `O`. Default `CertDX Private`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Secret Discovery Service`. |
-| `--mtls-dir` | | Override the mTLS material directory. |
+| `--data-dir` | | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 Example:
 
@@ -126,7 +140,7 @@ silently overwrite the CA bundle.
 | `-d`, `--dns-names` | | Optional SANs. |
 | `-o`, `--organization` | | Subject `O`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Client: <name>`. |
-| `--mtls-dir` | | Override the mTLS material directory. |
+| `--data-dir` | | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 Example:
 

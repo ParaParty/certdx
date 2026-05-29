@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"pkg.para.party/certdx/pkg/paths"
 	"pkg.para.party/certdx/pkg/tools"
 )
 
@@ -20,7 +19,7 @@ func MakeClient(name string, args []string) error {
 		domains    = fs.StringSliceP("dns-names", "d", []string{}, "Client certificate DNS names (comma-separated)")
 		org        = fs.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		commonName = fs.StringP("common-name", "c", commonNameTemplate, "Subject Common Name")
-		mtlsDir    = fs.String("mtls-dir", "", "mTLS material directory")
+		dataDir    = registerDataDirFlag(fs)
 		help       = fs.BoolP("help", "h", false, "Print help")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -36,7 +35,7 @@ func MakeClient(name string, args []string) error {
 	}
 	cn := strings.ReplaceAll(*commonName, "{name}", *clientName)
 
-	paths.SetMtlsDir(*mtlsDir)
+	applyDataDir(*dataDir)
 
 	if err := tools.MakeClientCert(*clientName, *org, cn, *domains); err != nil {
 		return fmt.Errorf("create client cert: %w", err)

@@ -13,7 +13,10 @@ import (
 )
 
 func makeTestServer(token string, apiPath string, allowedDomains []string) *CertDXServer {
-	s := MakeCertDXServer()
+	s, err := MakeCertDXServer()
+	if err != nil {
+		panic(err)
+	}
 	s.Config.HttpServer.Token = token
 	s.Config.HttpServer.APIPath = apiPath
 	s.Config.ACME.AllowedDomains = allowedDomains

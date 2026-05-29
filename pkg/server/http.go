@@ -15,6 +15,7 @@ import (
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/mtls"
 )
 
 // httpShutdownTimeout caps how long graceful shutdown of the HTTP API
@@ -214,7 +215,7 @@ func (s *CertDXServer) serveHttp(handler http.Handler) error {
 
 // serveHttpMtls runs the mTLS-authenticated HTTP API.
 func (s *CertDXServer) serveHttpMtls(handler http.Handler) error {
-	mtlsConfig, err := getMtlsConfig(s.Config.MTLS.PEM)
+	mtlsConfig, err := mtls.LoadServer(s.Config.MTLS.PEM)
 	if err != nil {
 		return err
 	}

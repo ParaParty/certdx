@@ -26,12 +26,16 @@ type CertStore struct {
 }
 
 // NewCertStore constructs a CertStore backed by the default cache.json path.
-func NewCertStore() CertStore {
+func NewCertStore() (CertStore, error) {
+	path, err := paths.ServerCachePath()
+	if err != nil {
+		return CertStore{}, fmt.Errorf("resolve cert store path: %w", err)
+	}
 	return CertStore{
-		path:    paths.ServerCacheSave(),
+		path:    path,
 		entries: make(map[domain.Key]*certStoreEntry),
 		update:  make(chan *certStoreEntry, 10),
-	}
+	}, nil
 }
 
 // Load reads and unmarshals the persisted certificate store. It returns

@@ -14,7 +14,10 @@ func makeValidTestEntry() *certEntry {
 }
 
 func TestSubscribeReleaseClearsRenewer(t *testing.T) {
-	s := MakeCertDXServer()
+	s, err := MakeCertDXServer()
+	if err != nil {
+		t.Fatal(err)
+	}
 	entry := makeValidTestEntry()
 
 	s.subscribe(entry)
@@ -41,7 +44,10 @@ func TestSubscribeReleaseClearsRenewer(t *testing.T) {
 }
 
 func TestSubscribeReleaseConcurrentBalanced(t *testing.T) {
-	s := MakeCertDXServer()
+	s, err := MakeCertDXServer()
+	if err != nil {
+		t.Fatal(err)
+	}
 	entry := makeValidTestEntry()
 
 	var wg sync.WaitGroup
@@ -209,7 +215,10 @@ func TestCertCacheGetCreatesAndDeduplicates(t *testing.T) {
 }
 
 func TestIsSubscribingReflectsState(t *testing.T) {
-	s := MakeCertDXServer()
+	s, err := MakeCertDXServer()
+	if err != nil {
+		t.Fatal(err)
+	}
 	entry := makeValidTestEntry()
 
 	if s.isSubscribing(entry) {

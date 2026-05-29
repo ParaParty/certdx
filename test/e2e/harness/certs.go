@@ -36,12 +36,9 @@ func GenerateChain(tb testing.TB, cwd string, serverDNS []string, clientNames ..
 		serverDNS = []string{"localhost", "127.0.0.1"}
 	}
 
-	// certdx_tools' MakeMtlsCertDir prefers <cwd>/mtls if it already
-	// exists, otherwise creates it next to the executable. Pre-create it
-	// so the chain lands in the test directory.
-	if err := os.MkdirAll(filepath.Join(cwd, "mtls"), 0o755); err != nil {
-		tb.Fatalf("mkdir mtls: %s", err)
-	}
+	// Tools resolve mtls/ under --data-dir, so pass <cwd> explicitly.
+	// This isolates each test from the shared tools binary's exe-adjacent
+	// default and removes the need to pre-create <cwd>/mtls.
 
 	// Trigger the (potentially slow, one-shot) binary build before
 	// starting the per-command context timer; on a cold CI runner the
@@ -52,12 +49,12 @@ func GenerateChain(tb testing.TB, cwd string, serverDNS []string, clientNames ..
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if out, err := RunTool(ctx, tb, cwd, "make-ca", "-o", "CertDX E2E", "-c", "CertDX E2E CA"); err != nil {
+	if out, err := RunTool(ctx, tb, cwd, "make-ca", "--data-dir", cwd, "-o", "CertDX E2E", "-c", "CertDX E2E CA"); err != nil {
 		tb.Fatalf("make-ca: %s\n%s", err, out)
 	}
 
 	dnsArg := joinDNS(serverDNS)
-	if out, err := RunTool(ctx, tb, cwd, "make-server", "-n", "server", "-d", dnsArg, "-o", "CertDX E2E"); err != nil {
+	if out, err := RunTool(ctx, tb, cwd, "make-server", "--data-dir", cwd, "-n", "server", "-d", dnsArg, "-o", "CertDX E2E"); err != nil {
 		tb.Fatalf("make-server: %s\n%s", err, out)
 	}
 
@@ -69,7 +66,7 @@ func GenerateChain(tb testing.TB, cwd string, serverDNS []string, clientNames ..
 	}
 
 	for _, name := range clientNames {
-		if out, err := RunTool(ctx, tb, cwd, "make-client", "-n", name, "-o", "CertDX E2E"); err != nil {
+		if out, err := RunTool(ctx, tb, cwd, "make-client", "--data-dir", cwd, "-n", name, "-o", "CertDX E2E"); err != nil {
 			tb.Fatalf("make-client %s: %s\n%s", name, err, out)
 		}
 		chain.ClientBundle[name] = filepath.Join(cwd, "mtls", name+".pem")
