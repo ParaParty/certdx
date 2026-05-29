@@ -12,17 +12,13 @@ type CaddyfileHTTPServer struct {
 	URL        string
 	AuthMethod string // "token" or "mtls"
 	Token      string
-	CA         string
-	Cert       string
-	Key        string
+	PEM        string
 }
 
 // CaddyfileGRPCServer mirrors a single GRPC main_server entry.
 type CaddyfileGRPCServer struct {
 	Server string
-	CA     string
-	Cert   string
-	Key    string
+	PEM    string
 }
 
 // CaddyfileCertEntry is one "certificate <id> { domains... }" block.
@@ -80,14 +76,8 @@ const caddyfileTpl = `{
 {{- if .HTTP.Token}}
 				token {{.HTTP.Token}}
 {{- end}}
-{{- if .HTTP.CA}}
-				ca {{.HTTP.CA}}
-{{- end}}
-{{- if .HTTP.Cert}}
-				certificate {{.HTTP.Cert}}
-{{- end}}
-{{- if .HTTP.Key}}
-				key {{.HTTP.Key}}
+{{- if .HTTP.PEM}}
+				pem {{.HTTP.PEM}}
 {{- end}}
 			}
 		}
@@ -96,9 +86,7 @@ const caddyfileTpl = `{
 		GRPC {
 			main_server {
 				server {{.GRPC.Server}}
-				ca {{.GRPC.CA}}
-				certificate {{.GRPC.Cert}}
-				key {{.GRPC.Key}}
+				pem {{.GRPC.PEM}}
 			}
 		}
 {{end}}

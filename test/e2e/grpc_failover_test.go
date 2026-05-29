@@ -34,21 +34,22 @@ func certTag(c *x509.Certificate) string {
 
 // grpcServerOpts builds a gRPC SDS server config bound to port. Short
 // timings keep tests fast.
-func grpcServerOpts(port int) harness.ServerOpts {
+func grpcServerOpts(port int, srvBundle string) harness.ServerOpts {
 	return harness.ServerOpts{
 		AllowedDomains: []string{"example.test"},
 		CertLifetime:   30 * time.Second,
 		RenewTimeLeft:  16 * time.Second,
 		GRPCEnabled:    true,
 		GRPCListen:     fmt.Sprintf(":%d", port),
+		MTLSPEM:        srvBundle,
 	}
 }
 
 // startGRPCServer renders server.toml and spawns certdx_server with the
 // given mock-cert tag, then waits for it to listen.
-func startGRPCServer(t *testing.T, logTag, tag, dir string, port int) *harness.Process {
+func startGRPCServer(t *testing.T, logTag, tag, dir string, port int, srvBundle string) *harness.Process {
 	t.Helper()
-	harness.WriteServerConfig(t, dir, grpcServerOpts(port))
+	harness.WriteServerConfig(t, dir, grpcServerOpts(port, srvBundle))
 	env := []string{mockACMETagEnv + "=" + tag}
 	p := harness.StartEnv(t, logTag, harness.ServerBin(t), dir, env, "-c", filepath.Join(dir, "server.toml"), "-d")
 	if err := harness.WaitListening("127.0.0.1", port, 5*time.Second); err != nil {
@@ -99,18 +100,16 @@ func setupGRPCFailover(t *testing.T, opts grpcSetupOpts) (mainSrv, standbySrv *h
 	s.chain = harness.GenerateChain(t, cwd, []string{"localhost", "127.0.0.1"}, "grpcclient")
 	s.mainDir = filepath.Join(cwd, "main")
 	harness.LinkMTLSInto(t, s.chain, s.mainDir)
-	mainSrv = startGRPCServer(t, "main-0", tagMain, s.mainDir, s.mainPort)
+	mainSrv = startGRPCServer(t, "main-0", tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 
 	var standbyCfg *harness.GRPCClientServer
 	if !opts.NoStandby {
 		s.standbyDir = filepath.Join(cwd, "standby")
 		harness.LinkMTLSInto(t, s.chain, s.standbyDir)
-		standbySrv = startGRPCServer(t, "standby-0", tagStandby, s.standbyDir, s.standbyPort)
+		standbySrv = startGRPCServer(t, "standby-0", tagStandby, s.standbyDir, s.standbyPort, s.chain.SrvBundle)
 		standbyCfg = &harness.GRPCClientServer{
 			Server: fmt.Sprintf("localhost:%d", s.standbyPort),
-			CA:     s.chain.CAPEM,
-			Cert:   s.chain.ClientPEM["grpcclient"],
-			Key:    s.chain.ClientKey["grpcclient"],
+			PEM:    s.chain.ClientBundle["grpcclient"],
 		}
 	}
 
@@ -121,9 +120,7 @@ func setupGRPCFailover(t *testing.T, opts grpcSetupOpts) (mainSrv, standbySrv *h
 	harness.WriteGRPCClientConfig(t, s.clientDir, harness.GRPCClientOpts{
 		Main: harness.GRPCClientServer{
 			Server: fmt.Sprintf("localhost:%d", s.mainPort),
-			CA:     s.chain.CAPEM,
-			Cert:   s.chain.ClientPEM["grpcclient"],
-			Key:    s.chain.ClientKey["grpcclient"],
+			PEM:    s.chain.ClientBundle["grpcclient"],
 		},
 		Standby:      standbyCfg,
 		RetryCount:   opts.RetryCount,
@@ -175,7 +172,7 @@ func TestGRPCFailoverThenFallback(t *testing.T) {
 		t.Errorf("phase 2: expected cert tag %q (from standby), got %q", tagStandby, tag)
 	}
 
-	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort)
+	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 	t.Log("phase 3: main restarted")
 	third := harness.WaitForCertChange(t, s.certPath, second, 60*time.Second)
 	t.Logf("phase 3: post-fallback cert delivered (tag=%q serial %s)", certTag(third), third.SerialNumber)
@@ -196,7 +193,7 @@ func TestGRPCBothDownThenMainRecovers(t *testing.T) {
 	t.Log("both servers stopped; sleeping to let the client enter retry loops")
 	time.Sleep(8 * time.Second)
 
-	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort)
+	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 	t.Log("main restarted")
 	got := harness.WaitForCertChange(t, s.certPath, first, 60*time.Second)
 	t.Logf("post-recovery cert (tag=%q serial %s)", certTag(got), got.SerialNumber)
@@ -217,7 +214,7 @@ func TestGRPCBothDownThenStandbyRecovers(t *testing.T) {
 	t.Log("both servers stopped; sleeping to let the client enter retry loops")
 	time.Sleep(8 * time.Second)
 
-	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort)
+	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort, s.chain.SrvBundle)
 	t.Log("standby restarted")
 	got := harness.WaitForCertChange(t, s.certPath, first, 60*time.Second)
 	t.Logf("post-recovery cert (tag=%q serial %s)", certTag(got), got.SerialNumber)
@@ -238,8 +235,8 @@ func TestGRPCBothDownThenBothRecover(t *testing.T) {
 	t.Log("both servers stopped; sleeping to let the client enter retry loops")
 	time.Sleep(8 * time.Second)
 
-	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort)
-	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort)
+	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort, s.chain.SrvBundle)
+	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 	t.Log("both servers restarted")
 	got := harness.WaitForCertChange(t, s.certPath, first, 60*time.Second)
 	t.Logf("post-recovery cert (tag=%q serial %s)", certTag(got), got.SerialNumber)
@@ -291,7 +288,7 @@ func TestGRPCFailoverFallbackStress(t *testing.T) {
 		t.Logf("cycle %d: failover cert (serial %s)", i, got.SerialNumber)
 		prev = got
 
-		mainSrv = startGRPCServer(t, fmt.Sprintf("main-r%d", i), tagMain, s.mainDir, s.mainPort)
+		mainSrv = startGRPCServer(t, fmt.Sprintf("main-r%d", i), tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 		got = harness.WaitForCertChange(t, s.certPath, prev, 60*time.Second)
 		t.Logf("cycle %d: fallback cert (tag=%q serial %s)", i, certTag(got), got.SerialNumber)
 		if tag := certTag(got); tag != tagMain {
@@ -320,7 +317,7 @@ func TestGRPCBothDownStress(t *testing.T) {
 
 		if i%2 == 1 {
 			// odd cycle: main recovers first.
-			mainSrv = startGRPCServer(t, fmt.Sprintf("main-r%d", i), tagMain, s.mainDir, s.mainPort)
+			mainSrv = startGRPCServer(t, fmt.Sprintf("main-r%d", i), tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 			got := harness.WaitForCertChange(t, s.certPath, prev, 60*time.Second)
 			t.Logf("cycle %d: main recovered, cert (tag=%q)", i, certTag(got))
 			if tag := certTag(got); tag != tagMain {
@@ -328,17 +325,17 @@ func TestGRPCBothDownStress(t *testing.T) {
 			}
 			prev = got
 			// Bring standby back so the next cycle has both targets.
-			standbySrv = startGRPCServer(t, fmt.Sprintf("standby-r%d", i), tagStandby, s.standbyDir, s.standbyPort)
+			standbySrv = startGRPCServer(t, fmt.Sprintf("standby-r%d", i), tagStandby, s.standbyDir, s.standbyPort, s.chain.SrvBundle)
 		} else {
 			// even cycle: standby recovers first.
-			standbySrv = startGRPCServer(t, fmt.Sprintf("standby-r%d", i), tagStandby, s.standbyDir, s.standbyPort)
+			standbySrv = startGRPCServer(t, fmt.Sprintf("standby-r%d", i), tagStandby, s.standbyDir, s.standbyPort, s.chain.SrvBundle)
 			got := harness.WaitForCertChange(t, s.certPath, prev, 60*time.Second)
 			t.Logf("cycle %d: standby recovered, cert (tag=%q)", i, certTag(got))
 			if tag := certTag(got); tag != tagStandby {
 				t.Errorf("cycle %d: expected cert tag %q, got %q", i, tagStandby, tag)
 			}
 			prev = got
-			mainSrv = startGRPCServer(t, fmt.Sprintf("main-r%d", i), tagMain, s.mainDir, s.mainPort)
+			mainSrv = startGRPCServer(t, fmt.Sprintf("main-r%d", i), tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 		}
 	}
 }
@@ -362,7 +359,7 @@ func TestGRPCMainRetryRecoversBeforeFailover(t *testing.T) {
 	}
 	// Restart main well within the 15s retry window.
 	time.Sleep(3 * time.Second)
-	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort)
+	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 	t.Log("main restarted within retry window")
 
 	got := harness.WaitForCertChange(t, s.certPath, first, 60*time.Second)
@@ -393,7 +390,7 @@ func TestGRPCStandbyRetryRecoversBeforeReconnect(t *testing.T) {
 	// then enters its 15s retry. 20s lands inside that window.
 	time.Sleep(20 * time.Second)
 
-	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort)
+	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort, s.chain.SrvBundle)
 	t.Log("standby restarted within standby-retry window")
 
 	got := harness.WaitForCertChange(t, s.certPath, first, 90*time.Second)
@@ -417,7 +414,7 @@ func TestGRPCStandbyReconnectIntervalRecovers(t *testing.T) {
 	// and enters the 20s ReconnectInterval sleep. 5s lands inside that window.
 	time.Sleep(5 * time.Second)
 
-	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort)
+	_ = startGRPCServer(t, "standby-r1", tagStandby, s.standbyDir, s.standbyPort, s.chain.SrvBundle)
 	t.Log("standby restarted within ReconnectInterval window")
 
 	got := harness.WaitForCertChange(t, s.certPath, first, 60*time.Second)
@@ -451,7 +448,7 @@ func TestGRPCNoStandbyMainRecovers(t *testing.T) {
 	}
 	// RetryCount=1 → RESTART_MAIN's 5s sleep. Restart inside the window.
 	time.Sleep(2 * time.Second)
-	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort)
+	_ = startGRPCServer(t, "main-r1", tagMain, s.mainDir, s.mainPort, s.chain.SrvBundle)
 
 	got := harness.WaitForCertChange(t, s.certPath, first, 60*time.Second)
 	if tag := certTag(got); tag != tagMain {

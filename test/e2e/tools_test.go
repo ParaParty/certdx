@@ -20,7 +20,7 @@ func TestToolsMakeMTLSCertChain(t *testing.T) {
 	cwd := t.TempDir()
 	chain := harness.GenerateChain(t, cwd, []string{"localhost", "127.0.0.1"}, "alice", "bob")
 
-	for _, p := range []string{chain.CAPEM, chain.CAKey, chain.SrvPEM, chain.SrvKey} {
+	for _, p := range []string{chain.CABundle, chain.SrvBundle} {
 		info, err := os.Stat(p)
 		if err != nil {
 			t.Fatalf("missing %s: %s", p, err)
@@ -31,17 +31,14 @@ func TestToolsMakeMTLSCertChain(t *testing.T) {
 	}
 
 	assertPerm(t, filepath.Join(cwd, "mtls"), 0o700)
-	assertPerm(t, chain.CAPEM, 0o644)
-	assertPerm(t, chain.CAKey, 0o600)
-	assertPerm(t, chain.SrvPEM, 0o644)
-	assertPerm(t, chain.SrvKey, 0o600)
-	for name := range chain.ClientPEM {
-		assertPerm(t, chain.ClientPEM[name], 0o644)
-		assertPerm(t, chain.ClientKey[name], 0o600)
+	assertPerm(t, chain.CABundle, 0o600)
+	assertPerm(t, chain.SrvBundle, 0o600)
+	for name := range chain.ClientBundle {
+		assertPerm(t, chain.ClientBundle[name], 0o600)
 	}
 
-	ca := harness.LoadCert(t, chain.CAPEM)
-	srv := harness.LoadCert(t, chain.SrvPEM)
+	ca := harness.LoadCert(t, chain.CABundle)
+	srv := harness.LoadCert(t, chain.SrvBundle)
 	if err := harness.VerifyChain(srv, ca, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}); err != nil {
 		t.Fatalf("server cert does not chain to CA: %s", err)
 	}
@@ -59,7 +56,7 @@ func TestToolsMakeMTLSCertChain(t *testing.T) {
 	}
 
 	for _, name := range []string{"alice", "bob"} {
-		pemPath := chain.ClientPEM[name]
+		pemPath := chain.ClientBundle[name]
 		if _, err := os.Stat(pemPath); err != nil {
 			t.Fatalf("missing client cert %s: %s", pemPath, err)
 		}
@@ -81,13 +78,13 @@ func TestToolsMakeMTLSCertChain(t *testing.T) {
 func TestToolsMakeClientRejectsReservedMTLSNames(t *testing.T) {
 	cwd := t.TempDir()
 	chain := harness.GenerateChain(t, cwd, []string{"localhost"})
-	originalCA := mustReadFile(t, chain.CAPEM)
-	originalServer := mustReadFile(t, chain.SrvPEM)
+	originalCA := mustReadFile(t, chain.CABundle)
+	originalServer := mustReadFile(t, chain.SrvBundle)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	for _, name := range []string{"ca", "server"} {
+	for _, name := range []string{"ca"} {
 		out, err := harness.RunTool(ctx, t, cwd, "make-client", "-n", name, "-o", "CertDX E2E")
 		if err == nil {
 			t.Fatalf("make-client %q succeeded; output:\n%s", name, out)
@@ -97,10 +94,10 @@ func TestToolsMakeClientRejectsReservedMTLSNames(t *testing.T) {
 		}
 	}
 
-	if got := mustReadFile(t, chain.CAPEM); string(got) != string(originalCA) {
+	if got := mustReadFile(t, chain.CABundle); string(got) != string(originalCA) {
 		t.Fatalf("ca.pem changed after reserved-name make-client")
 	}
-	if got := mustReadFile(t, chain.SrvPEM); string(got) != string(originalServer) {
+	if got := mustReadFile(t, chain.SrvBundle); string(got) != string(originalServer) {
 		t.Fatalf("server.pem changed after reserved-name make-client")
 	}
 }
@@ -114,7 +111,7 @@ func TestToolsMTLSDirFlagOverride(t *testing.T) {
 	if out, err := harness.RunTool(ctx, t, cwd, "make-ca", "--mtls-dir", mtlsDir, "-o", "CertDX E2E", "-c", "CertDX E2E CA"); err != nil {
 		t.Fatalf("make-ca with --mtls-dir: %s\n%s", err, out)
 	}
-	if out, err := harness.RunTool(ctx, t, cwd, "make-server", "--mtls-dir", mtlsDir, "-d", "localhost", "-o", "CertDX E2E"); err != nil {
+	if out, err := harness.RunTool(ctx, t, cwd, "make-server", "--mtls-dir", mtlsDir, "-n", "server", "-d", "localhost", "-o", "CertDX E2E"); err != nil {
 		t.Fatalf("make-server with --mtls-dir: %s\n%s", err, out)
 	}
 	if out, err := harness.RunTool(ctx, t, cwd, "make-client", "--mtls-dir", mtlsDir, "-n", "alice", "-o", "CertDX E2E"); err != nil {
@@ -143,12 +140,9 @@ func containsAll(haystack, needles []string) bool {
 func assertMTLSLayout(t *testing.T, mtlsDir string, clientName string) {
 	t.Helper()
 	assertPerm(t, mtlsDir, 0o700)
-	assertPerm(t, filepath.Join(mtlsDir, "ca.pem"), 0o644)
-	assertPerm(t, filepath.Join(mtlsDir, "ca.key"), 0o600)
-	assertPerm(t, filepath.Join(mtlsDir, "server.pem"), 0o644)
-	assertPerm(t, filepath.Join(mtlsDir, "server.key"), 0o600)
-	assertPerm(t, filepath.Join(mtlsDir, clientName+".pem"), 0o644)
-	assertPerm(t, filepath.Join(mtlsDir, clientName+".key"), 0o600)
+	assertPerm(t, filepath.Join(mtlsDir, "ca.pem"), 0o600)
+	assertPerm(t, filepath.Join(mtlsDir, "server.pem"), 0o600)
+	assertPerm(t, filepath.Join(mtlsDir, clientName+".pem"), 0o600)
 }
 
 func assertPerm(t *testing.T, path string, want os.FileMode) {

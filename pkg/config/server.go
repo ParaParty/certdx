@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"pkg.para.party/certdx/pkg/acme/acmeproviders"
+	"pkg.para.party/certdx/pkg/paths"
 )
 
 type ServerConfig struct {
@@ -17,6 +18,7 @@ type ServerConfig struct {
 	DnsProvider  *DnsProvider  `toml:"DnsProvider" json:"dns_provider,omitempty"`
 	HttpProvider *HttpProvider `toml:"HttpProvider" json:"http_provider,omitempty"`
 
+	MTLS          MTLSConfig       `toml:"MTLS" json:"mtls,omitempty"`
 	HttpServer    HttpServerConfig `toml:"HttpServer" json:"http_server,omitempty"`
 	GRPCSDSServer GRPCServerConfig `toml:"gRPCSDSServer" json:"grpc_sds_server,omitempty"`
 }
@@ -62,6 +64,12 @@ func (c *ServerConfig) Validate() error {
 
 	if err := c.GRPCSDSServer.Validate(); err != nil {
 		ret = append(ret, err)
+	}
+
+	if c.needsMTLS() {
+		if err := c.MTLS.Validate(); err != nil {
+			ret = append(ret, err)
+		}
 	}
 
 	return errors.Join(ret...)
@@ -225,6 +233,30 @@ func (c *GRPCServerConfig) Validate() error {
 	}
 
 	return nil
+}
+
+type MTLSConfig struct {
+	PEM string `toml:"pem" json:"pem,omitempty"`
+}
+
+func (c *MTLSConfig) Validate() error {
+	if c.PEM == "" {
+		return fmt.Errorf("[MTLS] pem is required when using mTLS or gRPC SDS")
+	}
+	if !paths.FileExists(c.PEM) {
+		return fmt.Errorf("[MTLS] file not found: %s", c.PEM)
+	}
+	return nil
+}
+
+func (c *ServerConfig) needsMTLS() bool {
+	if c.GRPCSDSServer.Enabled {
+		return true
+	}
+	if c.HttpServer.Enabled && c.HttpServer.AuthMethod == HTTP_AUTH_MTLS {
+		return true
+	}
+	return false
 }
 
 func (c *ServerConfig) SetDefault() {

@@ -64,34 +64,27 @@ func TestMtlsCAPathUnderOverride(t *testing.T) {
 	override := filepath.Join(t.TempDir(), "mtls")
 	SetMtlsDir(override)
 
-	caPEM, caKey, err := MtlsCAPath()
+	caPath, err := MtlsCAPath()
 	if err != nil {
 		t.Fatalf("MtlsCAPath: %v", err)
 	}
 	wantPEM := filepath.Join(override, "ca.pem")
-	wantKey := filepath.Join(override, "ca.key")
-	if caPEM != wantPEM {
-		t.Errorf("ca.pem path: got %s want %s", caPEM, wantPEM)
-	}
-	if caKey != wantKey {
-		t.Errorf("ca.key path: got %s want %s", caKey, wantKey)
+	if caPath != wantPEM {
+		t.Errorf("ca.pem path: got %s want %s", caPath, wantPEM)
 	}
 }
 
-func TestMtlsClientCertPathName(t *testing.T) {
+func TestMtlsBundlePathName(t *testing.T) {
 	prev := mtlsDirOverride
 	t.Cleanup(func() { mtlsDirOverride = prev })
 	override := filepath.Join(t.TempDir(), "mtls")
 	SetMtlsDir(override)
 
-	pem, key, err := MtlsClientCertPath("alice")
+	p, err := MtlsBundlePath("alice")
 	if err != nil {
-		t.Fatalf("MtlsClientCertPath: %v", err)
+		t.Fatalf("MtlsBundlePath: %v", err)
 	}
-	if pem != filepath.Join(override, "alice.pem") {
-		t.Errorf("client pem: got %s", pem)
-	}
-	if key != filepath.Join(override, "alice.key") {
-		t.Errorf("client key: got %s", key)
+	if p != filepath.Join(override, "alice.pem") {
+		t.Errorf("bundle path: got %s", p)
 	}
 }

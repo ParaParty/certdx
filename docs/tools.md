@@ -28,15 +28,15 @@ Available commands:
 
 The mTLS commands write into an `mtls/` directory next to the executable
 (or the current working directory). Run them in the same directory you run
-`certdx_server` from — typically `/opt/certdx` — so the server picks them
-up automatically. To override the location explicitly, pass `--mtls-dir
-<path>`; the flag is honored by `make-ca`, `make-server`, `make-client`,
-and `certdx_server` itself. When a command ensures the directory exists,
-it is chmod'd to `0700`. Cert PEMs are written with mode `0644` and
-private keys with mode `0600`.
+`certdx_server` from — typically `/opt/certdx` — so bundles are easy to
+reference from the server config. To override the location explicitly, pass
+`--mtls-dir <path>`; the flag is honored by `make-ca`, `make-server` and
+`make-client`. When a command ensures the directory exists,
+it is chmod'd to `0700`. All bundles are written with mode `0600` (they
+contain private keys).
 
-`make-client` reserves the names `ca` and `server` (case-insensitive,
-trimmed) so a typo cannot silently overwrite the CA or server material.
+`make-client` and `make-server` reserve the name `ca` (case-insensitive,
+trimmed) so a typo cannot silently overwrite the CA bundle.
 
 ---
 
@@ -81,10 +81,10 @@ certdx_tools google-account \
 
 ## `make-ca`
 
-Creates the private CA used by certdx mTLS. Writes `mtls/ca.pem`,
-`mtls/ca.key`, and `mtls/counter.txt`. Refuses to overwrite existing files.
-The directory is created with mode `0700`, the CA cert with `0644`, and
-the CA key with `0600`.
+Creates the private CA used by certdx mTLS. Writes `mtls/ca.pem` (a bundle
+containing the CA cert and CA key) and `mtls/counter.txt`. Refuses to
+overwrite existing files. The directory is created with mode `0700`, the
+bundle with `0600`.
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -94,11 +94,12 @@ the CA key with `0600`.
 
 ## `make-server`
 
-Issues the server-side mTLS certificate (`mtls/server.pem`, `mtls/server.key`)
-signed by the CA. Run after `make-ca`.
+Issues a server-side mTLS certificate bundle (`mtls/<name>.pem`: server cert +
+server key + CA cert) signed by the CA. Run after `make-ca`.
 
 | Flag | Required | Description |
 | --- | --- | --- |
+| `-n`, `--name` | yes | Bundle file name. Must not be `ca`. |
 | `-d`, `--dns-names` | yes | Comma-separated SANs. Must include every name a client will dial. |
 | `-o`, `--organization` | | Subject `O`. Default `CertDX Private`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Secret Discovery Service`. |
@@ -107,20 +108,21 @@ signed by the CA. Run after `make-ca`.
 Example:
 
 ```sh
-certdx_tools make-server -d certdxserver.example.com,sds.example.com
+certdx_tools make-server -n certdx-server -d certdxserver.example.com,sds.example.com
 ```
 
 ## `make-client`
 
-Issues a client certificate (`mtls/<name>.pem`, `mtls/<name>.key`) signed by
-the CA. Run once per consumer (`certdx_client`, Caddy host, Envoy, etc.).
+Issues a client certificate bundle (`mtls/<name>.pem`: client cert + client
+key + CA cert) signed by the CA. Run once per consumer (`certdx_client`,
+Caddy host, Envoy, etc.).
 
-The names `ca` and `server` are reserved (case-insensitive, trimmed) so a
-typo cannot silently overwrite the CA or server material.
+The name `ca` is reserved (case-insensitive, trimmed) so a typo cannot
+silently overwrite the CA bundle.
 
 | Flag | Required | Description |
 | --- | --- | --- |
-| `-n`, `--name` | yes | Logical client name. Becomes the file name. Must not be `ca` or `server`. |
+| `-n`, `--name` | yes | Logical client name. Becomes the file name. Must not be `ca`. |
 | `-d`, `--dns-names` | | Optional SANs. |
 | `-o`, `--organization` | | Subject `O`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Client: <name>`. |
@@ -132,8 +134,7 @@ Example:
 certdx_tools make-client --name caddy-edge -d edge.example.com
 ```
 
-Distribute the resulting `<name>.pem` / `<name>.key` (and a copy of `ca.pem`)
-to the client.
+Distribute the resulting `<name>.pem` bundle to the client.
 
 ---
 

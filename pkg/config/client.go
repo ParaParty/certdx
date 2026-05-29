@@ -119,22 +119,12 @@ type ClientCommonConfig struct {
 }
 
 type ClientMtlsConfig struct {
-	CA          string `toml:"ca" json:"ca,omitempty"`
-	Certificate string `toml:"certificate" json:"certificate,omitempty"`
-	Key         string `toml:"key" json:"key,omitempty"`
+	PEM string `toml:"pem" json:"pem,omitempty"`
 }
 
 func (c *ClientMtlsConfig) Validate() error {
-	if !paths.FileExists(c.CA) {
-		return fmt.Errorf("file not found: %s", c.CA)
-	}
-
-	if !paths.FileExists(c.Certificate) {
-		return fmt.Errorf("file not found: %s", c.Certificate)
-	}
-
-	if !paths.FileExists(c.Key) {
-		return fmt.Errorf("file not found: %s", c.Key)
+	if !paths.FileExists(c.PEM) {
+		return fmt.Errorf("file not found: %s", c.PEM)
 	}
 
 	return nil

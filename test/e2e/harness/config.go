@@ -35,6 +35,9 @@ type ServerOpts struct {
 	// gRPC SDS knobs.
 	GRPCEnabled bool
 	GRPCListen  string
+
+	// MTLS PEM bundle path (required when HTTPAuth="mtls" or GRPCEnabled).
+	MTLSPEM string
 }
 
 const serverTOMLTpl = `[ACME]
@@ -58,6 +61,10 @@ token = "{{.HTTPToken}}"
 [gRPCSDSServer]
 enabled = {{.GRPCEnabled}}
 listen = "{{.GRPCListen}}"
+{{if .MTLSPEM}}
+[MTLS]
+pem = "{{.MTLSPEM}}"
+{{end}}
 `
 
 // WriteServerConfig renders <dir>/server.toml and seeds an empty cache.json
@@ -113,9 +120,7 @@ type HTTPClientServer struct {
 	URL        string
 	AuthMethod string // "token" or "mtls"
 	Token      string
-	CA         string
-	Cert       string
-	Key        string
+	PEM        string
 }
 
 // ClientCert mirrors a [[Certifications]] entry.
@@ -144,18 +149,14 @@ reconnectInterval = "{{.ReconnectInt}}"
 url = "{{.Main.URL}}"
 authMethod = "{{.Main.AuthMethod}}"
 token = "{{.Main.Token}}"
-ca = "{{.Main.CA}}"
-certificate = "{{.Main.Cert}}"
-key = "{{.Main.Key}}"
+pem = "{{.Main.PEM}}"
 
 {{if .Standby}}
 [Http.StandbyServer]
 url = "{{.Standby.URL}}"
 authMethod = "{{.Standby.AuthMethod}}"
 token = "{{.Standby.Token}}"
-ca = "{{.Standby.CA}}"
-certificate = "{{.Standby.Cert}}"
-key = "{{.Standby.Key}}"
+pem = "{{.Standby.PEM}}"
 {{end}}
 
 {{range .Certs}}
@@ -182,9 +183,7 @@ func WriteHTTPClientConfig(tb testing.TB, dir string, opts HTTPClientOpts) strin
 // GRPCClientServer mirrors GRPC.MainServer / GRPC.StandbyServer.
 type GRPCClientServer struct {
 	Server string
-	CA     string
-	Cert   string
-	Key    string
+	PEM    string
 }
 
 // GRPCClientOpts holds knobs for a gRPC-mode client config.
@@ -203,16 +202,12 @@ reconnectInterval = "{{.ReconnectInt}}"
 
 [GRPC.MainServer]
 server = "{{.Main.Server}}"
-ca = "{{.Main.CA}}"
-certificate = "{{.Main.Cert}}"
-key = "{{.Main.Key}}"
+pem = "{{.Main.PEM}}"
 
 {{if .Standby}}
 [GRPC.StandbyServer]
 server = "{{.Standby.Server}}"
-ca = "{{.Standby.CA}}"
-certificate = "{{.Standby.Cert}}"
-key = "{{.Standby.Key}}"
+pem = "{{.Standby.PEM}}"
 {{end}}
 
 {{range .Certs}}

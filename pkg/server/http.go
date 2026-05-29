@@ -214,7 +214,7 @@ func (s *CertDXServer) serveHttp(handler http.Handler) error {
 
 // serveHttpMtls runs the mTLS-authenticated HTTP API.
 func (s *CertDXServer) serveHttpMtls(handler http.Handler) error {
-	mtlsConfig, err := getMtlsConfig()
+	mtlsConfig, err := getMtlsConfig(s.Config.MTLS.PEM)
 	if err != nil {
 		return err
 	}

@@ -301,7 +301,7 @@ func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo,
 func (s *CertDXServer) SDSSrv() error {
 	logging.Info("Start listening GRPC at %s", s.Config.GRPCSDSServer.Listen)
 
-	mtlsConfig, err := getMtlsConfig()
+	mtlsConfig, err := getMtlsConfig(s.Config.MTLS.PEM)
 	if err != nil {
 		return err
 	}

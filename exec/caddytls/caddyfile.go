@@ -25,9 +25,7 @@ const (
 	dirURL        = "url"
 	dirAuthMethod = "authMethod"
 	dirToken      = "token"
-	dirCA         = "ca"
-	dirCertFile   = "certificate"
-	dirKey        = "key"
+	dirPEM        = "pem"
 	dirServerAddr = "server"
 )
 
@@ -146,12 +144,8 @@ func (c *CertDXCaddyDaemon) unmarshalHttpServerBlock(s *config.ClientHttpServer,
 				s.AuthMethod = v
 			case dirToken:
 				s.Token = v
-			case dirCA:
-				s.CA = v
-			case dirCertFile:
-				s.Certificate = v
-			case dirKey:
-				s.Key = v
+			case dirPEM:
+				s.PEM = v
 			default:
 				return d.Errf("unrecognized subdirective for http server: %s", directive)
 			}
@@ -192,12 +186,8 @@ func (c *CertDXCaddyDaemon) unmarshalGRPCServerBlock(s *config.ClientGRPCServer,
 			switch directive {
 			case dirServerAddr:
 				s.Server = v
-			case dirCA:
-				s.CA = v
-			case dirCertFile:
-				s.Certificate = v
-			case dirKey:
-				s.Key = v
+			case dirPEM:
+				s.PEM = v
 			default:
 				return d.Errf("unrecognized subdirective for grpc server: %s", directive)
 			}

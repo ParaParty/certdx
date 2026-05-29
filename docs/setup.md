@@ -87,8 +87,10 @@ at the resulting HTTPS URL with the same token.
 ### HTTPS with mTLS
 
 Set `HttpServer.authMethod = "mtls"`. Issue the CA and server/client
-certificates with `certdx_tools` (see [mtls](#mtls) below). Clients use
-`authMethod = "mtls"` plus `ca`, `certificate` and `key` paths.
+certificates with `certdx_tools` (see [mtls](#mtls) below). Add an
+`[MTLS]` section to the server config pointing at the server bundle.
+Clients use `authMethod = "mtls"` with the `pem` path to their client
+bundle.
 
 ### gRPC SDS
 
@@ -106,27 +108,33 @@ Consumers:
 The mTLS material lives in an `mtls/` directory. By default it is
 discovered next to the executable, or under the current working directory.
 Override the location with the `--mtls-dir <path>` flag (passed to
-`certdx_server`, `make-ca`, `make-server`, or `make-client`). The
-directory is created with mode `0700`; certs land at `0644` and private
-keys at `0600`. The server reads
-`mtls/server.pem`, `mtls/server.key` and `mtls/ca.pem`; clients use a
-per-client `<name>.pem` / `<name>.key` plus a copy of `ca.pem`.
+`make-ca`, `make-server`, or `make-client`). The
+directory is created with mode `0700`; all bundles are written with mode
+`0600` (they contain private keys). The server reads its mTLS bundle
+from the `[MTLS].pem` config path; clients read theirs from the `pem`
+field in the server block.
+
+Each bundle is a single PEM file:
+
+- **CA bundle** (`ca.pem`): CA cert + CA key.
+- **Entity bundle** (`<name>.pem`): entity cert + entity key + CA cert.
 
 Generate everything with `certdx_tools` on the server host:
 
 ```sh
 certdx_tools make-ca
-certdx_tools make-server -d certdxserver.example.com,sds.example.com
+certdx_tools make-server -n certdx-server -d certdxserver.example.com,sds.example.com
 certdx_tools make-client --name nginx-edge
 certdx_tools make-client --name caddy-edge
 certdx_tools make-client --name envoy-frontend
 ```
 
+`-n` on `make-server` is required and sets the bundle file name.
 `-d` on `make-server` must include every name a client will dial. Distribute
-`ca.pem` plus each `<name>.pem` / `<name>.key` to the matching consumer.
-Keep `ca.key` only on the server host. The names `ca` and `server` are
-reserved for the CA and server-cert files; `make-client` rejects them so a
-typo cannot silently overwrite the CA or server material.
+each `<name>.pem` bundle to the matching consumer.
+Keep `ca.pem` only on the server host (it contains the CA private key).
+The name `ca` is reserved; `make-client` and `make-server` reject it so
+a typo cannot silently overwrite the CA.
 
 See [tools.md](tools.md) for the full flag set.
 
@@ -211,9 +219,9 @@ The certdx server's gRPC SDS endpoint is a normal Envoy SDS service. Envoy
 talks to it directly — no certdx client is needed.
 
 1. **Create an Envoy client certificate** with `certdx_tools make-client
-   --name envoy-frontend`. You will inline the contents of
-   `mtls/ca.pem`, `mtls/envoy-frontend.pem` and `mtls/envoy-frontend.key`
-   into the Envoy config below.
+   --name envoy-frontend`. The resulting `mtls/envoy-frontend.pem` bundle
+   contains the entity cert, entity key and CA cert. Split the three PEM
+   blocks into the appropriate Envoy config fields (see step 3).
 
 2. **Tell the server which secrets Envoy will request** via Envoy's node
    metadata. Each top-level key under `domains` is a secret name; its value
@@ -234,7 +242,14 @@ talks to it directly — no certdx client is needed.
 
 3. **Define an SDS cluster** that points at the certdx gRPC endpoint and uses
    the client certificate for mTLS. Use `LOGICAL_DNS`, force HTTP/2, and
-   pin TLS to 1.3:
+   pin TLS to 1.3.
+
+   The entity bundle contains three PEM blocks; split them into the Envoy
+   fields as follows:
+
+   - First `CERTIFICATE` block → `certificate_chain`
+   - `EC PRIVATE KEY` block → `private_key`
+   - Second `CERTIFICATE` block (the CA cert) → `trusted_ca`
 
    ```yaml
    static_resources:
@@ -274,18 +289,18 @@ talks to it directly — no certdx client is needed.
              - certificate_chain:
                  inline_string: |
                    -----BEGIN CERTIFICATE-----
-                   <contents of envoy-frontend.pem>
-                   -----END CERTIFICATE-----
-               private_key:
-                 inline_string: |
-                   -----BEGIN PRIVATE KEY-----
-                   <contents of envoy-frontend.key>
-                   -----END PRIVATE KEY-----
-             validation_context:
-               trusted_ca:
-                 inline_string: |
-                   -----BEGIN CERTIFICATE-----
-                   <contents of ca.pem>
+                  <first CERTIFICATE block from envoy-frontend.pem>
+                  -----END CERTIFICATE-----
+              private_key:
+                inline_string: |
+                  -----BEGIN EC PRIVATE KEY-----
+                  <EC PRIVATE KEY block from envoy-frontend.pem>
+                  -----END EC PRIVATE KEY-----
+            validation_context:
+              trusted_ca:
+                inline_string: |
+                  -----BEGIN CERTIFICATE-----
+                  <second CERTIFICATE block from envoy-frontend.pem (the CA)>
                    -----END CERTIFICATE-----
    ```
 
@@ -394,7 +409,7 @@ server and re-bind expiring ones. See [tools.md](tools.md#tencent-cloud-certific
   `allowedDomains`. Treat it like a secret; rotate by changing the token on
   both sides.
 - Prefer mTLS for cross-host deployments.
-- Private keys are written with `0600`. Make sure `savePath` and the `mtls/`
-  directory are not world-readable.
+- All PEM bundles are written with `0600` (they contain private keys). Make
+  sure `savePath` and the `mtls/` directory are not world-readable.
 - Set `HttpServer.secure = true` whenever the server is reachable outside a
   trusted network.

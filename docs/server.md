@@ -31,6 +31,7 @@ The configuration is a TOML file. Top-level sections:
 - `[HttpProvider]` (and `[HttpProvider.S3]`) — only when `ACME.challengeType = "http"`.
 - `[HttpServer]` — HTTPS distribution endpoint for `certdx_client` and Caddy.
 - `[gRPCSDSServer]` — gRPC SDS endpoint for Envoy and the gRPC client mode.
+- `[MTLS]` — path to the server's PEM bundle (required when using mTLS or gRPC).
 
 ### `[ACME]`
 
@@ -112,18 +113,12 @@ The HTTPS endpoint that `certdx_client` and the Caddy plugin call into.
 | `names` | string list | `[]` | SANs for the self-issued server certificate. Required when `secure = true`. Must be issuable under `ACME.allowedDomains`. |
 | `token` | string | `""` | Shared bearer token (only with `authMethod = "token"`). Empty disables token auth. |
 
-When `authMethod = "mtls"`, the server loads its certificate from
-`mtls/server.pem` and `mtls/server.key`, and trusts client certificates
-signed by `mtls/ca.pem`. The `mtls/` directory is resolved in this order:
+When `authMethod = "mtls"`, the server loads its mTLS material from the
+PEM bundle specified in `[MTLS].pem`. The bundle contains the server cert,
+server key and CA cert.
 
-1. `--mtls-dir <path>` flag, if passed.
-2. `mtls/` under the current working directory.
-3. `mtls/` next to the running executable.
-
-The directory is created with mode `0700` if it doesn't exist; certs are
-written with mode `0644` and private keys with mode `0600`. Generate the
-contents with `certdx_tools` (`make-ca`, `make-server`, `make-client`);
-see [tools.md](tools.md).
+Generate the bundle with `certdx_tools` (`make-ca`, `make-server`,
+`make-client`); see [tools.md](tools.md).
 
 ### `[gRPCSDSServer]`
 
@@ -132,10 +127,17 @@ see [tools.md](tools.md).
 | `enabled` | bool | `false` | Enable the gRPC SDS server. |
 | `listen` | string | `":10002"` | Listen address |
 
-The gRPC endpoint always uses mTLS. It loads its certificate from
-`mtls/server.pem` and `mtls/server.key` and trusts client certificates signed
-by `mtls/ca.pem`. Envoy (or `certdx_client` in gRPC mode) presents a client
-certificate signed by the same CA.
+The gRPC endpoint always uses mTLS. It loads the certificate and CA from the
+bundle at `[MTLS].pem`. Envoy (or `certdx_client` in gRPC mode) presents a
+client certificate signed by the same CA.
+
+### `[MTLS]`
+
+Required when `HttpServer.authMethod = "mtls"` or `gRPCSDSServer.enabled = true`.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `pem` | path | Path to the server PEM bundle (server cert + key + CA cert). |
 
 ## Runtime files
 
@@ -144,7 +146,6 @@ working directory — whichever exists):
 
 | Name | Purpose |
 | --- | --- |
-| `mtls/` | CA, server and per-client certificates for mTLS / gRPC SDS. |
 | `private/` | ACME account private keys (one file per email + provider). |
 | `cache.json` | Issued-certificate cache. Inspect with `certdx_tools show-certs`. |
 

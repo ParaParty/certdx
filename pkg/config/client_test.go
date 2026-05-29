@@ -96,22 +96,16 @@ func TestClientConfigValidateHttpModeMissingUrl(t *testing.T) {
 
 func TestClientConfigValidateGrpcModeValid(t *testing.T) {
 	dir := t.TempDir()
-	ca := filepath.Join(dir, "ca.pem")
-	cert := filepath.Join(dir, "client.pem")
-	key := filepath.Join(dir, "client.key")
-	for _, f := range []string{ca, cert, key} {
-		if err := os.WriteFile(f, []byte("dummy"), 0o600); err != nil {
-			t.Fatalf("write: %v", err)
-		}
+	bundle := filepath.Join(dir, "client.pem")
+	if err := os.WriteFile(bundle, []byte("dummy"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
 	}
 
 	c := &ClientConfig{}
 	c.SetDefault()
 	c.Common.Mode = CLIENT_MODE_GRPC
 	c.GRPC.MainServer.Server = "localhost:10002"
-	c.GRPC.MainServer.CA = ca
-	c.GRPC.MainServer.Certificate = cert
-	c.GRPC.MainServer.Key = key
+	c.GRPC.MainServer.PEM = bundle
 	c.Certifications = []ClientCertification{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
@@ -143,9 +137,7 @@ func TestClientConfigValidateGrpcModeMissingMtlsFiles(t *testing.T) {
 	c.SetDefault()
 	c.Common.Mode = CLIENT_MODE_GRPC
 	c.GRPC.MainServer.Server = "localhost:10002"
-	c.GRPC.MainServer.CA = "/nonexistent/ca.pem"
-	c.GRPC.MainServer.Certificate = "/nonexistent/client.pem"
-	c.GRPC.MainServer.Key = "/nonexistent/client.key"
+	c.GRPC.MainServer.PEM = "/nonexistent/client.pem"
 	c.Certifications = []ClientCertification{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
@@ -164,9 +156,7 @@ func TestClientConfigValidateHttpMtlsMissingFiles(t *testing.T) {
 	c.Common.Mode = CLIENT_MODE_HTTP
 	c.Http.MainServer.Url = "https://example.com"
 	c.Http.MainServer.AuthMethod = HTTP_AUTH_MTLS
-	c.Http.MainServer.CA = "/nonexistent/ca.pem"
-	c.Http.MainServer.Certificate = "/nonexistent/client.pem"
-	c.Http.MainServer.Key = "/nonexistent/client.key"
+	c.Http.MainServer.PEM = "/nonexistent/client.pem"
 	c.Certifications = []ClientCertification{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}

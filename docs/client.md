@@ -46,9 +46,7 @@ Top-level sections:
 | `url` | string | *(required for main)* | Full URL including the server's `apiPath`. |
 | `authMethod` | string | `"token"` | `token` or `mtls`. |
 | `token` | string | `""` | Shared bearer token; required with `authMethod = "token"`. |
-| `ca` | path | | mTLS CA. Required with `authMethod = "mtls"`. |
-| `certificate` | path | | mTLS client certificate. Required with `authMethod = "mtls"`. |
-| `key` | path | | mTLS client private key. Required with `authMethod = "mtls"`. |
+| `pem` | path | | PEM bundle (client cert + key + CA cert). Required with `authMethod = "mtls"`. |
 
 `StandbyServer` is optional; if `url` is set, it must also pass validation. The
 client falls back to the standby when the main server is unreachable and
@@ -61,9 +59,7 @@ The gRPC endpoint always uses mTLS.
 | Key | Type | Notes |
 | --- | --- | --- |
 | `server` | string | `host:port` of the certdx gRPC SDS endpoint. |
-| `ca` | path | CA that signed the server certificate. |
-| `certificate` | path | Client certificate (signed by the same CA). |
-| `key` | path | Client private key. |
+| `pem` | path | PEM bundle (client cert + key + CA cert). |
 
 `StandbyServer` is optional; same fallback semantics as in HTTP mode.
 

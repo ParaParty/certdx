@@ -27,7 +27,7 @@ func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOptio
 
 		if server.AuthMethod == config.HTTP_AUTH_MTLS {
 			client.HttpClient.Transport = &http.Transport{
-				TLSClientConfig: getMtlsConfig(server.CA, server.Certificate, server.Key),
+				TLSClientConfig: getMtlsConfig(server.PEM),
 			}
 		}
 	}
