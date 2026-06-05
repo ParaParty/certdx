@@ -240,8 +240,8 @@ file.
   `--log /tmp/certdx-{server,client}.log`.
 - `certdx-{server,client}-fhs.service` — **FHS flavor** for deb/rpm:
   `ExecStart=/usr/bin/certdx_server --conf /etc/certdx/server.toml`,
-  runs as the `certdx` system user, `StateDirectory=certdx`, journald
-  logging, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
+  runs as root, `StateDirectory=certdx`, journald logging,
+  `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
   `PrivateTmp` hardening. `/etc/certdx/mtls/` is read-only at runtime
   (the server only reads its bundle; tools create it pre-install).
 
@@ -277,9 +277,8 @@ silently writing `cache.json` in cwd.
 7. **If you parse PEM from `make-*` stdout**, switch to reading the
    bundle file the tool prints.
 8. **If you package via `.deb` / `.rpm`**, install to `/usr/bin/`, use
-   the `*-fhs.service` units, create the `certdx` system user, and
-   place mtls bundles under `/etc/certdx/mtls/` (config root) — not
-   `/var/lib/certdx/`.
+   the `*-fhs.service` units, and place mtls bundles under
+   `/etc/certdx/mtls/` (config root) — not `/var/lib/certdx/`.
 9. **If you embed certdx as a library**, switch to `pkg/mtls`
    (`LoadServer` / `LoadClient`) and handle the new error returns from
    `paths.ServerCachePath`, `server.NewCertStore`, and

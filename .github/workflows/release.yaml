@@ -43,6 +43,9 @@ jobs:
       - name: Install xcaddy
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
       - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
         working-directory: release
         run: python3 build.py ${{ matrix.goos }} ${{ matrix.goarch }}
@@ -54,6 +57,8 @@ jobs:
           path: |
             release/*.zip
             release/*.tar.gz
+            release/*.deb
+            release/*.rpm
           if-no-files-found: error
           retention-days: 1
 
@@ -75,5 +80,7 @@ jobs:
           files: |
             release/*.zip
             release/*.tar.gz
+            release/*.deb
+            release/*.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
