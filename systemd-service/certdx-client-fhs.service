@@ -5,8 +5,6 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=certdx
-Group=certdx
 ExecStart=/usr/bin/certdx_client --conf /etc/certdx/client.toml
 Restart=always
 RestartSec=3
