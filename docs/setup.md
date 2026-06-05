@@ -195,18 +195,51 @@ writes its log to `/tmp/certdx-server.log` via `--log`.
 
 ### FHS install (`.deb` / `.rpm`)
 
-If you install via a system package that drops the binary at
-`/usr/bin/certdx_server`, the binary runs in **FHS install mode**:
+Each release ships `.deb` and `.rpm` packages for `linux/amd64`,
+`linux/arm64` and `linux/armhf`. Install with the system package
+manager:
+
+```sh
+# Debian / Ubuntu
+sudo apt install ./certdx_<version>_amd64.deb
+
+# Fedora / RHEL / openSUSE
+sudo dnf install ./certdx-<version>-1.x86_64.rpm
+```
+
+When installed at `/usr/bin/certdx_server`, the binary runs in
+**FHS install mode**:
 
 | Resource | FHS path |
 | --- | --- |
-| Binary | `/usr/bin/certdx_server` |
-| Config | `/etc/certdx/server.toml` |
+| Binaries | `/usr/bin/certdx_{server,client,tools}` |
+| Config | `/etc/certdx/{server,client}.toml` (you create) |
+| Example configs | `/etc/certdx/{server,client}.toml.example` (minimal, shipped) |
+| Full reference configs | `/etc/certdx/{server,client}.toml.full.example` (every option, shipped) |
 | State (`mtls/`, `private/`, `cache.json`) | `/var/lib/certdx/` |
+| Systemd units | `/usr/lib/systemd/system/certdx-{server,client}.service` |
 
-Use the `*-fhs.service` units, which pass `--conf /etc/certdx/server.toml`
-and run as the `certdx` system user with systemd `StateDirectory=certdx`.
-`--conf` is always required — there is no implicit default.
+The package does not enable or start any service: copy the example
+config you need, edit it, then enable the unit:
+
+```sh
+sudo cp /etc/certdx/server.toml.example /etc/certdx/server.toml
+sudoedit /etc/certdx/server.toml
+sudo systemctl enable --now certdx-server
+```
+
+Services run as root. The `*-fhs.service` units pass
+`--conf /etc/certdx/{server,client}.toml`; `--conf` is always required
+and has no implicit default. State (`mtls/`, `private/`, `cache.json`)
+is created under `/var/lib/certdx/` on demand via systemd's
+`StateDirectory=certdx`.
+
+Uninstall (`apt remove`, `apt purge`, `rpm -e`, `dnf remove`) stops
+the services and removes the shipped files. Your hand-written
+`/etc/certdx/*.toml` and the entire `/var/lib/certdx/` (mTLS material,
+ACME account keys, cert cache) are preserved — they may contain
+irreplaceable secrets and must be removed manually if you want a
+clean wipe.
 
 ### Overriding state location
 
