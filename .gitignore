@@ -25,6 +25,7 @@
 
 # Release files
 release/certdx_*
+release/certdx-*
 release/caddy_certdx_*
 /tools
 /server

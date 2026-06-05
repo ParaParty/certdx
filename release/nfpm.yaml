@@ -1,0 +1,100 @@
+# nfpm configuration for certdx (.deb / .rpm).
+#
+# This file is a template. release/build.py renders the placeholders
+# below via Python's string.Template before invoking nfpm, because
+# nfpm v2 does not env-var-substitute contents.src paths.
+#
+#   VERSION   debian/rpm-policy-friendly version string (no leading 'v')
+#   ARCH      nfpm arch token (amd64, arm64, arm7)
+#   GOARCH    Go GOARCH value (amd64, arm64, arm) - used to locate the
+#             staging directory release/certdx_linux_GOARCH/
+#
+# nfpm is invoked with cwd=repo_root, so all source paths below are
+# relative to the repository root.
+
+name: certdx
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: ParaParty <admin@para.party>
+vendor: ParaParty
+homepage: https://github.com/ParaParty/certdx
+license: MIT
+description: |
+  One ACME daemon for your whole fleet.
+  CertDX runs ACME in a single place, caches certificates, and hands
+  them out to as many services as you need over HTTPS or gRPC SDS.
+  This package installs certdx_server, certdx_client and certdx_tools
+  with FHS-flavor systemd units (config under /etc/certdx, state under
+  /var/lib/certdx).
+
+contents:
+  - src: release/certdx_linux_${GOARCH}/certdx_server
+    dst: /usr/bin/certdx_server
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  - src: release/certdx_linux_${GOARCH}/certdx_client
+    dst: /usr/bin/certdx_client
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  - src: release/certdx_linux_${GOARCH}/certdx_tools
+    dst: /usr/bin/certdx_tools
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  - src: systemd-service/certdx-server-fhs.service
+    dst: /usr/lib/systemd/system/certdx-server.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - src: systemd-service/certdx-client-fhs.service
+    dst: /usr/lib/systemd/system/certdx-client.service
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - src: config/server_config.toml
+    dst: /etc/certdx/server.toml.example
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - src: config/client_config.toml
+    dst: /etc/certdx/client.toml.example
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - src: config/server_config_full.toml
+    dst: /etc/certdx/server.toml.full.example
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+  - src: config/client_config_full.toml
+    dst: /etc/certdx/client.toml.full.example
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+
+scripts:
+  postinstall: release/scripts/postinstall.sh
+  preremove:   release/scripts/preremove.sh
+  postremove:  release/scripts/postremove.sh
