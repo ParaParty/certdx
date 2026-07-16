@@ -11,7 +11,7 @@ require (
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.2
-	pkg.para.party/certdx v0.5.0
+	pkg.para.party/certdx v0.6.0
 )
 
 require (
