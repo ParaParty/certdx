@@ -167,10 +167,19 @@ func (r *CertDXClientDaemon) ClientInit() {
 	}
 }
 
-// AddCertToWatchOpt registers an additional cert + handler set to be
-// watched. Must be called before HttpMain / GRPCMain runs; the watcher
-// goroutine is launched there with rootCtx.
+// AddCertToWatchOpt registers an additional cert + handler set to be watched.
+// Registrations for the same domain set share one watcher and accumulate their
+// options. Must be called before HttpMain / GRPCMain runs; the watcher goroutine
+// is launched there with rootCtx.
 func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, options []WatchingCertsOption) error {
+	key := domain.AsKey(domains)
+	if cert, exists := r.certs[key]; exists {
+		for _, option := range options {
+			option(cert)
+		}
+		return nil
+	}
+
 	cd := certData{
 		Domains: domains,
 	}
@@ -186,7 +195,7 @@ func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, op
 
 	cert.Data.Store(&cd)
 
-	r.certs[domain.AsKey(domains)] = cert
+	r.certs[key] = cert
 
 	return nil
 }
