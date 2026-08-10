@@ -1,0 +1,11 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    name: certdx-kubernetes-updater
+    labels:
+        app.kubernetes.io/name: certdx
+        app.kubernetes.io/component: kubernetes-certificate-updater
+rules:
+    - apiGroups: [""]
+      resources: ["secrets"]
+      verbs: ["list", "get", "update"]
