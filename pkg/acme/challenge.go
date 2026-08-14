@@ -34,9 +34,10 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 		// 添加 DNS 超时
 		if p.DnsProvider.DNSTimeout != "" {
 			timeout, err := time.ParseDuration(p.DnsProvider.DNSTimeout)
-			if err == nil && timeout > 0 {
-				opt = append(opt, dns01.AddDNSTimeout(timeout))
+			if err != nil {
+				return fmt.Errorf("invalid dnsTimeout %q: %w", p.DnsProvider.DNSTimeout, err)
 			}
+			opt = append(opt, dns01.AddDNSTimeout(timeout))
 		}
 
 		if err := instance.Client.Challenge.SetDNS01Provider(clg, opt...); err != nil {

@@ -152,6 +152,15 @@ type DnsProvider struct {
 }
 
 func (p *DnsProvider) Validate() error {
+	if p.DNSTimeout != "" {
+		timeout, err := time.ParseDuration(p.DNSTimeout)
+		if err != nil {
+			return fmt.Errorf("DnsProvider: invalid dnsTimeout %q: %w", p.DNSTimeout, err)
+		}
+		if timeout <= 0 {
+			return fmt.Errorf("DnsProvider: dnsTimeout must be positive, got %q", p.DNSTimeout)
+		}
+	}
 	switch p.Type {
 	case DnsProviderTypeCloudflare:
 		if (p.Email == "" || p.APIKey == "") && (p.AuthToken == "" || p.ZoneToken == "") {
