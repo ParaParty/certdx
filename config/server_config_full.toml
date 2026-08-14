@@ -34,6 +34,11 @@ client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/acme-u
 [DnsProvider]
 disableCompletePropagationRequirement = false
 
+# DNS propagation check settings
+# Use public DNS servers to check TXT record propagation
+# nameservers = ["8.8.8.8:53", "1.1.1.1:53"]
+# dnsTimeout = "30s"
+
 # cloudflare global api key and email
 type = "cloudflare"
 email = ""

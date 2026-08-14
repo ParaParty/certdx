@@ -2,6 +2,7 @@ package acme
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/challenge/dns01"
@@ -22,7 +23,20 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 		opt := make([]dns01.ChallengeOption, 0)
 
 		if p.DnsProvider.DisableCompletePropagationRequirement {
-			opt = append(opt, dns01.DisableCompletePropagationRequirement())
+			opt = append(opt, dns01.DisableAuthoritativeNssPropagationRequirement())
+		}
+
+		// 添加自定义 DNS 服务器
+		if len(p.DnsProvider.Nameservers) > 0 {
+			opt = append(opt, dns01.AddRecursiveNameservers(p.DnsProvider.Nameservers))
+		}
+
+		// 添加 DNS 超时
+		if p.DnsProvider.DNSTimeout != "" {
+			timeout, err := time.ParseDuration(p.DnsProvider.DNSTimeout)
+			if err == nil && timeout > 0 {
+				opt = append(opt, dns01.AddDNSTimeout(timeout))
+			}
 		}
 
 		if err := instance.Client.Challenge.SetDNS01Provider(clg, opt...); err != nil {
