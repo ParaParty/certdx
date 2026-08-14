@@ -134,6 +134,10 @@ type DnsProvider struct {
 	Type                                  string `toml:"type" json:"type,omitempty"`
 	DisableCompletePropagationRequirement bool   `toml:"disableCompletePropagationRequirement" json:"disable_complete_propagation_requirement,omitempty"`
 
+	// DNS propagation check settings
+	Nameservers []string `toml:"nameservers" json:"nameservers,omitempty"`
+	DNSTimeout  string   `toml:"dnsTimeout" json:"dns_timeout,omitempty"`
+
 	// cloudflare global
 	Email  string `toml:"email" json:"email,omitempty"`
 	APIKey string `toml:"apiKey" json:"api_key,omitempty"`
