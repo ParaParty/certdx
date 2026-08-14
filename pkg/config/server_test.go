@@ -137,6 +137,30 @@ func TestDnsProviderValidateTencentCloudEmpty(t *testing.T) {
 	}
 }
 
+func TestDnsProviderValidateDNSTimeout(t *testing.T) {
+	base := DnsProvider{Type: DnsProviderTypeCloudflare, Email: "a@b.com", APIKey: "key"}
+
+	for _, valid := range []string{"", "30s", "1m30s"} {
+		p := base
+		p.DNSTimeout = valid
+		if err := p.Validate(); err != nil {
+			t.Fatalf("valid dnsTimeout %q: %v", valid, err)
+		}
+	}
+
+	for _, invalid := range []string{"30", "abc", "0s", "-5s"} {
+		p := base
+		p.DNSTimeout = invalid
+		err := p.Validate()
+		if err == nil {
+			t.Fatalf("expected error on dnsTimeout %q", invalid)
+		}
+		if !strings.Contains(err.Error(), "dnsTimeout") {
+			t.Fatalf("error wording drifted: %v", err)
+		}
+	}
+}
+
 func TestDnsProviderValidateUnknownType(t *testing.T) {
 	p := &DnsProvider{Type: "route53"}
 	err := p.Validate()
