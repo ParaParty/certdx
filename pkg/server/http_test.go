@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/api"
 )
 
@@ -97,14 +99,168 @@ func TestApiWithTokenHandlerRejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestCheckAuthorizationTokenLengthMismatch(t *testing.T) {
+	s := makeTestServer("secret123", "/", nil)
+	for _, token := range []string{"secret12", "secret1234", ""} {
+		req := httptest.NewRequest("POST", "/", nil)
+		req.Header.Set("Authorization", "Token "+token)
+		if s.checkAuthorizationToken(req) {
+			t.Fatalf("token %q should not authorize", token)
+		}
+	}
+}
+
 func TestHandleCertReqEmptyBody(t *testing.T) {
 	s := makeTestServer("", "/", []string{"example.com"})
 	req := httptest.NewRequest("POST", "/", nil)
 	w := httptest.NewRecorder()
 	var rw http.ResponseWriter = w
 	s.handleCertReq(&rw, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("empty body: got %d want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("empty body: got %d want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleCertReqEmptyDomains(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	body, _ := json.Marshal(api.HttpCertReq{Domains: nil})
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("empty domains: got %d want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+// A pack that is subscribed but not yet issued holds a zero-value CertT.
+// Serving it would make the client overwrite its good on-disk cert with
+// empty files, so the request must fail loudly instead.
+func TestHandleCertReqSubscribedButNotIssued(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+
+	entry, err := s.certCache.get([]string{"example.com"})
+	if err != nil {
+		t.Fatalf("cert cache get: %v", err)
+	}
+	entry.stateMu.Lock()
+	entry.subscribing = 1
+	entry.stateMu.Unlock()
+
+	body, _ := json.Marshal(api.HttpCertReq{Domains: []string{"example.com"}})
+	// Cancelled request ctx so the wait for the in-flight issuance returns
+	// at once instead of burning httpCertWaitTimeout.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("not yet issued: got status %d want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	var resp api.HttpCertResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err == nil && (len(resp.FullChain) != 0 || len(resp.Key) != 0) {
+		t.Fatalf("empty cert must never be served: %s", w.Body.String())
+	}
+}
+
+// A cert we actually hold is served even once its renew deadline has passed:
+// getting the renewal done is the renewer's job, and a 503 here would leave
+// the client with nothing rather than with a cert it can keep using until the
+// replacement lands. Only genuinely absent material earns a 503.
+func TestHandleCertReqSubscribedPastRenewDeadline(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+
+	entry, err := s.certCache.get([]string{"example.com"})
+	if err != nil {
+		t.Fatalf("cert cache get: %v", err)
+	}
+	entry.stateMu.Lock()
+	entry.cert = CertT{
+		FullChain:   []byte("PEM-chain"),
+		Key:         []byte("PEM-key"),
+		ValidBefore: time.Now().Add(-time.Hour),
+	}
+	entry.subscribing = 1
+	entry.stateMu.Unlock()
+
+	body, _ := json.Marshal(api.HttpCertReq{Domains: []string{"example.com"}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("held cert past renew deadline: got status %d want %d", w.Code, http.StatusOK)
+	}
+	var resp api.HttpCertResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if string(resp.FullChain) != "PEM-chain" || string(resp.Key) != "PEM-key" {
+		t.Fatalf("served cert material: %q / %q", resp.FullChain, resp.Key)
+	}
+}
+
+// A sub-hour certLifeTime must yield a cert that is usable the instant it is
+// issued, whatever minute of the hour the issuance happens at. The
+// hour-truncated validity target used to land in the past for such configs, so
+// the freshly obtained cert was invalid on arrival: 503 on every request, and
+// one ACME obtain per request behind it.
+func TestHandleCertReqShortCertLifeTimeServes200(t *testing.T) {
+	s := newTestServer(t)
+	s.Config.HttpServer.APIPath = "/"
+	s.Config.ACME.AllowedDomains = []string{"example.com"}
+	s.Config.ACME.CertLifeTimeDuration = 30 * time.Second
+	s.Config.ACME.RenewTimeLeftDuration = 10 * time.Second
+
+	mock := acme.NewMockACME(5 * time.Minute)
+	obtainer := &fakeObtainer{fn: func(_ context.Context, domains []string) ([]byte, []byte, error) {
+		return mock.Obtain(context.Background(), domains, time.Time{})
+	}}
+	s.acme = obtainer
+
+	body, _ := json.Marshal(api.HttpCertReq{Domains: []string{"example.com"}})
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("30s certLifeTime: got status %d want %d", w.Code, http.StatusOK)
+	}
+
+	var resp api.HttpCertResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.FullChain) == 0 || len(resp.Key) == 0 {
+		t.Fatalf("200 with empty cert material: %s", w.Body.String())
+	}
+
+	entry, err := s.certCache.get([]string{"example.com"})
+	if err != nil {
+		t.Fatalf("cert cache get: %v", err)
+	}
+	cert := entry.Cert()
+	if !cert.IsValid() {
+		t.Fatalf("cert is invalid the moment it was issued: ValidBefore %s, now %s", cert.ValidBefore, time.Now())
+	}
+
+	// A second request must be served from cache, not cost another issuance.
+	w2 := httptest.NewRecorder()
+	var rw2 http.ResponseWriter = w2
+	s.handleCertReq(&rw2, httptest.NewRequest("POST", "/", bytes.NewReader(body)))
+	if w2.Code != http.StatusOK {
+		t.Fatalf("second request: got status %d want %d", w2.Code, http.StatusOK)
+	}
+	if got := obtainer.calls.Load(); got != 1 {
+		t.Fatalf("obtain called %d times, want 1 (an invalid-on-arrival cert re-obtains per request)", got)
 	}
 }
 
@@ -128,7 +284,10 @@ func TestHandleCertReqValidDomainsCachedCert(t *testing.T) {
 	s := makeTestServer("", "/", []string{"example.com"})
 
 	// Pre-populate the cert cache with a valid cert.
-	entry := s.certCache.get([]string{"example.com"})
+	entry, err := s.certCache.get([]string{"example.com"})
+	if err != nil {
+		t.Fatalf("cert cache get: %v", err)
+	}
 	entry.stateMu.Lock()
 	entry.cert = CertT{
 		FullChain:   []byte("PEM-chain"),
@@ -166,7 +325,7 @@ func TestHandleCertReqInvalidJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	var rw http.ResponseWriter = w
 	s.handleCertReq(&rw, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("invalid json: got %d want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid json: got %d want %d", w.Code, http.StatusBadRequest)
 	}
 }

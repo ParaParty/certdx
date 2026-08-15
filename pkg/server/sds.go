@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
 	"time"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -49,6 +50,39 @@ func sendStreamErr(ctx context.Context, errChan chan<- error, err error) {
 	select {
 	case errChan <- err:
 	case <-ctx.Done():
+	}
+}
+
+// recoverStream turns a panic in a per-stream goroutine into a stream
+// error. These goroutines are plain `go func()`s, so an unrecovered panic
+// on one malformed frame would take the whole server process down instead
+// of just the offending connection.
+func recoverStream(ctx context.Context, errChan chan<- error, what, peer string) {
+	if r := recover(); r != nil {
+		logging.Error("Panic while %s for %s: %v\n%s", what, peer, r, debug.Stack())
+		sendStreamErr(ctx, errChan, fmt.Errorf("panic while %s for %s: %v", what, peer, r))
+	}
+}
+
+// dispatchRequest hands req to a pack handler without ever blocking the
+// receive loop. The handler spends most of its life parked waiting for the
+// next renewal, so a blocking send here would wedge the receive loop and
+// with it every other cert pack sharing the stream. reqChan buffers a
+// single request; one that is still queued has been superseded by the
+// newer request, so it is dropped in its favor.
+func dispatchRequest(reqChan chan *discoveryv3.DiscoveryRequest, req *discoveryv3.DiscoveryRequest) {
+	for {
+		select {
+		case reqChan <- req:
+			return
+		default:
+		}
+
+		select {
+		case <-reqChan:
+		default:
+			// The handler drained it first, retry the send.
+		}
 	}
 }
 
@@ -97,6 +131,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 
 	go func() {
 		// goroutine for receiving
+		defer recoverStream(ctx, errChan, "receiving requests", peer)
 		for {
 			select {
 			case <-ctx.Done():
@@ -136,13 +171,11 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 
 			packRequests := map[string][]string{}
 			for _, name := range req.ResourceNames {
-				// this is an ack
+				// The pack is already served on this stream: this is an
+				// ack, a nack or a re-subscription. handleCert tells them
+				// apart, all we do here is hand the frame over.
 				if reqChan, ok := dispatch[name]; ok {
-					select {
-					case reqChan <- req:
-					case <-ctx.Done():
-						return
-					}
+					dispatchRequest(reqChan, req)
 					continue
 				}
 
@@ -176,9 +209,13 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 			for name, domains := range packRequests {
 				logging.Info("Handling pack %s with domains %v in response to %s", name, domains, peer)
 
-				entry := sds.cdxsrv.certCache.get(domains)
+				entry, err := sds.cdxsrv.certCache.get(domains)
+				if err != nil {
+					sendStreamErr(ctx, errChan, fmt.Errorf("cert pack %s: %w", name, err))
+					return
+				}
 
-				reqChan := make(chan *discoveryv3.DiscoveryRequest)
+				reqChan := make(chan *discoveryv3.DiscoveryRequest, 1)
 				dispatch[name] = reqChan
 				go sds.handleCert(ctx, name, entry, reqChan, resp, errChan, peer)
 			}
@@ -203,21 +240,65 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 // so StreamSecrets returns from its outer select and gRPC closes the
 // connection — the previous "log and return from this goroutine"
 // behavior left the stream alive serving a stale or absent cert pack.
+//
+// Renewals and client frames are awaited in the same select: a client that
+// acks late (or never) must not delay the next cert, and a pack parked on a
+// renewal must not stall the stream's receive loop.
 func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 	req chan *discoveryv3.DiscoveryRequest, resp chan *discoveryv3.DiscoveryResponse,
 	errChan chan<- error, peer string) {
+
+	defer recoverStream(ctx, errChan, fmt.Sprintf("serving cert pack %s", name), peer)
+
+	// Sub-context so the update watcher started below always winds down with
+	// this handler, including on an early error return. The deferred recover
+	// above captured the parent ctx, so it can still report a panic.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	sds.cdxsrv.subscribe(entry)
 	defer sds.cdxsrv.release(entry)
 
 	cert, seen := entry.Snapshot()
-	if !cert.IsValid() {
-		seen = entry.WaitForUpdate(ctx, seen)
-		if ctx.Err() != nil {
+
+	// Turn WaitForUpdate into a channel so renewals can be selected on
+	// alongside inbound frames. Buffered by one: a renewal that lands while
+	// the handler is busy is picked up on the next wait, because
+	// WaitForUpdate returns immediately once the version has moved past
+	// the last one this goroutine observed.
+	updates := make(chan struct{}, 1)
+	go func() {
+		for {
+			seen = entry.WaitForUpdate(ctx, seen)
+			if ctx.Err() != nil {
+				return
+			}
+			select {
+			case updates <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	for !cert.IsValid() {
+		select {
+		case <-updates:
+		case <-req:
+			// Nothing to offer yet, keep the frame from wedging the stream.
+			continue
+		case <-ctx.Done():
 			return
 		}
-		cert, seen = entry.Snapshot()
+		cert, _ = entry.Snapshot()
 	}
+
+	// reoffered bounds re-offers to one per cert version: on a stream
+	// carrying several packs the client acks with a single version that can
+	// match only one of them, so an unconditional re-offer would ping-pong
+	// between the packs forever. It is cleared whenever a renewal gives the
+	// pack something new to say.
+	reoffered := false
 
 	for {
 		secret, err := anypb.New(&tlsv3.Secret{
@@ -257,42 +338,72 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 
 		logging.Info("Offered cert %v version %s to %s", entry.domains, version, peer)
 
-		select {
-		case ack := <-req:
-			if ack.VersionInfo == version {
-				logging.Info("Cert pack %s version %s deployed at %s", name, version, peer)
-			} else {
-				err := ack.ErrorDetail
-				logging.Warn("Cert version %s rejected by %s at %s: %d(%s)",
-					version, name, peer,
-					err.Code, err.Message)
+	awaitOffer:
+		for {
+			select {
+			case r := <-req:
+				switch {
+				case r.GetErrorDetail() != nil:
+					// NACK. Nothing better to send until the next renewal.
+					detail := r.GetErrorDetail()
+					logging.Warn("Cert pack %s version %s rejected by %s: %d(%s)",
+						name, version, peer, detail.GetCode(), detail.GetMessage())
+				case r.VersionInfo == version:
+					logging.Info("Cert pack %s version %s deployed at %s", name, version, peer)
+				case !reoffered:
+					// A frame naming this pack with some other version and
+					// no error detail: a re-subscription, or an ack for an
+					// offer this pack has already moved past. Re-offer the
+					// current cert once so a genuine re-subscription is
+					// served.
+					reoffered = true
+					logging.Info("Re-offering cert pack %s to %s, client reported version %q", name, peer, r.VersionInfo)
+					break awaitOffer
+				default:
+					logging.Debug("Cert pack %s: version %q from %s is stale, current is %s", name, r.VersionInfo, peer, version)
+				}
+			case <-updates:
+				cert, _ = entry.Snapshot()
+				reoffered = false
+				break awaitOffer
+			case <-ctx.Done():
+				logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
+				return
 			}
-		case <-ctx.Done():
-			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
-			return
 		}
+	}
+}
 
-		seen = entry.WaitForUpdate(ctx, seen)
-		if ctx.Err() != nil {
-			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
-			return
-		}
-		cert, seen = entry.Snapshot()
+// logClientTLS audits the client certificate(s) presented by the peer of
+// ctx. Shared by the unary and stream interceptors: StreamSecrets is a
+// streaming RPC, so a unary-only interceptor never sees the SDS clients
+// this log exists for.
+func logClientTLS(ctx context.Context) {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p == nil {
+		return
+	}
+	mtls, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return
+	}
+	addr := peerAddr(ctx)
+	if len(mtls.State.PeerCertificates) > 1 {
+		logging.Error("Client %s providing multiple client certificate.", addr)
+	}
+	for _, item := range mtls.State.PeerCertificates {
+		logging.Info("Client `%s` from %s.", item.Subject.CommonName, addr)
 	}
 }
 
 func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-	if p, ok := peer.FromContext(ctx); ok {
-		if mtls, ok := p.AuthInfo.(credentials.TLSInfo); ok {
-			if len(mtls.State.PeerCertificates) > 1 {
-				logging.Error("Client %s providing multiple client certificate.", p.Addr.String())
-			}
-			for _, item := range mtls.State.PeerCertificates {
-				logging.Info("Client `%s` from %s.", item.Subject.CommonName, p.Addr.String())
-			}
-		}
-	}
+	logClientTLS(ctx)
 	return handler(ctx, req)
+}
+
+func clientTLSLogStream(srv interface{}, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	logClientTLS(ss.Context())
+	return handler(srv, ss)
 }
 
 // SDSSrv runs the gRPC SDS endpoint until Stop is called. A goroutine
@@ -310,6 +421,7 @@ func (s *CertDXServer) SDSSrv() error {
 	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(mtlsConfig)),
 		grpc.UnaryInterceptor(clientTLSLog),
+		grpc.StreamInterceptor(clientTLSLogStream),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             time.Second,
 			PermitWithoutStream: true,

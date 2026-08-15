@@ -1,11 +1,13 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
@@ -17,6 +19,12 @@ const (
 	permCertFile os.FileMode = 0o644
 	permKeyFile  os.FileMode = 0o600
 )
+
+// reloadCommandTimeout bounds the reload command. The handler runs on
+// the sole UpdateChan consumer, so a reload that never returns would
+// drop every later update and hang Stop; killing it keeps the watcher
+// loop in control.
+const reloadCommandTimeout = 60 * time.Second
 
 // CertificateUpdateHandler is invoked whenever a watched cert receives
 // fresh material. Handlers are expected to be quick; long-running work
@@ -61,6 +69,16 @@ func prepareTempFile(dir, base string, data []byte, mode os.FileMode) (string, e
 		os.Remove(name)
 		return "", fmt.Errorf("chmod temp file: %w", err)
 	}
+	// Flush to stable storage before the rename: otherwise a crash can
+	// leave the rename durable but the contents not, i.e. a zero-length
+	// cert or key at the final path with no fallback.
+	//
+	// Best effort, exactly like syncDir: some FUSE and container mounts
+	// answer fsync with ENOSYS/ENOTSUP/EINVAL, and durability polish
+	// must never be what stops a certificate from being delivered.
+	if err := syncFile(tmp); err != nil {
+		logging.Warn("Failed to sync %s, continuing without fsync: %s", name, err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(name)
 		return "", fmt.Errorf("close temp file: %w", err)
@@ -94,7 +112,32 @@ func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, k
 	if err := os.Rename(keyTmp, keyPath); err != nil {
 		return fmt.Errorf("rename key: %w", err)
 	}
+
+	// Persist the directory entries the renames created. Best effort:
+	// some filesystems/platforms refuse to fsync a directory, and that
+	// must not fail a write that already landed.
+	syncDir(filepath.Dir(certPath))
+	if keyDir := filepath.Dir(keyPath); keyDir != filepath.Dir(certPath) {
+		syncDir(keyDir)
+	}
 	return nil
+}
+
+// syncFile fsyncs f so its contents survive a crash. It is a var so
+// tests can simulate a mount that refuses fsync.
+var syncFile = func(f *os.File) error { return f.Sync() }
+
+// syncDir fsyncs dir so a preceding rename survives a crash.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		logging.Debug("Failed to open %s for sync: %s", dir, err)
+		return
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		logging.Debug("Failed to sync %s: %s", dir, err)
+	}
 }
 
 // writeCertAndDoCommand persists fullchain/key to the paths configured
@@ -104,8 +147,9 @@ func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, k
 //
 // The reload command runs only when both files pre-existed; the first
 // install is effectively a bootstrap and the downstream service is
-// unlikely to be running yet.
-func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification) {
+// unlikely to be running yet. It is bounded by ctx and
+// reloadCommandTimeout, whichever fires first.
+func writeCertAndDoCommand(ctx context.Context, fullchain, key []byte, c *config.ClientCertification) {
 	var certExists, keyExists bool
 
 	certPath, keyPath, err := c.GetFullChainAndKeyPath()
@@ -129,18 +173,38 @@ func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification)
 	logging.Info("Saved cert %v", c.Domains)
 
 	if certExists && keyExists {
-		// strings.Fields collapses whitespace and skips empty inputs, so
-		// a whitespace-only ReloadCommand returns an empty slice — guard
-		// against args[0] panicking instead of just !=  "".
-		if args := strings.Fields(c.ReloadCommand); len(args) > 0 {
-			logging.Debug("Executing reload command: %s", c.ReloadCommand)
-			if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-				logging.Error("Failed executing reload command %s: %s", c.ReloadCommand, err)
-			}
-		}
+		runReloadCommand(ctx, c.ReloadCommand, reloadCommandTimeout)
 	}
 	return
 
 ERR:
 	logging.Error("Failed to save cert file: %s", err)
+}
+
+// runReloadCommand executes command, killing it after timeout (or when
+// ctx is cancelled). It always returns: the caller is the sole
+// UpdateChan consumer, so blocking here would stall every later cert
+// update and hang daemon shutdown.
+func runReloadCommand(ctx context.Context, command string, timeout time.Duration) {
+	// strings.Fields collapses whitespace and skips empty inputs, so
+	// a whitespace-only ReloadCommand returns an empty slice — guard
+	// against args[0] panicking instead of just !=  "".
+	args := strings.Fields(command)
+	if len(args) == 0 {
+		return
+	}
+
+	logging.Debug("Executing reload command: %s", command)
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	err := exec.CommandContext(cmdCtx, args[0], args[1:]...).Run()
+	if err == nil {
+		return
+	}
+	if cmdCtx.Err() != nil {
+		logging.Error("Reload command %s did not finish within %s, killed: %s", command, timeout, err)
+	} else {
+		logging.Error("Failed executing reload command %s: %s", command, err)
+	}
 }

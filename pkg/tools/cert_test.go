@@ -4,12 +4,68 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/pem"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"pkg.para.party/certdx/pkg/paths"
 )
+
+// withDataDir points paths at a fresh temp data root for the duration of
+// the test and resets the package-level serial counter.
+func withDataDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "data")
+	paths.SetDataDir(dir)
+	counter.SetInt64(0)
+	t.Cleanup(func() {
+		paths.SetDataDir("")
+		counter.SetInt64(0)
+	})
+	return dir
+}
+
+// firstCertInBundle parses the leading CERTIFICATE block of a bundle.
+func firstCertInBundle(t *testing.T, path string) *x509.Certificate {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	certPEM, _ := splitCertAndKeyPEM(data)
+	if certPEM == nil {
+		t.Fatalf("no CERTIFICATE block in %s", path)
+	}
+	block, _ := pem.Decode(certPEM)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse cert in %s: %v", path, err)
+	}
+	return cert
+}
+
+func readCounter(t *testing.T) *big.Int {
+	t.Helper()
+	p, err := paths.CACounterPath()
+	if err != nil {
+		t.Fatalf("CACounterPath: %v", err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read counter: %v", err)
+	}
+	n, ok := new(big.Int).SetString(strings.TrimSpace(string(data)), 10)
+	if !ok {
+		t.Fatalf("counter file is not a number: %q", data)
+	}
+	return n
+}
 
 func TestSplitIPsAndDNS(t *testing.T) {
 	dns, ips := splitIPsAndDNS([]string{
@@ -169,5 +225,203 @@ func TestMakeClientCertServerNameAllowed(t *testing.T) {
 	}
 	if err.Error() == `name "server" is reserved for CA material` {
 		t.Fatal("'server' should no longer be reserved")
+	}
+}
+
+func TestMakeCASerialAndConstraints(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn"); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+
+	caPath, err := paths.MtlsCAPath()
+	if err != nil {
+		t.Fatalf("MtlsCAPath: %v", err)
+	}
+	ca := firstCertInBundle(t, caPath)
+
+	if ca.SerialNumber.Sign() <= 0 {
+		t.Errorf("CA serial = %s, want positive (RFC 5280)", ca.SerialNumber)
+	}
+	if !ca.IsCA || !ca.BasicConstraintsValid {
+		t.Error("CA is missing basic constraints")
+	}
+	if !ca.MaxPathLenZero || ca.MaxPathLen != 0 {
+		t.Errorf("CA pathLen = %d (zero=%t), want 0/true", ca.MaxPathLen, ca.MaxPathLenZero)
+	}
+	if got := ca.NotAfter.Sub(ca.NotBefore); got != DefaultCALifetime {
+		t.Errorf("CA lifetime = %s, want %s", got, DefaultCALifetime)
+	}
+	if ca.NotAfter.Year() >= 2100 {
+		t.Errorf("CA NotAfter = %s, still effectively unbounded", ca.NotAfter)
+	}
+
+	// The counter must be initialized to the first positive serial.
+	if got, want := readCounter(t), big.NewInt(firstEntitySerial); got.Cmp(want) != 0 {
+		t.Errorf("counter after MakeCA = %s, want %s", got, want)
+	}
+}
+
+func TestEntitySerialsArePositiveAndUnique(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn"); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+	caPath, _ := paths.MtlsCAPath()
+	ca := firstCertInBundle(t, caPath)
+
+	if err := MakeServerCert("server", "org", "cn", []string{"localhost"}); err != nil {
+		t.Fatalf("MakeServerCert: %v", err)
+	}
+	if err := MakeClientCert("client", "org", "cn", nil); err != nil {
+		t.Fatalf("MakeClientCert: %v", err)
+	}
+
+	srvPath, _ := paths.MtlsBundlePath("server")
+	cliPath, _ := paths.MtlsBundlePath("client")
+	srv := firstCertInBundle(t, srvPath)
+	cli := firstCertInBundle(t, cliPath)
+
+	for name, c := range map[string]*x509.Certificate{"server": srv, "client": cli} {
+		if c.SerialNumber.Sign() <= 0 {
+			t.Errorf("%s serial = %s, want positive", name, c.SerialNumber)
+		}
+		if c.SerialNumber.Cmp(ca.SerialNumber) == 0 {
+			t.Errorf("%s serial duplicates the CA serial %s", name, c.SerialNumber)
+		}
+	}
+	if srv.SerialNumber.Cmp(cli.SerialNumber) == 0 {
+		t.Errorf("server and client share serial %s", srv.SerialNumber)
+	}
+	if got, want := srv.SerialNumber, big.NewInt(1); got.Cmp(want) != 0 {
+		t.Errorf("first entity serial = %s, want %s", got, want)
+	}
+	if got, want := readCounter(t), big.NewInt(3); got.Cmp(want) != 0 {
+		t.Errorf("counter after two certs = %s, want %s", got, want)
+	}
+}
+
+func TestEntityCertLifetimeIsBounded(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn"); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+	if err := MakeServerCert("server", "org", "cn", []string{"localhost"}); err != nil {
+		t.Fatalf("MakeServerCert: %v", err)
+	}
+
+	srvPath, _ := paths.MtlsBundlePath("server")
+	srv := firstCertInBundle(t, srvPath)
+
+	if got := srv.NotAfter.Sub(srv.NotBefore); got != DefaultLeafLifetime {
+		t.Errorf("leaf lifetime = %s, want %s", got, DefaultLeafLifetime)
+	}
+	if srv.NotAfter.Year() >= 2100 {
+		t.Errorf("leaf NotAfter = %s, still effectively unbounded", srv.NotAfter)
+	}
+}
+
+func TestWithLifetimeOverride(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn", WithLifetime(48*time.Hour)); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+	if err := MakeClientCert("client", "org", "cn", nil, WithLifetime(24*time.Hour)); err != nil {
+		t.Fatalf("MakeClientCert: %v", err)
+	}
+
+	caPath, _ := paths.MtlsCAPath()
+	cliPath, _ := paths.MtlsBundlePath("client")
+	ca := firstCertInBundle(t, caPath)
+	cli := firstCertInBundle(t, cliPath)
+
+	if got := ca.NotAfter.Sub(ca.NotBefore); got != 48*time.Hour {
+		t.Errorf("CA lifetime = %s, want 48h", got)
+	}
+	if got := cli.NotAfter.Sub(cli.NotBefore); got != 24*time.Hour {
+		t.Errorf("leaf lifetime = %s, want 24h", got)
+	}
+
+	// Non-positive durations fall back to the default.
+	if err := MakeServerCert("server", "org", "cn", []string{"localhost"}, WithLifetime(0)); err != nil {
+		t.Fatalf("MakeServerCert: %v", err)
+	}
+	srvPath, _ := paths.MtlsBundlePath("server")
+	srv := firstCertInBundle(t, srvPath)
+	if got := srv.NotAfter.Sub(srv.NotBefore); got != DefaultLeafLifetime {
+		t.Errorf("lifetime with WithLifetime(0) = %s, want default %s", got, DefaultLeafLifetime)
+	}
+}
+
+// WithLifetime keeps the default for a non-positive duration. This is only a
+// library backstop: the --valid-for flag of make-{ca,server,client} rejects
+// such a value before it ever reaches here (see exec/tools/tasks/make-*.go).
+func TestWithLifetimeIgnoresNonPositiveDurations(t *testing.T) {
+	for _, d := range []time.Duration{0, -1, -24 * time.Hour} {
+		if got := buildOptions(DefaultLeafLifetime, []CertOption{WithLifetime(d)}); got.lifetime != DefaultLeafLifetime {
+			t.Errorf("WithLifetime(%s) => lifetime %s, want default %s", d, got.lifetime, DefaultLeafLifetime)
+		}
+	}
+	if got := buildOptions(DefaultCALifetime, []CertOption{WithLifetime(time.Hour)}); got.lifetime != time.Hour {
+		t.Errorf("WithLifetime(1h) => lifetime %s, want 1h", got.lifetime)
+	}
+}
+
+func TestLegacyZeroCounterIsBumpedToPositive(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn"); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+	// Simulate a CA created by a pre-fix version, whose counter file
+	// holds the non-positive serial 0.
+	counterPath, _ := paths.CACounterPath()
+	if err := os.WriteFile(counterPath, []byte("0"), permCounter); err != nil {
+		t.Fatalf("write counter: %v", err)
+	}
+
+	if err := MakeServerCert("server", "org", "cn", []string{"localhost"}); err != nil {
+		t.Fatalf("MakeServerCert: %v", err)
+	}
+	srvPath, _ := paths.MtlsBundlePath("server")
+	srv := firstCertInBundle(t, srvPath)
+	if srv.SerialNumber.Sign() <= 0 {
+		t.Fatalf("leaf serial = %s, want positive", srv.SerialNumber)
+	}
+}
+
+func TestCounterPersistedBeforeBundle(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn"); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+	if err := MakeServerCert("server", "org", "cn", []string{"localhost"}); err != nil {
+		t.Fatalf("MakeServerCert: %v", err)
+	}
+
+	srvPath, _ := paths.MtlsBundlePath("server")
+	counterPath, _ := paths.CACounterPath()
+
+	bundleInfo, err := os.Stat(srvPath)
+	if err != nil {
+		t.Fatalf("stat bundle: %v", err)
+	}
+	counterInfo, err := os.Stat(counterPath)
+	if err != nil {
+		t.Fatalf("stat counter: %v", err)
+	}
+	if counterInfo.ModTime().After(bundleInfo.ModTime()) {
+		t.Error("serial counter was written after the bundle; a crash in between would reuse a serial")
+	}
+
+	// The persisted counter must already be past the issued serial.
+	srv := firstCertInBundle(t, srvPath)
+	if readCounter(t).Cmp(srv.SerialNumber) <= 0 {
+		t.Error("persisted counter is not greater than the issued serial")
 	}
 }

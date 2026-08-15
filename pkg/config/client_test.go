@@ -185,6 +185,100 @@ func TestClientConfigValidateHttpTokenNoMtlsCheck(t *testing.T) {
 	}
 }
 
+func TestClientConfigValidateDuplicateNames(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	// Same name AND same savePath: both entries would write the same
+	// /tmp/x.pem and /tmp/x.key.
+	c.Certifications = []ClientCertification{
+		{Name: "x", SavePath: "/tmp", Domains: []string{"a.example.com"}},
+		{Name: "x", SavePath: "/tmp", Domains: []string{"b.example.com"}},
+	}
+	err := c.Validate(nil)
+	if err == nil {
+		t.Fatal("expected error on duplicate certification name")
+	}
+	if !strings.Contains(err.Error(), "duplicate certification name") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+// TestClientConfigValidateSameNameDifferentSavePath locks the backward-compat
+// fix: in HTTP mode the on-disk identity is savePath + name, so reusing a name
+// under a different savePath is a valid config and must keep loading.
+func TestClientConfigValidateSameNameDifferentSavePath(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Common.Mode = CLIENT_MODE_HTTP
+	c.Http.MainServer.Url = "https://example.com"
+	c.Certifications = []ClientCertification{
+		{Name: "site", SavePath: "/etc/nginx/certs", Domains: []string{"a.example.com"}},
+		{Name: "site", SavePath: "/etc/haproxy/certs", Domains: []string{"b.example.com"}},
+	}
+	if err := c.Validate(nil); err != nil {
+		t.Fatalf("same name under different savePaths should validate: %v", err)
+	}
+}
+
+// TestClientConfigValidateGrpcDuplicateNames keeps the global name check where
+// it matters: the name is the SDS resource name on the wire in gRPC mode.
+func TestClientConfigValidateGrpcDuplicateNames(t *testing.T) {
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "client.pem")
+	if err := os.WriteFile(bundle, []byte("dummy"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Common.Mode = CLIENT_MODE_GRPC
+	c.GRPC.MainServer.Server = "localhost:10002"
+	c.GRPC.MainServer.PEM = bundle
+	c.Certifications = []ClientCertification{
+		{Name: "site", SavePath: "/etc/nginx/certs", Domains: []string{"a.example.com"}},
+		{Name: "site", SavePath: "/etc/haproxy/certs", Domains: []string{"b.example.com"}},
+	}
+	err := c.Validate(nil)
+	if err == nil {
+		t.Fatal("expected error on duplicate SDS resource name in grpc mode")
+	}
+	if !strings.Contains(err.Error(), "duplicate certification name") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func TestClientConfigValidateDuplicateDomainSets(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	// Same domain set, differing only in case and order.
+	c.Certifications = []ClientCertification{
+		{Name: "x", SavePath: "/tmp", Domains: []string{"a.example.com", "b.example.com"}},
+		{Name: "y", SavePath: "/tmp", Domains: []string{"B.example.com", "a.example.com."}},
+	}
+	err := c.Validate(nil)
+	if err == nil {
+		t.Fatal("expected error on duplicate domain set")
+	}
+	if !strings.Contains(err.Error(), "duplicates the domain set") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func TestClientConfigValidateDistinctCertifications(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	c.Certifications = []ClientCertification{
+		{Name: "x", SavePath: "/tmp", Domains: []string{"a.example.com"}},
+		{Name: "y", SavePath: "/tmp", Domains: []string{"b.example.com"}},
+	}
+	if err := c.Validate(nil); err != nil {
+		t.Fatalf("distinct certifications should validate: %v", err)
+	}
+}
+
 func TestClientConfigSetDefault(t *testing.T) {
 	c := &ClientConfig{}
 	c.SetDefault()

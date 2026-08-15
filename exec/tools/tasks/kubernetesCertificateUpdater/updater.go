@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -31,12 +32,22 @@ import (
 // granted via a ClusterRole + ClusterRoleBinding (cluster-wide) since the
 // list is performed across all namespaces.
 
+// secretListPageSize is the page size used when listing TLS secrets
+// cluster-wide, keeping peak memory bounded on large clusters.
+const secretListPageSize = 500
+
 type KubernetesCertificateUpdater struct {
 	cmd *k8sCertsUpdateCmd
 
 	wg           sync.WaitGroup
 	taskErrMutex sync.Mutex
 	taskErr      []error
+
+	// pending holds the watch names (namespace/name) whose handler has been
+	// registered but has not completed yet, so a wait timeout can name the
+	// secrets that never got their certificate.
+	pendingMutex sync.Mutex
+	pending      map[string]struct{}
 
 	certDXDaemon *client.CertDXClientDaemon
 	kubeClient   kubernetes.Interface
@@ -48,6 +59,7 @@ func MakeKubernetesReplaceCertificate(updaterCmd *k8sCertsUpdateCmd) *Kubernetes
 
 		wg:           sync.WaitGroup{},
 		taskErrMutex: sync.Mutex{},
+		pending:      make(map[string]struct{}),
 
 		// certDXDaemon : in certdx init
 	}
@@ -109,7 +121,7 @@ func (r *KubernetesCertificateUpdater) InvokeCertificateUpdate(ctx context.Conte
 	}
 	defer r.certDXDaemon.Stop()
 
-	return r.waitReplaceTask()
+	return r.waitReplaceTask(ctx)
 }
 
 func (r *KubernetesCertificateUpdater) getAllCertificatesFromKubernetes(ctx context.Context) ([]corev1.Secret, error) {
@@ -117,22 +129,36 @@ func (r *KubernetesCertificateUpdater) getAllCertificatesFromKubernetes(ctx cont
 		return nil, fmt.Errorf("kubernetes client is not initialized")
 	}
 
-	raw, err := r.kubeClient.CoreV1().Secrets("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list secrets in kubernetes: %w", err)
+	// Only TLS secrets can ever be updated, so let the apiserver do the
+	// filtering, and page through the result: a cluster-wide list of every
+	// secret would otherwise be materialized in memory at once.
+	listOpts := metav1.ListOptions{
+		FieldSelector: "type=" + string(corev1.SecretTypeTLS),
+		Limit:         secretListPageSize,
 	}
 
-	ret := make([]corev1.Secret, 0, len(raw.Items))
-	for _, secret := range raw.Items {
-		if secret.Type != corev1.SecretTypeTLS {
-			continue
+	ret := make([]corev1.Secret, 0)
+	for {
+		raw, err := r.kubeClient.CoreV1().Secrets("").List(ctx, listOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list secrets in kubernetes: %w", err)
 		}
-		if _, ok := secret.Annotations[certDxDomainAnnotation]; !ok {
-			continue
+
+		for _, secret := range raw.Items {
+			if secret.Type != corev1.SecretTypeTLS {
+				continue
+			}
+			if _, ok := secret.Annotations[certDxDomainAnnotation]; !ok {
+				continue
+			}
+			ret = append(ret, secret)
 		}
-		ret = append(ret, secret)
+
+		if raw.Continue == "" {
+			return ret, nil
+		}
+		listOpts.Continue = raw.Continue
 	}
-	return ret, nil
 }
 
 // registerWatchAndHandlers parses each annotated secret, validates its domains
@@ -160,6 +186,7 @@ func (r *KubernetesCertificateUpdater) registerWatchAndHandlers(ctx context.Cont
 
 		watchName := fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)
 		r.wg.Add(1)
+		r.markPending(watchName)
 
 		var once sync.Once
 		handler := func(fullchain, key []byte, _ *config.ClientCertification) {
@@ -167,6 +194,7 @@ func (r *KubernetesCertificateUpdater) registerWatchAndHandlers(ctx context.Cont
 			// the first successful delivery for this one-shot run.
 			once.Do(func() {
 				defer r.wg.Done()
+				defer r.markDone(watchName)
 				if err := r.replaceCertificateInKubernetes(ctx, secret, fullchain, key); err != nil {
 					r.taskErrMutex.Lock()
 					r.taskErr = append(r.taskErr, fmt.Errorf("%s/%s: %w", secret.Namespace, secret.Name, err))
@@ -179,6 +207,7 @@ func (r *KubernetesCertificateUpdater) registerWatchAndHandlers(ctx context.Cont
 			client.WithCertificateHandlerOption(handler),
 		}); err != nil {
 			logging.Error("Failed to add cert to watch for secret %s: %s", watchName, err)
+			r.markDone(watchName)
 			r.wg.Done()
 			continue
 		}
@@ -205,8 +234,42 @@ func (r *KubernetesCertificateUpdater) startCertDXDaemon() error {
 	return nil
 }
 
-func (r *KubernetesCertificateUpdater) waitReplaceTask() error {
-	waitCtx, cancel := context.WithTimeout(context.Background(), waitDeadline)
+func (r *KubernetesCertificateUpdater) markPending(watchName string) {
+	r.pendingMutex.Lock()
+	defer r.pendingMutex.Unlock()
+	if r.pending == nil {
+		r.pending = make(map[string]struct{})
+	}
+	r.pending[watchName] = struct{}{}
+}
+
+func (r *KubernetesCertificateUpdater) markDone(watchName string) {
+	r.pendingMutex.Lock()
+	defer r.pendingMutex.Unlock()
+	delete(r.pending, watchName)
+}
+
+// pendingWatchNames returns the sorted names of the secrets whose handler has
+// not completed yet.
+func (r *KubernetesCertificateUpdater) pendingWatchNames() []string {
+	r.pendingMutex.Lock()
+	defer r.pendingMutex.Unlock()
+	names := make([]string, 0, len(r.pending))
+	for name := range r.pending {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (r *KubernetesCertificateUpdater) collectTaskErr() []error {
+	r.taskErrMutex.Lock()
+	defer r.taskErrMutex.Unlock()
+	return append([]error(nil), r.taskErr...)
+}
+
+func (r *KubernetesCertificateUpdater) waitReplaceTask(ctx context.Context) error {
+	waitCtx, cancel := context.WithTimeout(ctx, waitDeadline)
 	defer cancel()
 
 	wgDone := make(chan struct{})
@@ -217,15 +280,18 @@ func (r *KubernetesCertificateUpdater) waitReplaceTask() error {
 
 	select {
 	case <-waitCtx.Done():
-		return fmt.Errorf("timeout waiting for kubernetes secrets to be updated")
+		// Report both what already failed and which secrets never got a
+		// certificate; otherwise the run fails with a bare, unactionable timeout.
+		pending := r.pendingWatchNames()
+		errs := append([]error{fmt.Errorf("stopped waiting for kubernetes secrets to be updated (%w), %d pending: [%s]",
+			context.Cause(waitCtx), len(pending), strings.Join(pending, ", "))}, r.collectTaskErr()...)
+		return errors.Join(errs...)
 	case <-wgDone:
-		r.taskErrMutex.Lock()
-		defer r.taskErrMutex.Unlock()
-		if len(r.taskErr) == 0 {
-			logging.Info("All kubernetes secrets updated successfully")
-			return nil
+		if errs := r.collectTaskErr(); len(errs) != 0 {
+			return errors.Join(errs...)
 		}
-		return errors.Join(r.taskErr...)
+		logging.Info("All kubernetes secrets updated successfully")
+		return nil
 	}
 }
 
@@ -287,9 +353,12 @@ func parseDomainsAnnotation(domainListStr string) []string {
 	return ret
 }
 
+// areDomainsAllowed reports whether one configured cert pack covers every
+// annotated domain. The configured lists are cert-pack domains, so wildcard
+// entries must be honoured (a "*.example.com" pack covers "foo.example.com").
 func areDomainsAllowed(certdx *client.CertDXClientDaemon, domains []string) bool {
 	for _, item := range certdx.Config.Certifications {
-		if domain.AllAllowed(item.Domains, domains) {
+		if domain.AllCovered(item.Domains, domains) {
 			return true
 		}
 	}

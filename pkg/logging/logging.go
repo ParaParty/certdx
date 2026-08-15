@@ -6,12 +6,28 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
+// Both are read from every logging goroutine while SetLogger / SetDebug
+// may replace them concurrently (the Caddy plugin swaps the logger on
+// config reload), so they are accessed atomically.
 var (
-	debugEnabled bool
-	logger       = log.New(os.Stderr, "", log.LstdFlags)
+	debugEnabled atomic.Bool
+	logger       atomic.Pointer[log.Logger]
 )
+
+func init() {
+	logger.Store(log.New(os.Stderr, "", log.LstdFlags))
+}
+
+// currentLogger returns the active logger, never nil.
+func currentLogger() *log.Logger {
+	if l := logger.Load(); l != nil {
+		return l
+	}
+	return log.New(os.Stderr, "", log.LstdFlags)
+}
 
 // SetLogFile adds a log file as an additional output alongside stderr.
 func SetLogFile(logFilePath string) {
@@ -24,25 +40,29 @@ func SetLogFile(logFilePath string) {
 		return
 	}
 	Info("Log to file path: %s", logFilePath)
-	logger.SetOutput(io.MultiWriter(os.Stderr, logFile))
+	currentLogger().SetOutput(io.MultiWriter(os.Stderr, logFile))
 }
 
 // SetLogger replaces the underlying logger instance. Used by the Caddy
-// integration to route output through Caddy's zap logger.
+// integration to route output through Caddy's zap logger. A nil logger
+// is ignored so in-flight logging never panics.
 func SetLogger(l *log.Logger) {
-	logger = l
+	if l == nil {
+		return
+	}
+	logger.Store(l)
 }
 
 func SetDebug(enabled bool) {
-	debugEnabled = enabled
+	debugEnabled.Store(enabled)
 }
 
 func logf(prefix, format string, v ...any) {
-	logger.Printf("%s %s", prefix, fmt.Sprintf(format, v...))
+	currentLogger().Printf("%s %s", prefix, fmt.Sprintf(format, v...))
 }
 
 func Debug(format string, v ...any) {
-	if debugEnabled {
+	if debugEnabled.Load() {
 		logf("[DEB]", format, v...)
 	}
 }
@@ -53,7 +73,7 @@ func Warn(format string, v ...any)   { logf("[WRN]", format, v...) }
 func Error(format string, v ...any)  { logf("[ERR]", format, v...) }
 
 func Fatal(format string, v ...any) {
-	logger.Fatalf("[ERR] %s", fmt.Sprintf(format, v...))
+	currentLogger().Fatalf("[ERR] %s", fmt.Sprintf(format, v...))
 }
 
 // ---------------------------------------------------------------------------

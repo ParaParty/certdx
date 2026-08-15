@@ -137,6 +137,9 @@ Keep `ca.pem` only on the server host (it contains the CA private key).
 The name `ca` is reserved; `make-client` and `make-server` reject it so
 a typo cannot silently overwrite the CA.
 
+Entity bundles are valid for two years and the CA for ten (override with
+`--valid-for`), so schedule a re-issue before they expire.
+
 See [tools.md](tools.md) for the full flag set.
 
 ## 4. Server-side install

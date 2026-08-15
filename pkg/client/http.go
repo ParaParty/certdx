@@ -12,44 +12,60 @@ import (
 
 	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/mtls"
 )
+
+// httpIdleConnTimeout bounds how long an idle keep-alive connection is
+// kept alive. Clients are built once per server and reused, but a
+// bounded idle timeout still keeps sockets from piling up when the peer
+// goes away.
+const httpIdleConnTimeout = 90 * time.Second
 
 type CertDXHttpClient struct {
 	HttpClient *http.Client
 	Server     *config.ClientHttpServer
 }
 
-type CertDXHttpClientOption func(client *CertDXHttpClient)
+// CertDXHttpClientOption customises a client under construction. An
+// option that cannot be satisfied (e.g. an unreadable mTLS bundle)
+// returns an error, which MakeCertDXHttpClient surfaces to the caller.
+// Options must never be process-fatal: this code also runs inside the
+// Caddy plugin and certdx_tools, where killing the host process on a
+// transient file error is unacceptable.
+type CertDXHttpClientOption func(client *CertDXHttpClient) error
+
+func newTLSTransport(cfg *tls.Config) *http.Transport {
+	return &http.Transport{
+		TLSClientConfig: cfg,
+		IdleConnTimeout: httpIdleConnTimeout,
+	}
+}
 
 func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOption {
-	return func(client *CertDXHttpClient) {
+	return func(client *CertDXHttpClient) error {
 		client.Server = server
 
 		if server.AuthMethod == config.HTTP_AUTH_MTLS {
 			cfg, err := mtls.LoadClient(server.PEM)
 			if err != nil {
-				logging.Fatal("load mtls bundle: %s", err)
+				return fmt.Errorf("load mtls bundle: %w", err)
 			}
-			client.HttpClient.Transport = &http.Transport{
-				TLSClientConfig: cfg,
-			}
+			client.HttpClient.Transport = newTLSTransport(cfg)
 		}
+		return nil
 	}
 }
 
 func WithCertDXInsecure() CertDXHttpClientOption {
-	return func(client *CertDXHttpClient) {
-		client.HttpClient.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		}
+	return func(client *CertDXHttpClient) error {
+		client.HttpClient.Transport = newTLSTransport(&tls.Config{
+			InsecureSkipVerify: true,
+		})
+		return nil
 	}
 }
 
-func MakeCertDXHttpClient(s ...CertDXHttpClientOption) *CertDXHttpClient {
+func MakeCertDXHttpClient(s ...CertDXHttpClientOption) (*CertDXHttpClient, error) {
 	ret := &CertDXHttpClient{
 		HttpClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -57,10 +73,12 @@ func MakeCertDXHttpClient(s ...CertDXHttpClientOption) *CertDXHttpClient {
 	}
 
 	for _, item := range s {
-		item(ret)
+		if err := item(ret); err != nil {
+			return nil, err
+		}
 	}
 
-	return ret
+	return ret, nil
 }
 
 func (c *CertDXHttpClient) makeGetCertRequest(ctx context.Context, domains []string) (*http.Request, error) {

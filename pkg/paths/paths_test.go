@@ -83,6 +83,57 @@ func TestMtlsBundlePathName(t *testing.T) {
 	}
 }
 
+func TestACMEPrivateKeyRejectsTraversal(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "data")
+	withDataDir(t, override)
+
+	cases := []struct{ email, provider string }{
+		{"../../etc/passwd", "r3"},
+		{"a/b@example.com", "r3"},
+		{"u@example.com", "../r3"},
+		{"u@example.com", "sub/r3"},
+		{"..", "r3"},
+		{".", "r3"},
+		{"", "r3"},
+		{"u@example.com", ""},
+		{"u\x00@example.com", "r3"},
+	}
+	for _, c := range cases {
+		p, err := ACMEPrivateKey(c.email, c.provider)
+		if err == nil {
+			t.Errorf("ACMEPrivateKey(%q, %q) = %q, want error", c.email, c.provider, p)
+		}
+	}
+}
+
+func TestACMEPrivateKeyStaysInsidePrivateDir(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "data")
+	withDataDir(t, override)
+
+	// Plain-but-unusual local parts must keep working and must resolve
+	// inside private/.
+	for _, email := range []string{"u@example.com", "u+tag@example.com", "u.name@example.com"} {
+		p, err := ACMEPrivateKey(email, "r3")
+		if err != nil {
+			t.Fatalf("ACMEPrivateKey(%q): %v", email, err)
+		}
+		if want := filepath.Join(override, "private"); filepath.Dir(p) != want {
+			t.Errorf("key for %q escaped %s: %s", email, want, p)
+		}
+	}
+}
+
+func TestMtlsBundlePathRejectsTraversal(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "data")
+	withDataDir(t, override)
+
+	for _, name := range []string{"../ca", "a/b", "..", "", "."} {
+		if p, err := MtlsBundlePath(name); err == nil {
+			t.Errorf("MtlsBundlePath(%q) = %q, want error", name, p)
+		}
+	}
+}
+
 func TestMtlsCAAndCounterPath(t *testing.T) {
 	override := filepath.Join(t.TempDir(), "data")
 	withDataDir(t, override)

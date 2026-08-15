@@ -2,10 +2,13 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"pkg.para.party/certdx/pkg/config"
 )
@@ -117,6 +120,52 @@ func TestPrepareTempFileMissingDir(t *testing.T) {
 	}
 }
 
+// TestPrepareTempFileSurvivesFsyncFailure pins the best-effort fsync:
+// some FUSE/container mounts answer fsync with ENOSYS/EINVAL, and that
+// must not stop a certificate write that would otherwise land.
+func TestPrepareTempFileSurvivesFsyncFailure(t *testing.T) {
+	orig := syncFile
+	t.Cleanup(func() { syncFile = orig })
+	syncFile = func(*os.File) error { return syscall.ENOSYS }
+
+	root := t.TempDir()
+	p := filepath.Join(root, "cert.pem")
+	tmp, err := prepareTempFile(root, "cert.pem", []byte("CERT"), 0o600)
+	if err != nil {
+		t.Fatalf("fsync failure must not fail the write: %v", err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if got, err := os.ReadFile(p); err != nil || string(got) != "CERT" {
+		t.Fatalf("contents: got %q err %v", got, err)
+	}
+}
+
+// TestWriteCertAndDoCommandSurvivesFsyncFailure walks the same mount
+// through the full write path: a refused fsync must still deliver both
+// cert and key.
+func TestWriteCertAndDoCommandSurvivesFsyncFailure(t *testing.T) {
+	orig := syncFile
+	t.Cleanup(func() { syncFile = orig })
+	syncFile = func(*os.File) error { return syscall.EINVAL }
+
+	root := t.TempDir()
+	c := &config.ClientCertification{
+		Name:     "site",
+		SavePath: root,
+		Domains:  []string{"example.com"},
+	}
+	writeCertAndDoCommand(context.Background(), []byte("CERT"), []byte("KEY"), c)
+
+	if got, err := os.ReadFile(filepath.Join(root, "site.pem")); err != nil || string(got) != "CERT" {
+		t.Fatalf("cert not delivered on a mount that refuses fsync: got %q err %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "site.key")); err != nil || string(got) != "KEY" {
+		t.Fatalf("key not delivered on a mount that refuses fsync: got %q err %v", got, err)
+	}
+}
+
 func TestWriteCertAndDoCommandWritesBothFiles(t *testing.T) {
 	root := t.TempDir()
 	c := &config.ClientCertification{
@@ -124,7 +173,7 @@ func TestWriteCertAndDoCommandWritesBothFiles(t *testing.T) {
 		SavePath: root,
 		Domains:  []string{"example.com"},
 	}
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
+	writeCertAndDoCommand(context.Background(), []byte("CERT"), []byte("KEY"), c)
 
 	cert, err := os.ReadFile(filepath.Join(root, "site.pem"))
 	if err != nil {
@@ -176,7 +225,7 @@ func TestWriteCertAndDoCommandWhitespaceReloadCommand(t *testing.T) {
 			t.Fatalf("panicked on whitespace ReloadCommand: %v", r)
 		}
 	}()
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
+	writeCertAndDoCommand(context.Background(), []byte("CERT"), []byte("KEY"), c)
 }
 
 // TestWriteCertAndDoCommandSkipsReloadOnFirstInstall covers the
@@ -198,7 +247,7 @@ func TestWriteCertAndDoCommandSkipsReloadOnFirstInstall(t *testing.T) {
 		}
 	}()
 	// First install — files don't exist yet — reload must not run.
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
+	writeCertAndDoCommand(context.Background(), []byte("CERT"), []byte("KEY"), c)
 
 	if _, err := os.Stat(filepath.Join(root, "site.pem")); err != nil {
 		t.Errorf("cert was not written: %v", err)
@@ -214,6 +263,73 @@ func TestWriteCertAndDoCommandEmptySavePath(t *testing.T) {
 			t.Fatalf("panicked on empty save path: %v", r)
 		}
 	}()
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
+	writeCertAndDoCommand(context.Background(), []byte("CERT"), []byte("KEY"), c)
 	// Nothing to assert on disk — just that we returned cleanly.
+}
+
+// TestRunReloadCommandKillsHungCommand pins the hang fix: a reload
+// command that never exits must be killed at the timeout so the sole
+// UpdateChan consumer regains control.
+func TestRunReloadCommandKillsHungCommand(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runReloadCommand(context.Background(), "sleep 30", 100*time.Millisecond)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runReloadCommand did not return, hung reload wedges the watcher")
+	}
+}
+
+// TestRunReloadCommandHonoursContext covers the daemon-stop path: a
+// cancelled root context must terminate the reload command too.
+func TestRunReloadCommandHonoursContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runReloadCommand(ctx, "sleep 30", time.Minute)
+	}()
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runReloadCommand ignored context cancellation")
+	}
+}
+
+// TestWriteCertKeyPairAtomicSeparateDirs covers cert and key living in
+// different directories: both renames must land, and the parent-dir
+// syncs must not turn a successful write into an error.
+func TestWriteCertKeyPairAtomicSeparateDirs(t *testing.T) {
+	certDir := t.TempDir()
+	keyDir := t.TempDir()
+	certPath := filepath.Join(certDir, "site.pem")
+	keyPath := filepath.Join(keyDir, "site.key")
+
+	if err := writeCertKeyPairAtomic(certPath, []byte("CERT"), keyPath, []byte("KEY")); err != nil {
+		t.Fatalf("writeCertKeyPairAtomic: %v", err)
+	}
+	if got, err := os.ReadFile(certPath); err != nil || string(got) != "CERT" {
+		t.Fatalf("cert: got %q err %v", got, err)
+	}
+	if got, err := os.ReadFile(keyPath); err != nil || string(got) != "KEY" {
+		t.Fatalf("key: got %q err %v", got, err)
+	}
+}
+
+// TestSyncDirMissingDirIsBestEffort: syncing a directory that isn't
+// there must not panic — the sync is durability polish, not a
+// precondition.
+func TestSyncDirMissingDirIsBestEffort(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("panicked: %v", r)
+		}
+	}()
+	syncDir(filepath.Join(t.TempDir(), "nope"))
 }

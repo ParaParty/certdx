@@ -90,8 +90,15 @@ reloadCommand = "systemctl reload nginx"
 ## Renewal cadence
 
 The client polls the server on the same cadence as the server's renewal
-check (`ACME.renewTimeLeft / 4`). When the server returns a newer
-certificate, the client overwrites both files and runs `reloadCommand`.
+check (`ACME.renewTimeLeft / 4`), floored at one minute so a server that
+reports a tiny or zero `renewTimeLeft` cannot turn the poller into a hot
+loop. A failed round does not wait that long: it retries after 15s and
+backs off up to 60s until the server answers again. When the server
+returns a newer certificate, the client overwrites both files and runs
+`reloadCommand`.
+
+`reloadCommand` is given 60 seconds to finish before it is killed, so a
+command that hangs cannot wedge the certificate handler.
 
 Writes are atomic via a temp-file-and-rename, so a downstream service
 reading the cert mid-update never observes a torn or partial file. The

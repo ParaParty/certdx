@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestACMEConfigValidateEmptyAllowedDomains(t *testing.T) {
@@ -184,9 +185,143 @@ func TestHttpProviderValidateS3Nil(t *testing.T) {
 }
 
 func TestHttpProviderValidateS3Valid(t *testing.T) {
-	p := &HttpProvider{Type: HttpProviderTypeS3, S3: &S3Client{}}
+	p := &HttpProvider{Type: HttpProviderTypeS3, S3: validS3Client()}
 	if err := p.Validate(); err != nil {
 		t.Fatalf("valid s3 provider: %v", err)
+	}
+}
+
+func validS3Client() *S3Client {
+	return &S3Client{
+		Bucket:          "cos-1000000000",
+		URL:             "https://cos.ap-beijing.myqcloud.com",
+		AccessKeyId:     "id",
+		AccessKeySecret: "secret",
+	}
+}
+
+func TestHttpProviderValidateS3MissingFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*S3Client)
+		wantMsg string
+	}{
+		{"no bucket", func(s *S3Client) { s.Bucket = "" }, "empty bucket or url"},
+		{"no url", func(s *S3Client) { s.URL = "" }, "empty bucket or url"},
+		{"no access key id", func(s *S3Client) { s.AccessKeyId = "" }, "empty accessKeyId or accessKeySecret"},
+		{"no access key secret", func(s *S3Client) { s.AccessKeySecret = "" }, "empty accessKeyId or accessKeySecret"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s3 := validS3Client()
+			tc.mutate(s3)
+			p := &HttpProvider{Type: HttpProviderTypeS3, S3: s3}
+			err := p.Validate()
+			if err == nil {
+				t.Fatal("expected error on incomplete S3 config")
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("error wording drifted: %v", err)
+			}
+		})
+	}
+}
+
+// TestS3ClientResolvedACL locks the backward-compatible ACL semantics: an
+// absent acl key keeps sending the "public-read" certdx <= v0.6.0 hardcoded,
+// while an explicit empty acl opts out of the header entirely.
+func TestS3ClientResolvedACL(t *testing.T) {
+	empty := ""
+	private := "private"
+
+	cases := []struct {
+		name string
+		s3   *S3Client
+		want string
+	}{
+		{"unset keeps the historical public-read", &S3Client{}, DefaultS3ACL},
+		{"explicit empty sends no ACL", &S3Client{ACL: &empty}, ""},
+		{"explicit value is passed through", &S3Client{ACL: &private}, "private"},
+		{"nil receiver keeps the historical public-read", nil, DefaultS3ACL},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.s3.ResolvedACL(); got != tc.want {
+				t.Errorf("ResolvedACL() = %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHttpProviderValidateS3ACL(t *testing.T) {
+	valid := []*string{nil, ptr(""), ptr("public-read"), ptr("private"), ptr("bucket-owner-full-control")}
+	for _, acl := range valid {
+		s3 := validS3Client()
+		s3.ACL = acl
+		p := &HttpProvider{Type: HttpProviderTypeS3, S3: s3}
+		if err := p.Validate(); err != nil {
+			t.Fatalf("acl %v should validate: %v", acl, err)
+		}
+	}
+
+	s3 := validS3Client()
+	s3.ACL = ptr("public_read")
+	p := &HttpProvider{Type: HttpProviderTypeS3, S3: s3}
+	err := p.Validate()
+	if err == nil {
+		t.Fatal("expected error on unknown canned acl")
+	}
+	if !strings.Contains(err.Error(), "unknown acl") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestDnsProviderValidateNameservers(t *testing.T) {
+	base := DnsProvider{Type: DnsProviderTypeCloudflare, Email: "a@b.com", APIKey: "key"}
+
+	valid := [][]string{
+		nil,
+		{"8.8.8.8:53"},
+		{"1.1.1.1"},
+		{"dns.example.com:5353"},
+		{"[2001:4860:4860::8888]:53"},
+		{"2001:4860:4860::8888"},
+		// Underscore labels are illegal per RFC 1123 but common in AD /
+		// legacy internal DNS, and lego/miekg resolve them fine.
+		{"_dns.internal.example.com"},
+		{"ad_dc1.corp.example.com:53"},
+	}
+	for _, ns := range valid {
+		p := base
+		p.Nameservers = ns
+		if err := p.Validate(); err != nil {
+			t.Fatalf("valid nameservers %v: %v", ns, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"https://8.8.8.8",
+		"8.8.8.8:53 ",
+		"8.8.8.8 1.1.1.1",
+		"8.8.8.8:dns",
+		"8.8.8.8:0",
+		"8.8.8.8:99999",
+		"8.8.8.8:53/resolve",
+		"-bad-.example.com",
+	}
+	for _, ns := range invalid {
+		p := base
+		p.Nameservers = []string{ns}
+		err := p.Validate()
+		if err == nil {
+			t.Fatalf("expected error on nameserver %q", ns)
+		}
+		if !strings.Contains(err.Error(), "nameserver") {
+			t.Fatalf("error wording drifted for %q: %v", ns, err)
+		}
 	}
 }
 
@@ -209,12 +344,55 @@ func TestHttpServerConfigValidateDisabled(t *testing.T) {
 }
 
 func TestHttpServerConfigValidateAPIPathAutoPrefix(t *testing.T) {
-	c := &HttpServerConfig{Enabled: true, APIPath: "api/cert"}
+	c := &HttpServerConfig{Enabled: true, APIPath: "api/cert", AuthMethod: HTTP_AUTH_TOKEN, Token: "t"}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if c.APIPath != "/api/cert" {
 		t.Errorf("APIPath not prefixed: got %s want /api/cert", c.APIPath)
+	}
+}
+
+func TestHttpServerConfigValidateAuthMethod(t *testing.T) {
+	cases := []struct {
+		name    string
+		c       HttpServerConfig
+		wantErr string
+	}{
+		{"empty", HttpServerConfig{Enabled: true, APIPath: "/", Token: "t"}, "unknown authMethod"},
+		{"typo", HttpServerConfig{Enabled: true, APIPath: "/", AuthMethod: "tokne", Token: "t"}, "unknown authMethod"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.c.Validate()
+			if err == nil {
+				t.Fatal("expected error on bad authMethod")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error wording drifted: %v", err)
+			}
+		})
+	}
+
+	ok := &HttpServerConfig{Enabled: true, APIPath: "/", AuthMethod: HTTP_AUTH_MTLS}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("mtls auth method should validate: %v", err)
+	}
+}
+
+func TestHttpServerConfigValidateEmptyToken(t *testing.T) {
+	c := &HttpServerConfig{Enabled: true, APIPath: "/", AuthMethod: HTTP_AUTH_TOKEN}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected error on token auth with empty token")
+	}
+	if !strings.Contains(err.Error(), "allowAnonymous") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+
+	c.AllowAnonymous = true
+	if err := c.Validate(); err != nil {
+		t.Fatalf("empty token with allowAnonymous should validate: %v", err)
 	}
 }
 
@@ -263,6 +441,112 @@ func TestServerConfigParseDurationInvalidRenewTimeLeft(t *testing.T) {
 	}
 }
 
+func TestServerConfigParseDurationRejectsNonPositive(t *testing.T) {
+	cases := []struct {
+		name          string
+		certLifeTime  string
+		renewTimeLeft string
+		wantMsg       string
+	}{
+		{"zero life time", "0s", "24h", "CertLifeTime must be positive"},
+		{"negative life time", "-168h", "24h", "CertLifeTime must be positive"},
+		{"zero renew time", "168h", "0s", "RenewTimeLeft must be positive"},
+		{"negative renew time", "168h", "-1h", "RenewTimeLeft must be positive"},
+		{"renew longer than life time", "24h", "168h", "must not be longer than CertLifeTime"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &ServerConfig{}
+			c.SetDefault()
+			c.ACME.Provider = "r3"
+			c.ACME.CertLifeTime = tc.certLifeTime
+			c.ACME.RenewTimeLeft = tc.renewTimeLeft
+			err := c.parseDuration()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("error wording drifted: %v", err)
+			}
+		})
+	}
+}
+
+// TestServerConfigParseDurationRenewEqualsCertLifeTime pins the "renew at half
+// life" setup (certLifeTime == renewTimeLeft): the cert is asked to live twice
+// certLifeTime and is renewed halfway through. Only renewTimeLeft strictly
+// longer than certLifeTime is rejected.
+func TestServerConfigParseDurationRenewEqualsCertLifeTime(t *testing.T) {
+	c := &ServerConfig{}
+	c.SetDefault()
+	c.ACME.Provider = "r3"
+	c.ACME.CertLifeTime = "720h"
+	c.ACME.RenewTimeLeft = "720h"
+	if err := c.parseDuration(); err != nil {
+		t.Fatalf("renewTimeLeft == certLifeTime should be accepted: %v", err)
+	}
+}
+
+func TestServerConfigParseDurationProviderMaxLifeTime(t *testing.T) {
+	c := &ServerConfig{}
+	c.SetDefault()
+	c.ACME.Provider = "google"
+	// 90d total is exactly the provider maximum.
+	c.ACME.CertLifeTime = "2136h"
+	c.ACME.RenewTimeLeft = "24h"
+	if err := c.parseDuration(); err != nil {
+		t.Fatalf("90d total should be accepted: %v", err)
+	}
+
+	c.ACME.CertLifeTime = "2137h"
+	err := c.parseDuration()
+	if err == nil {
+		t.Fatal("expected error on cert life time beyond provider maximum")
+	}
+	if !strings.Contains(err.Error(), "longer than") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+
+	// The mock provider mints its own certs, so the cap does not apply.
+	c.ACME.Provider = "mock"
+	c.ACME.CertLifeTime = "8760h"
+	if err := c.parseDuration(); err != nil {
+		t.Fatalf("mock provider should not be capped: %v", err)
+	}
+}
+
+// TestServerConfigParseDurationLongLifeTimeNonGoogle locks the backward-compat
+// fix: only Google gets the requested NotAfter on the wire, so an over-long
+// certLifeTime against Let's Encrypt keeps loading (the server clamps
+// ValidBefore against the issued leaf's real NotAfter at runtime).
+func TestServerConfigParseDurationLongLifeTimeNonGoogle(t *testing.T) {
+	for _, provider := range []string{"r3", "r3test"} {
+		t.Run(provider, func(t *testing.T) {
+			c := &ServerConfig{}
+			c.SetDefault()
+			c.ACME.Provider = provider
+			c.ACME.CertLifeTime = "8760h"
+			c.ACME.RenewTimeLeft = "168h"
+			if err := c.parseDuration(); err != nil {
+				t.Fatalf("non-google provider should not be hard-capped: %v", err)
+			}
+			if c.ACME.CertLifeTimeDuration != 8760*time.Hour {
+				t.Errorf("CertLifeTimeDuration: got %s", c.ACME.CertLifeTimeDuration)
+			}
+		})
+	}
+
+	// googletest is Google too, and must stay a hard error.
+	c := &ServerConfig{}
+	c.SetDefault()
+	c.ACME.Provider = "googletest"
+	c.ACME.CertLifeTime = "8760h"
+	c.ACME.RenewTimeLeft = "168h"
+	if err := c.parseDuration(); err == nil {
+		t.Fatal("expected googletest to reject an over-long cert life time")
+	}
+}
+
 func TestACMEConfigValidateUnsupportedChallengeType(t *testing.T) {
 	c := &ACMEConfig{
 		Provider:       "r3test",
@@ -296,5 +580,8 @@ func TestServerConfigSetDefault(t *testing.T) {
 	}
 	if c.GRPCSDSServer.Listen != ":10002" {
 		t.Errorf("default grpc listen: got %s want :10002", c.GRPCSDSServer.Listen)
+	}
+	if c.HttpServer.AuthMethod != HTTP_AUTH_TOKEN {
+		t.Errorf("default http authMethod: got %s want %s", c.HttpServer.AuthMethod, HTTP_AUTH_TOKEN)
 	}
 }

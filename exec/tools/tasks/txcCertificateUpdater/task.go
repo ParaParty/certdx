@@ -3,6 +3,8 @@ package txcCertificateUpdater
 import (
 	"context"
 	"fmt"
+	"os/signal"
+	"syscall"
 
 	flag "github.com/spf13/pflag"
 
@@ -37,7 +39,16 @@ func TencentCloudReplaceCertificate(name string, args []string) error {
 	if err := updater.InitCertificateUpdater(); err != nil {
 		return fmt.Errorf("init updater: %w", err)
 	}
-	if err := updater.InvokeCertificateUpdate(context.Background()); err != nil {
+
+	// The run is bounded so an unreachable or rejecting Tencent Cloud
+	// endpoint exits nonzero for cron alerting instead of hanging, and a
+	// SIGINT/SIGTERM cancels the in-flight API calls.
+	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	ctx, cancel := context.WithTimeout(ctx, waitDeadline)
+	defer cancel()
+
+	if err := updater.InvokeCertificateUpdate(ctx); err != nil {
 		return fmt.Errorf("update certificates: %w", err)
 	}
 	return nil

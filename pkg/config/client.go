@@ -6,6 +6,7 @@ import (
 	"path"
 	"time"
 
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/paths"
 )
 
@@ -41,9 +42,38 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 		ret = append(ret, fmt.Errorf("no certification configured"))
 	}
 
+	// A certification name is only a global identifier in gRPC/SDS mode, where
+	// it is the SDS resource name on the wire (pkg/client/sds.go guards this
+	// again at runtime). In HTTP mode the on-disk identity is savePath + name
+	// and the daemon keys its watch map on the domain set, so the same name
+	// under two different savePaths is a perfectly good config and has always
+	// loaded. Only an identical savePath + name pair is a real collision
+	// there: both entries would write the same .pem/.key files.
+	grpcMode := c.Common.Mode == CLIENT_MODE_GRPC
+	seenNames := make(map[string]struct{}, len(c.Certifications))
+	seenDomains := make(map[domain.Key]string, len(c.Certifications))
 	for _, cert := range c.Certifications {
 		if err := cert.Validate(option); err != nil {
 			ret = append(ret, err)
+			continue
+		}
+
+		if nameKey, dupErr := certNameKey(cert, grpcMode); nameKey != "" {
+			if _, ok := seenNames[nameKey]; ok {
+				ret = append(ret, dupErr)
+			} else {
+				seenNames[nameKey] = struct{}{}
+			}
+		}
+
+		// Two certifications over the same domain set would race each other
+		// writing the same cert, so they have to be merged in the config.
+		key := domain.AsKey(cert.Domains)
+		if first, ok := seenDomains[key]; ok {
+			ret = append(ret, fmt.Errorf("certification %s duplicates the domain set of %s: %v",
+				cert.Name, first, cert.Domains))
+		} else {
+			seenDomains[key] = cert.Name
 		}
 	}
 
@@ -63,6 +93,21 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 	}
 
 	return errors.Join(ret...)
+}
+
+// certNameKey returns the uniqueness key for one certification's name, plus
+// the error to report when that key repeats. An empty key means the name has
+// no identity worth checking here (non-gRPC mode with no savePath, e.g. an
+// embedder that never writes files).
+func certNameKey(cert ClientCertification, grpcMode bool) (string, error) {
+	if grpcMode {
+		return cert.Name, fmt.Errorf("duplicate certification name: %s", cert.Name)
+	}
+	if cert.SavePath == "" {
+		return "", nil
+	}
+	return cert.SavePath + "\x00" + cert.Name,
+		fmt.Errorf("duplicate certification name: %s under savePath %s", cert.Name, cert.SavePath)
 }
 
 func (c *ClientConfig) parseDuration() error {
