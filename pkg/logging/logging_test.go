@@ -2,20 +2,22 @@ package logging
 
 import (
 	"bytes"
+	"io"
 	"log"
 	"strings"
+	"sync"
 	"testing"
 )
 
 func captureLogger(t *testing.T) (*bytes.Buffer, func()) {
 	t.Helper()
-	prev := logger
-	prevDebug := debugEnabled
+	prev := logger.Load()
+	prevDebug := debugEnabled.Load()
 	buf := &bytes.Buffer{}
-	logger = log.New(buf, "", 0)
+	logger.Store(log.New(buf, "", 0))
 	return buf, func() {
-		logger = prev
-		debugEnabled = prevDebug
+		logger.Store(prev)
+		debugEnabled.Store(prevDebug)
 	}
 }
 
@@ -23,7 +25,7 @@ func TestDebugSuppressedByDefault(t *testing.T) {
 	buf, restore := captureLogger(t)
 	defer restore()
 
-	debugEnabled = false
+	debugEnabled.Store(false)
 	Debug("should not appear")
 
 	if buf.Len() != 0 {
@@ -35,7 +37,7 @@ func TestDebugEnabledOutput(t *testing.T) {
 	buf, restore := captureLogger(t)
 	defer restore()
 
-	debugEnabled = true
+	debugEnabled.Store(true)
 	Debug("test %d", 42)
 
 	got := buf.String()
@@ -66,8 +68,8 @@ func TestSetDebugToggles(t *testing.T) {
 }
 
 func TestSetLoggerSwaps(t *testing.T) {
-	prev := logger
-	defer func() { logger = prev }()
+	prev := logger.Load()
+	defer func() { logger.Store(prev) }()
 
 	buf := &bytes.Buffer{}
 	SetLogger(log.New(buf, "", 0))
@@ -75,6 +77,51 @@ func TestSetLoggerSwaps(t *testing.T) {
 	Info("routed")
 	if !strings.Contains(buf.String(), "routed") {
 		t.Fatal("SetLogger did not swap output")
+	}
+}
+
+// TestConcurrentLogAndSetLogger reproduces the Caddy-reload data race:
+// goroutines logging while SetLogger / SetDebug swap the package state.
+// Fails under `go test -race` if the state is not accessed atomically.
+func TestConcurrentLogAndSetLogger(t *testing.T) {
+	_, restore := captureLogger(t)
+	defer restore()
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			Info("logging %d", i)
+			Debug("debug %d", i)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			SetLogger(log.New(io.Discard, "", 0))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			SetDebug(i%2 == 0)
+		}
+	}()
+
+	wg.Wait()
+}
+
+func TestSetLoggerIgnoresNil(t *testing.T) {
+	buf, restore := captureLogger(t)
+	defer restore()
+
+	SetLogger(nil)
+	Info("still routed")
+	if !strings.Contains(buf.String(), "still routed") {
+		t.Fatal("SetLogger(nil) dropped the active logger")
 	}
 }
 

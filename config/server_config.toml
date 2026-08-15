@@ -20,5 +20,6 @@ secure = true
 # Domain of this server, server will issue a certification for itself
 # for https api. Make sure your acme server can issue this domain.
 names = ["certdxserver.example.com", "*.example.com"]
-# left empty for no token
+# Required with the default authMethod = "token". To serve without any
+# authentication, leave it empty and set allowAnonymous = true.
 token = "KFCCrazyThursdayVMe50"

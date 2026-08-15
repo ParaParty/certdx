@@ -10,6 +10,10 @@ challengeType = "dns"
 # Certification will have a life time of certLifeTime + renewTimeLeft
 # If certLifeTime is passed, server will renew this certification
 # Server and client will check certification every renewTimeLeft/4
+# Both must be positive and renewTimeLeft must not be longer than certLifeTime.
+# Their sum is what is asked of the ACME provider: Google rejects anything over
+# the 90 days it can issue, Let's Encrypt ignores the request and the server
+# renews on the issued certificate's real expiry (logging a warning).
 certLifeTime = "168h"
 renewTimeLeft = "24h"
 
@@ -17,6 +21,11 @@ renewTimeLeft = "24h"
 allowedDomains = [
     "example.com",
 ]
+
+# Caps how many distinct cert packs the server will keep in its cache, so an
+# unauthenticated flood of domain sets can not grow it without bound.
+# 0 (the default) means unlimited.
+maxCacheEntries = 0
 
 # Google cloud credential, for registering google acme account
 [GoogleCloudCredential]
@@ -36,6 +45,7 @@ disableCompletePropagationRequirement = false
 
 # DNS propagation check settings
 # Use public DNS servers to check TXT record propagation
+# Each entry must be host[:port], port defaults to 53. No scheme, no URL.
 # nameservers = ["8.8.8.8:53", "1.1.1.1:53"]
 # dnsTimeout = "30s"
 
@@ -50,7 +60,7 @@ apiKey = ""
 # zoneToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
 
 # or you can use tencent cloud
-# type = "tencent"
+# type = "tencentcloud"
 # secretID = ""
 # SecretKey = ""
 
@@ -64,6 +74,16 @@ accessKeyId = "xxxxxxxxxx"
 accessKeySecret = "xxxxxxxx"
 sessionToken = ""
 url = "https://cos.ap-beijing.myqcloud.com"
+# Canned ACL sent with the challenge object.
+#   - leave this key out (the default): "public-read" is sent, which is what
+#     certdx <= v0.6.0 always did. Existing ACL-enabled buckets keep working.
+#   - acl = "": no ACL header is sent at all. Buckets created since Apr 2023
+#     have ACLs disabled by default and reject any x-amz-acl header, so this
+#     is the setting for them; make the challenge path publicly readable via
+#     the bucket policy instead.
+#   - any other canned ACL ("private", "bucket-owner-full-control", ...) is
+#     sent as-is.
+# acl = "public-read"
 
 # [MTLS] is required when authMethod = "mtls" or gRPCSDSServer is enabled.
 # pem is the path to the server PEM bundle (server cert + key + CA cert).
@@ -75,13 +95,19 @@ enabled = true
 listen = ":19198"
 apiPath = "/1145141919810"
 
+# "token" or "mtls", defaults to "token"
 authMethod = "token"
 secure = true
 # Domain of this server, server will issue a certification for itself
 # for https api. Make sure your acme server can issue this domain.
 names = ["certdxserver.example.com", "*.example.com"]
-# left empty for no token
+# Required when authMethod = "token". To serve without any authentication,
+# leave it empty and set allowAnonymous = true.
 token = "KFCCrazyThursdayVMe50"
+# allowAnonymous = false
+# authMethod = "token" with secure = false serves the token and the private
+# keys in cleartext, which logs a warning on startup. Set this to silence it.
+# allowInsecureToken = false
 
 # authMethod = "mtls"
 

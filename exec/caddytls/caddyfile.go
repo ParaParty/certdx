@@ -33,10 +33,15 @@ func init() {
 	httpcaddyfile.RegisterGlobalOption(dirCertDX, parseCertDXGlobalOptions)
 }
 
+// expectArg1 consumes the rest of the line and returns its single
+// argument. The directive name has to be captured before RemainingArgs
+// advances the dispenser, otherwise the error names the last argument
+// value instead of the directive it belongs to.
 func expectArg1(d *caddyfile.Dispenser) (string, error) {
+	directive := d.Val()
 	args := d.RemainingArgs()
 	if len(args) != 1 {
-		return "", d.Errf("expected 1 argument for %s, got %d", d.Val(), len(args))
+		return "", d.Errf("expected 1 argument for %s, got %d", directive, len(args))
 	}
 	return args[0], nil
 }
@@ -141,6 +146,15 @@ func (c *CertDXCaddyDaemon) unmarshalHttpServerBlock(s *config.ClientHttpServer,
 			case dirURL:
 				s.Url = v
 			case dirAuthMethod:
+				// An unrecognised value would leave auth disabled, so a
+				// typo such as "mTLS" has to fail the adapt, not the
+				// first request.
+				switch v {
+				case config.HTTP_AUTH_TOKEN, config.HTTP_AUTH_MTLS:
+				default:
+					return d.Errf("invalid %s %q, expected %q or %q",
+						dirAuthMethod, v, config.HTTP_AUTH_TOKEN, config.HTTP_AUTH_MTLS)
+				}
 				s.AuthMethod = v
 			case dirToken:
 				s.Token = v

@@ -120,6 +120,47 @@ func TestCertStoreSaveAndLoad(t *testing.T) {
 	}
 }
 
+// save must go through a temp file + rename so a crash mid-write can't leave
+// cache.json truncated, and must not leave the temp file behind.
+func TestCertStoreSaveIsAtomic(t *testing.T) {
+	cs := makeTempCertStore(t)
+
+	if err := os.WriteFile(cs.path, []byte(`{"1":{"domains":["old.com"],"cert":{}}}`), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	entry := &certStoreEntry{
+		Domains: []string{"new.com"},
+		Cert:    CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)},
+	}
+	if err := cs.saveEntry(entry); err != nil {
+		t.Fatalf("saveEntry: %v", err)
+	}
+
+	if _, err := os.Stat(cs.path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temp file left behind: %v", err)
+	}
+
+	var reloaded map[domain.Key]*certStoreEntry
+	b, err := os.ReadFile(cs.path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if err := json.Unmarshal(b, &reloaded); err != nil {
+		t.Fatalf("store is not valid JSON after save: %v", err)
+	}
+	if _, ok := reloaded[domain.AsKey([]string{"new.com"})]; !ok {
+		t.Fatal("saved entry missing from the store file")
+	}
+	st, err := os.Stat(cs.path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := st.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("perm: got %o want 0600", mode)
+	}
+}
+
 func TestCertStoreListenUpdatePersists(t *testing.T) {
 	cs := makeTempCertStore(t)
 	ctx, cancel := context.WithCancel(context.Background())

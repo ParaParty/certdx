@@ -104,7 +104,7 @@ Top-level directives:
 | Directive | Notes |
 | --- | --- |
 | `url` | Full URL including the server's `apiPath`. |
-| `authMethod` | `token` (default) or `mtls`. |
+| `authMethod` | `token` (default) or `mtls`. Any other value fails `caddy adapt` instead of being silently ignored. |
 | `token` | Bearer token for `authMethod token`. |
 | `pem` | PEM bundle (client cert + key + CA cert) for `authMethod mtls`. |
 
@@ -126,6 +126,11 @@ https://example.com {
 ```
 
 `my-cert` must match a `certificate <id> { ... }` block in the global config.
+
+Certificate material is kept in Caddy's usage pool, so a config reload
+(`caddy reload`) keeps serving the certificates already fetched instead of
+falling back to a cold start while the new client re-fetches them. A full
+process restart still starts cold.
 
 ## Full example
 

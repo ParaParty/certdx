@@ -34,7 +34,12 @@ type respData struct {
 }
 
 type CertDXgRPCClient struct {
-	tlsCred credentials.TransportCredentials
+	// tlsCred caches the mTLS credentials once they load successfully.
+	// Loading is deferred to the first Stream so a bad or not-yet-present
+	// bundle is a retryable stream error rather than a process-fatal
+	// one — this client also runs inside the Caddy plugin and
+	// certdx_tools, where killing the host process is unacceptable.
+	tlsCred atomic.Pointer[credentials.TransportCredentials]
 	server  *config.ClientGRPCServer
 	certs   map[domain.Key]*watchingCert
 
@@ -57,12 +62,25 @@ func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]
 	received := make(chan struct{})
 	c.Received.Store(&received)
 	c.Running.Store(false)
-	cfg, err := mtls.LoadClient(server.PEM)
-	if err != nil {
-		logging.Fatal("load mtls bundle: %s", err)
-	}
-	c.tlsCred = credentials.NewTLS(cfg)
 	return c
+}
+
+// transportCredentials returns the client's mTLS credentials, loading
+// the bundle on first use and caching it afterwards. A load failure is
+// returned to the caller, which surfaces it as a stream error and lets
+// the failover state machine retry.
+func (c *CertDXgRPCClient) transportCredentials() (credentials.TransportCredentials, error) {
+	if cred := c.tlsCred.Load(); cred != nil {
+		return *cred, nil
+	}
+
+	cfg, err := mtls.LoadClient(c.server.PEM)
+	if err != nil {
+		return nil, fmt.Errorf("load mtls bundle: %w", err)
+	}
+	cred := credentials.NewTLS(cfg)
+	c.tlsCred.Store(&cred)
+	return cred, nil
 }
 
 func sendStreamErr(ctx context.Context, errChan chan<- error, err error) {
@@ -72,7 +90,26 @@ func sendStreamErr(ctx context.Context, errChan chan<- error, err error) {
 	}
 }
 
+// checkCertNames rejects duplicate cert pack names before anything goes
+// on the wire. The name is the dispatch key for incoming secrets and
+// also keys the Node.Metadata domain sets we send, so a duplicate would
+// silently overwrite both and starve one cert of updates forever.
+func (c *CertDXgRPCClient) checkCertNames() error {
+	seen := make(map[string]struct{}, len(c.certs))
+	for _, cert := range c.certs {
+		if _, dup := seen[cert.Config.Name]; dup {
+			return fmt.Errorf("duplicate certificate name %q in watched certs", cert.Config.Name)
+		}
+		seen[cert.Config.Name] = struct{}{}
+	}
+	return nil
+}
+
 func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
+	if err := c.checkCertNames(); err != nil {
+		return err
+	}
+
 	streamCtx, cancel := context.WithCancel(ctx)
 	c.cancel.Store(&cancel)
 	defer func() {
@@ -80,8 +117,13 @@ func (c *CertDXgRPCClient) Stream(ctx context.Context) error {
 		c.cancel.Store(nil)
 	}()
 
+	tlsCred, err := c.transportCredentials()
+	if err != nil {
+		return err
+	}
+
 	conn, err := grpc.NewClient(c.server.Server,
-		grpc.WithTransportCredentials(c.tlsCred),
+		grpc.WithTransportCredentials(tlsCred),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    30 * time.Second,
 			Timeout: 25 * time.Second,

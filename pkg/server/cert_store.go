@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"pkg.para.party/certdx/pkg/domain"
@@ -68,17 +69,62 @@ func (s *CertStore) Load() error {
 	return nil
 }
 
+// save persists the whole store atomically: the JSON is written and fsynced
+// to a temp file next to cache.json and then renamed over it, so a crash
+// mid-write leaves the previous store intact instead of an empty file.
+// Mirrors the client's writeCertKeyPairAtomic.
 func (s *CertStore) save() error {
 	jsonBytes, err := json.Marshal(s.entries)
 	if err != nil {
 		return fmt.Errorf("marshal cert store: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, jsonBytes, 0o600); err != nil {
+	tmpPath := s.path + ".tmp"
+	if err := writeFileSynced(tmpPath, jsonBytes, 0o600); err != nil {
 		return fmt.Errorf("write cert store: %w", err)
 	}
+	defer func() { _ = os.Remove(tmpPath) }() // no-op after rename succeeds
+
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		return fmt.Errorf("replace cert store: %w", err)
+	}
+	syncDir(filepath.Dir(s.path))
 
 	return nil
+}
+
+// writeFileSynced writes data to path with the given permissions and fsyncs
+// the file before returning, so the rename that follows can't expose a file
+// whose contents never reached the disk.
+func writeFileSynced(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// syncDir fsyncs a directory so a rename inside it is durable. Failures are
+// only logged: the store itself is already written, and some filesystems
+// don't allow opening a directory for sync.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		logging.Debug("Sync cert store directory failed: %s", err)
+		return
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		logging.Debug("Sync cert store directory failed: %s", err)
+	}
 }
 
 func (s *CertStore) saveEntry(fe *certStoreEntry) error {

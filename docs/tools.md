@@ -48,6 +48,12 @@ than dumping the PEM blocks to stdout.
 `make-client` and `make-server` reserve the name `ca` (case-insensitive,
 trimmed) so a typo cannot silently overwrite the CA bundle.
 
+Issued entity certificates are valid for two years and the CA for ten,
+rather than effectively forever, so a leaked mTLS key eventually stops
+being useful. Plan on re-running `make-server` / `make-client` before the
+bundles expire, or pass `--valid-for` to pick a different period.
+Certificates issued by an earlier version are unaffected.
+
 ---
 
 ## `show-certs`
@@ -82,7 +88,13 @@ Cloud credentials).
 | `-k`, `--kid` | yes | EAB key id. |
 | `-m`, `--hmac` | yes | EAB B64 HMAC. |
 | `-t`, `--test-account` | | Register against the Google staging endpoint (`googletest`). |
+| `-f`, `--force` | | Overwrite an existing account key for this `(email, provider)` pair. |
 | `-h`, `--help` | | Print help. |
+
+Without `--force` the command refuses to run when
+`private/<email>_<provider>.key` already exists: re-registering mints a new
+account key, and the old one — the only way to manage the certificates
+already issued under it — would be gone.
 
 Example:
 
@@ -104,6 +116,7 @@ bundle with `0600`.
 | --- | --- | --- |
 | `-o`, `--organization` | `CertDX Private` | Subject `O`. |
 | `-c`, `--common-name` | `CertDX Private Certificate Authority` | Subject `CN`. |
+| `--valid-for` | `87600h` (10 years) | Certificate validity period. |
 | `--data-dir` | *(install-mode default)* | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 ## `make-server`
@@ -117,6 +130,7 @@ server key + CA cert) signed by the CA. Run after `make-ca`.
 | `-d`, `--dns-names` | yes | Comma-separated SANs. Must include every name a client will dial. |
 | `-o`, `--organization` | | Subject `O`. Default `CertDX Private`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Secret Discovery Service`. |
+| `--valid-for` | | Certificate validity period. Default `17520h` (2 years). |
 | `--data-dir` | | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 Example:
@@ -140,6 +154,7 @@ silently overwrite the CA bundle.
 | `-d`, `--dns-names` | | Optional SANs. |
 | `-o`, `--organization` | | Subject `O`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Client: <name>`. |
+| `--valid-for` | | Certificate validity period. Default `17520h` (2 years). |
 | `--data-dir` | | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 Example:

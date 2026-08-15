@@ -42,9 +42,16 @@ The configuration is a TOML file. Top-level sections:
 | `provider` | string | `"r3"` | One of `r3`, `r3test`, `google`, `googletest`. |
 | `retryCount` | int | `5` | Per-issuance retry count. |
 | `challengeType` | string | `"dns"` | `dns` or `http`. |
-| `certLifeTime` | duration string | `"168h"` | Lifetime of issued certificates the server requests/tracks. |
-| `renewTimeLeft` | duration string | `"24h"` | Renew when remaining lifetime drops below this. The renewal check runs every `renewTimeLeft / 4`. |
+| `certLifeTime` | duration string | `"168h"` | Lifetime of issued certificates the server requests/tracks. Must be positive. |
+| `renewTimeLeft` | duration string | `"24h"` | Renew when remaining lifetime drops below this. The renewal check runs every `renewTimeLeft / 4`. Must be positive and shorter than `certLifeTime`. |
 | `allowedDomains` | string list | *(required)* | Root domains the server is allowed to issue. Requests for domains outside this list are rejected. |
+| `maxCacheEntries` | int | `0` | Cap on the number of distinct cert packs the cache tracks. `0` means unlimited. |
+
+A certificate is requested to stay valid for `certLifeTime + renewTimeLeft`,
+so that sum is what the ACME provider has to be able to issue. Both Let's
+Encrypt and Google Trust Services cap at 90 days; a configuration whose sum
+exceeds that is rejected at startup rather than yielding certificates that
+expire long before the server thinks they do.
 
 Supported ACME providers:
 
@@ -73,11 +80,18 @@ block is in `config/server_config_full.toml`.
 | --- | --- | --- |
 | `type` | string | `cloudflare` or `tencentcloud`. |
 | `disableCompletePropagationRequirement` | bool | Skip the lego "wait for full propagation" step. |
+| `nameservers` | string list | Resolvers used for the DNS-01 propagation check, as `host` or `host:port`. URLs and entries with whitespace are rejected at startup. |
+| `dnsTimeout` | duration string | Per-query timeout for the propagation check. Must be positive. |
 | `email`, `apiKey` | string | Cloudflare global API key auth. |
 | `authToken`, `zoneToken` | string | Cloudflare scoped token auth (alternative to global). |
 | `secretID`, `secretKey` | string | Tencent Cloud credentials. |
 
 Exactly one credential set must be configured for the chosen `type`.
+
+With `disableCompletePropagationRequirement = true` the authoritative-server
+check is skipped, so the TXT record is instead verified on the resolvers in
+`nameservers` before the challenge is handed to the ACME server. Without
+`nameservers`, that mode does no verification at all — set both together.
 
 ### `[HttpProvider]` and `[HttpProvider.S3]`
 
@@ -100,6 +114,20 @@ sessionToken = ""
 url = "https://cos.ap-beijing.myqcloud.com"
 ```
 
+`acl` is optional and controls the canned ACL sent with the challenge object:
+
+- leave the key out (the default): `public-read` is sent, which is what certdx
+  has always done, so an existing ACL-enabled bucket keeps working after an
+  upgrade;
+- `acl = ""`: no canned-ACL header is sent at all. Buckets created since April
+  2023 have ACLs disabled by default and reject any `x-amz-acl` header, so this
+  is the setting for them — make the challenge path publicly readable with a
+  bucket policy instead;
+- any other AWS canned ACL (`private`, `public-read-write`,
+  `authenticated-read`, `aws-exec-read`, `bucket-owner-read`,
+  `bucket-owner-full-control`) is sent as-is; anything else is rejected at
+  startup.
+
 ### `[HttpServer]`
 
 The HTTPS endpoint that `certdx_client` and the Caddy plugin call into.
@@ -109,10 +137,21 @@ The HTTPS endpoint that `certdx_client` and the Caddy plugin call into.
 | `enabled` | bool | `false` | Enable the HTTP server. |
 | `listen` | string | `":10001"` | Listen address. |
 | `apiPath` | string | `"/"` | Base API path. A leading `/` is added automatically if missing. |
-| `authMethod` | string | `"token"` | `token` or `mtls`. |
+| `authMethod` | string | `"token"` | `token` or `mtls`. Any other value is rejected at startup. |
 | `secure` | bool | `false` | When `true`, the server obtains a certificate for itself via ACME and serves HTTPS. Required when running on the public internet. |
 | `names` | string list | `[]` | SANs for the self-issued server certificate. Required when `secure = true`. Must be issuable under `ACME.allowedDomains`. |
-| `token` | string | `""` | Shared bearer token (only with `authMethod = "token"`). Empty disables token auth. |
+| `token` | string | `""` | Shared bearer token (only with `authMethod = "token"`). Required unless `allowAnonymous = true`. |
+| `allowAnonymous` | bool | `false` | Serve without any authentication. Only then is an empty `token` accepted. |
+| `allowInsecureToken` | bool | `false` | Silence the startup warning about serving the token and private keys over plain HTTP (`secure = false`). |
+
+An enabled token-auth server with an empty `token` used to serve every caller
+anonymously by accident. That is now an error: to run without authentication,
+say so with `allowAnonymous = true`.
+
+With `secure = false` the bearer token and the issued private keys travel in
+cleartext, so the server logs a warning on every start. Run it only on a
+trusted network (or behind a TLS terminator), and set `allowInsecureToken =
+true` to acknowledge the trade-off and silence the warning.
 
 When `authMethod = "mtls"`, the server loads its mTLS material from the
 PEM bundle specified in `[MTLS].pem`. The bundle contains the server cert,
