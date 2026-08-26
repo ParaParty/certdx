@@ -93,7 +93,7 @@ func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 		return fmt.Errorf("fetch activating certificates: %w", err)
 	}
 
-	matchedCerts := make([]ClientCertification, 0)
+	matchedCerts := make([]ClientCertificate, 0)
 
 	for _, expiringCert := range expiringCertificates {
 		if expiringCert.CertificateId == nil {
@@ -112,7 +112,7 @@ func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 
 		fetchedCertSANs := expiringCert.CertSANs
 
-		for _, cert := range r.cfg.Certifications {
+		for _, cert := range r.cfg.Certificates {
 			if isSameStrSetRejectNilItem(fetchedCertSANs, cert.Domains) {
 				cert.oldCertificateId = *expiringCert.CertificateId
 				cert.certDxKey = domain.AsKey(cert.Domains)
@@ -121,8 +121,8 @@ func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 		}
 	}
 
-	logMissingCerts(r.cfg.Certifications, matchedCerts)
-	r.cfg.Certifications = matchedCerts
+	logMissingCerts(r.cfg.Certificates, matchedCerts)
+	r.cfg.Certificates = matchedCerts
 
 	return nil
 }
@@ -133,7 +133,7 @@ func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
 // rather than leaking a permanent +1 that would hang WaitReplaceTask
 // at its deadline.
 func (r *TencentCloudCertificateUpdater) AddReplaceTask() error {
-	for _, c := range r.cfg.Certifications {
+	for _, c := range r.cfg.Certificates {
 		taskCert := c // capture by value for the closure
 
 		if err := r.certDXDaemon.AddCertToWatchOpt(taskCert.Name, taskCert.Domains, []client.WatchingCertsOption{
@@ -150,8 +150,8 @@ func (r *TencentCloudCertificateUpdater) AddReplaceTask() error {
 // fires on each cert update. It posts the new cert to Tencent Cloud
 // SSL with retries (cancellable via r.ctx) and signals the outer
 // WaitGroup whether the call succeeded or not.
-func (r *TencentCloudCertificateUpdater) makeReplaceHandler(taskCert ClientCertification) client.CertificateUpdateHandler {
-	return func(fullchain, key []byte, _ *config.ClientCertification) {
+func (r *TencentCloudCertificateUpdater) makeReplaceHandler(taskCert ClientCertificate) client.CertificateUpdateHandler {
+	return func(fullchain, key []byte, _ *config.ClientCertificate) {
 		defer r.wg.Done()
 
 		req := txssl.NewUpdateCertificateInstanceRequest()
@@ -251,7 +251,7 @@ func (r *TencentCloudCertificateUpdater) FetchTencentCloudCertificate(opt func(r
 // Tencent Cloud. The previous nil-returning err signature was dead
 // code; the caller had no way to distinguish "all matched" from "some
 // missing".
-func logMissingCerts(configured, matched []ClientCertification) {
+func logMissingCerts(configured, matched []ClientCertificate) {
 	matchedKeys := make(map[string]struct{}, len(matched))
 	for _, cert := range matched {
 		key := cert.Name + "|" + strings.Join(cert.Domains, ",")

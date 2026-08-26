@@ -185,7 +185,7 @@ token = "KFCCrazyThursdayVMe50"
 secretID = "tencent cloud secret id"
 secretKey = "tencent cloud secret key"
 
-[[Certifications]]
+[[Certificate]]
 name = "display name"
 domains = ["*.example.com"]
 resourceTypes = ["teo"]
@@ -198,7 +198,7 @@ Sections:
 
 - `[Http.MainServer]` — same shape as a `certdx_client` HTTP main server.
 - `[Authorization]` — Tencent Cloud SecretId / SecretKey.
-- `[[Certifications]]` — one entry per cert to update:
+- `[[Certificate]]` — one entry per cert to update:
   - `name` — display name shown in Tencent Cloud SSL.
   - `domains` — used to locate the existing certificates on
     <https://console.cloud.tencent.com/ssl> that should be replaced.
@@ -256,7 +256,7 @@ data:
 ```
 
 Domains are comma-separated, case-insensitive, and de-duplicated.
-Secrets whose domains are not covered by any `[[Certifications]].domains`
+Secrets whose domains are not covered by any `[[Certificate]].domains`
 entry in the updater config are skipped with a warning.
 
 ### Config file
@@ -270,7 +270,7 @@ the regular `certdx_client` config (see [client.md](client.md)) —
 url = "https://certdxserver.example.com:10001/"
 token = "KFCCrazyThursdayVMe50"
 
-[[Certifications]]
+[[Certificate]]
 name = "domainsToWatch"
 domains = [
     "*.example.com",
@@ -278,7 +278,7 @@ domains = [
 ]
 ```
 
-The `domains` lists in `[[Certifications]]` act as the allowlist for the
+The `domains` lists in `[[Certificate]]` act as the allowlist for the
 updater: a secret annotated with `foo.example.com` is allowed because it
 is covered by `*.example.com`. gRPC mode (`Common.mode = "grpc"` plus
 `[GRPC.MainServer]`) is supported as well.

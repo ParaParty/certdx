@@ -51,7 +51,7 @@ func TestDuplicateDomainSecretsShareWatchAndAllUpdate(t *testing.T) {
 
 	daemon := client.MakeCertDXClientDaemon()
 	daemon.Config.Http.MainServer.Url = server.URL
-	daemon.Config.Certifications = []config.ClientCertification{{Name: "newtest", Domains: domains}}
+	daemon.Config.Certificates = []config.ClientCertificate{{Name: "newtest", Domains: domains}}
 
 	updater := MakeKubernetesReplaceCertificate(&k8sCertsUpdateCmd{})
 	updater.certDXDaemon = daemon

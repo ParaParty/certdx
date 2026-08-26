@@ -62,7 +62,7 @@ type certData struct {
 // the canonical config.
 type watchingCert struct {
 	Data           atomic.Pointer[certData]
-	Config         config.ClientCertification
+	Config         config.ClientCertificate
 	UpdateHandlers []CertificateUpdateHandler
 	UpdateChan     chan certData
 }
@@ -121,7 +121,7 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 // loadSavedCert reads any previously-persisted cert/key for this
 // certification off disk so the daemon can serve stale-but-valid
 // material until the first fresh fetch lands.
-func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertification) (fullchan, key []byte, err error) {
+func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertificate) (fullchan, key []byte, err error) {
 	fullchanPath, keyPath, err := c.GetFullChainAndKeyPath()
 	if err != nil {
 		return nil, nil, err
@@ -142,11 +142,11 @@ func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertification) (fullc
 	return
 }
 
-// ClientInit prepares one watchingCert per Certifications entry and
+// ClientInit prepares one watchingCert per Certificate entry and
 // seeds it with any cert previously written to disk. Watcher goroutines
 // are not launched until HttpMain or GRPCMain runs (they own rootCtx).
 func (r *CertDXClientDaemon) ClientInit() {
-	for _, c := range r.Config.Certifications {
+	for _, c := range r.Config.Certificates {
 		cd := certData{
 			Domains: c.Domains,
 		}
@@ -185,7 +185,7 @@ func (r *CertDXClientDaemon) AddCertToWatchOpt(name string, domains []string, op
 	}
 
 	cert := &watchingCert{
-		Config:         config.ClientCertification{Name: name, Domains: domains},
+		Config:         config.ClientCertificate{Name: name, Domains: domains},
 		UpdateHandlers: []CertificateUpdateHandler{},
 		UpdateChan:     make(chan certData, 1),
 	}

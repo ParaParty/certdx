@@ -119,7 +119,7 @@ func TestPrepareTempFileMissingDir(t *testing.T) {
 
 func TestWriteCertAndDoCommandWritesBothFiles(t *testing.T) {
 	root := t.TempDir()
-	c := &config.ClientCertification{
+	c := &config.ClientCertificate{
 		Name:     "site",
 		SavePath: root,
 		Domains:  []string{"example.com"},
@@ -158,7 +158,7 @@ func TestWriteCertAndDoCommandWritesBothFiles(t *testing.T) {
 // whitespace-only ReloadCommand must not panic args[0].
 func TestWriteCertAndDoCommandWhitespaceReloadCommand(t *testing.T) {
 	root := t.TempDir()
-	c := &config.ClientCertification{
+	c := &config.ClientCertificate{
 		Name:          "site",
 		SavePath:      root,
 		ReloadCommand: "   \t  ",
@@ -187,7 +187,7 @@ func TestWriteCertAndDoCommandWhitespaceReloadCommand(t *testing.T) {
 // not pre-exist, the command should never be invoked.
 func TestWriteCertAndDoCommandSkipsReloadOnFirstInstall(t *testing.T) {
 	root := t.TempDir()
-	c := &config.ClientCertification{
+	c := &config.ClientCertificate{
 		Name:          "site",
 		SavePath:      root,
 		ReloadCommand: "/nonexistent/should-not-run",
@@ -208,7 +208,7 @@ func TestWriteCertAndDoCommandSkipsReloadOnFirstInstall(t *testing.T) {
 // TestWriteCertAndDoCommandEmptySavePath covers the early-return path
 // when GetFullChainAndKeyPath fails because SavePath is empty.
 func TestWriteCertAndDoCommandEmptySavePath(t *testing.T) {
-	c := &config.ClientCertification{Name: "site", SavePath: ""}
+	c := &config.ClientCertificate{Name: "site", SavePath: ""}
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("panicked on empty save path: %v", r)

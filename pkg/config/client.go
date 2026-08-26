@@ -22,7 +22,7 @@ type ClientConfig struct {
 		StandbyServer ClientGRPCServer `toml:"StandbyServer" json:"standby_server,omitempty"`
 	} `toml:"GRPC" json:"GRPC,omitempty"`
 
-	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
+	Certificates []ClientCertificate `toml:"Certificate" json:"certificates,omitempty"`
 }
 
 func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
@@ -37,11 +37,11 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 		ret = append(ret, err)
 	}
 
-	if len(c.Certifications) == 0 && !option.acceptEmptyCertificatesList {
-		ret = append(ret, fmt.Errorf("no certification configured"))
+	if len(c.Certificates) == 0 && !option.acceptEmptyCertificatesList {
+		ret = append(ret, fmt.Errorf("no certificate configured"))
 	}
 
-	for _, cert := range c.Certifications {
+	for _, cert := range c.Certificates {
 		if err := cert.Validate(option); err != nil {
 			ret = append(ret, err)
 		}
@@ -154,25 +154,25 @@ func (c *ClientGRPCServer) Validate() error {
 	return c.ClientMtlsConfig.Validate()
 }
 
-type ClientCertification struct {
+type ClientCertificate struct {
 	Name          string   `toml:"name" json:"name,omitempty"`
 	SavePath      string   `toml:"savePath" json:"save_path,omitempty"`
 	Domains       []string `toml:"domains" json:"domains,omitempty"`
 	ReloadCommand string   `toml:"reloadCommand" json:"reload_command,omitempty"`
 }
 
-func (c *ClientCertification) Validate(options *validatingConfiguration) error {
+func (c *ClientCertificate) Validate(options *validatingConfiguration) error {
 	var savePathAccepted = c.SavePath != ""
 	if options.acceptEmptyCertificateSavePath && len(c.SavePath) == 0 {
 		savePathAccepted = true
 	}
 	if len(c.Domains) == 0 || c.Name == "" || !savePathAccepted {
-		return fmt.Errorf("wrong certification configuration for %s", c.Name)
+		return fmt.Errorf("wrong certificate configuration for %s", c.Name)
 	}
 	return nil
 }
 
-func (c *ClientCertification) GetFullChainAndKeyPath() (fullchain, key string, err error) {
+func (c *ClientCertificate) GetFullChainAndKeyPath() (fullchain, key string, err error) {
 	if len(c.SavePath) == 0 || len(c.Name) == 0 {
 		return "", "", fmt.Errorf("empty save path")
 	}

@@ -29,7 +29,7 @@ Top-level sections:
 - `[Common]` — operating mode and retry/reconnect tuning.
 - `[Http.MainServer]` / `[Http.StandbyServer]` — used when `Common.mode = "http"`.
 - `[GRPC.MainServer]` / `[GRPC.StandbyServer]` — used when `Common.mode = "grpc"`.
-- `[[Certifications]]` — one entry per certificate to fetch.
+- `[[Certificate]]` — one entry per certificate to fetch.
 
 ### `[Common]`
 
@@ -66,7 +66,7 @@ The gRPC endpoint always uses mTLS.
 Generate the mTLS material with `certdx_tools` (`make-ca`, `make-server`,
 `make-client`); see [tools.md](tools.md).
 
-### `[[Certifications]]`
+### `[[Certificate]]`
 
 Each entry describes one certificate to fetch and where to write it.
 
@@ -80,7 +80,7 @@ Each entry describes one certificate to fetch and where to write it.
 Example:
 
 ```toml
-[[Certifications]]
+[[Certificate]]
 name = "wildcard-example"
 savePath = "/etc/ssl/certdx"
 domains = ["*.example.com", "example.com"]
@@ -101,8 +101,8 @@ where the downstream service is not yet up.
 
 ## Common validation errors
 
-- `no certification configured` — add at least one `[[Certifications]]`.
-- `wrong certification configuration for <name>` — `name`, `savePath` and
+- `no certificate configured` — add at least one `[[Certificate]]`.
+- `wrong certificate configuration for <name>` — `name`, `savePath` and
   `domains` are all required.
 - `http main server url is empty` — set `Http.MainServer.url` when in HTTP mode.
 - `grpc main server url is empty` — set `GRPC.MainServer.server` when in gRPC mode.
