@@ -22,9 +22,9 @@ APIs, or rate limits.
     runs `systemctl reload nginx` (or any command).
   - **Caddy plugin** as a `get_certificate` provider.
   - **Envoy** via gRPC SDS — hot-swaps certificates with no restart.
-  - **Kubernetes secret updater** that refreshes annotated `kubernetes.io/tls`
-    secrets in-place — usable as a one-shot Job or CronJob.
-  - **Tencent Cloud updater** that re-binds expiring certificates on
+  - **Kubernetes secrets** refreshed in place: the client patches annotated
+    `kubernetes.io/tls` secrets on every renewal.
+  - **Tencent Cloud** resources re-bound to the renewed certificate on
     CLB / CDN / WAF / TEO and friends.
 - **Auth that fits the deployment** — shared bearer token over HTTPS for
   simple setups, mTLS or gRPC SDS for everything else.
@@ -35,9 +35,10 @@ APIs, or rate limits.
 
 ```
 ACME CA  <----->  certdx_server  ----->  certdx_client       --(file + reload)-->  nginx / haproxy / ...
+                       |                       |             --(patch secret)-->  Kubernetes TLS secrets
+                       |                       +---------------(re-bind)------->  Tencent Cloud CLB / CDN / WAF / TEO
                        |          ----->  Caddy plugin        --(in-memory)----->  Caddy
                        +--------- ----->  Envoy (SDS)         --(hot reload)---->  Envoy listeners
-                                  ----->  certdx_tools k8s    --(patch secret)-->  Kubernetes TLS secrets
 ```
 
 The server is the only component talking to the ACME CA; everything else is
@@ -47,11 +48,10 @@ a consumer.
 
 | Client | How it works |
 | --- | --- |
-| **certdx client** | Standalone daemon. Writes cert/key files to disk and runs a reload command (e.g. `systemctl reload nginx`). |
+| **certdx client** | Standalone daemon. Runs an update action per certificate: write cert/key files and run a reload command, patch annotated Kubernetes TLS secrets, or re-bind Tencent Cloud resources. |
 | **Caddy plugin** | Caddy [`get_certificate`](https://caddyserver.com/docs/caddyfile/directives/tls#get_certificate) module — certificates stay in memory, no files. |
 | **Envoy (gRPC SDS)** | Envoy connects to the server's SDS endpoint directly; certificates are hot-swapped with no restart. |
-| **Kubernetes secret updater** | `certdx_tools kubernetes-certificate-updater` patches annotated `kubernetes.io/tls` secrets in-place — run as a Job or CronJob. |
-| **certdx tools** | General-purpose CLI: inspect the cache, generate mTLS material, register Google ACME accounts, replace expiring Tencent Cloud / Kubernetes certificates, and more. |
+| **certdx tools** | General-purpose CLI: inspect the cache, generate mTLS material, register Google ACME accounts, and more. |
 
 ## Quick start
 
@@ -86,6 +86,6 @@ Full walk-through: [docs/quickstart.md](docs/quickstart.md).
 | [Server reference](docs/server.md) | Every option in `server_config.toml`. |
 | [Client reference](docs/client.md) | Every option in `client_config.toml`. |
 | [Caddy plugin](docs/caddytls.md) | Caddyfile syntax. |
-| [Tools](docs/tools.md) | `certdx_tools` subcommands (cache, mTLS material, Tencent Cloud updater, …). |
+| [Tools](docs/tools.md) | `certdx_tools` subcommands (cache inspection, mTLS material, ACME accounts). |
 
 External: [DeepWiki](https://deepwiki.com/ParaParty/certdx).

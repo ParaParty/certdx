@@ -14,9 +14,10 @@ Reference pages with every option:
 ## Architecture
 
 `certdx_server` is the only component that talks to the ACME CA. Everything
-else — `certdx_client`, the Caddy plugin, Envoy via SDS, the Kubernetes
-secret updater, the Tencent Cloud updater — is a consumer that pulls
-finished certificates from the server.
+else — `certdx_client`, the Caddy plugin, Envoy via SDS — is a consumer that
+pulls finished certificates from the server. Pushing certificates on to
+Kubernetes secrets or Tencent Cloud resources is done by the client's
+update actions.
 
 ## 1. Pick the ACME provider
 
@@ -87,7 +88,7 @@ Easiest to deploy. In `[HttpServer]` set `enabled = true`,
 and a long random `token`. The server issues its own ACME certificate for
 `names` so it can serve HTTPS.
 
-Clients (`certdx_client`, the Caddy plugin, the Tencent Cloud updater) point
+Clients (`certdx_client`, the Caddy plugin) point
 at the resulting HTTPS URL with the same token.
 
 ### HTTPS with mTLS
@@ -268,7 +269,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now certdx-client
 ```
 
-The client writes `<savePath>/<name>.pem` and `.key`, then runs
+The client runs the update actions configured for each certificate. The
+`file` action writes `<savePath>/<name>.pem` and `.key`, then runs its
 `reloadCommand`. Typical reload commands:
 
 - nginx: `systemctl reload nginx`
@@ -408,11 +410,11 @@ talks to it directly — no certdx client is needed.
 
 ### Kubernetes
 
-Use `certdx_tools kubernetes-certificate-updater` to refresh existing
-`kubernetes.io/tls` secrets in-place. The updater finds every TLS secret
-annotated with `party.para.certdx/domains`, asks the certdx server for
-the matching certificate, and patches the secret — it never creates new
-secrets and never edits anything else.
+Give the client a `kubernetes` update action to refresh existing
+`kubernetes.io/tls` secrets in place. It finds every TLS secret annotated
+with `party.para.certdx/domains` whose domains the certificate covers and
+patches the secret — it never creates new secrets and never edits
+anything else.
 
 Mark each secret you want managed:
 
@@ -426,42 +428,54 @@ metadata:
     party.para.certdx/domains: "*.example.com,example.com"
 type: kubernetes.io/tls
 data:
-  tls.crt: ""   # placeholder; the updater will fill these in
+  tls.crt: ""   # placeholder; the client will fill these in
   tls.key: ""
 ```
 
-Provide the updater with a certdx client config that lists every domain
-set under `[[Certificate]]` (a minimal example is shipped as
-`config/client_k8s.toml`). Domains in a secret's annotation must be
-covered by one `[[Certificate]].domains` entry — secrets whose domains
-fall outside the allowlist are skipped.
+Then point a certificate at the cluster:
 
-Run it as a one-shot Job or on a schedule with a CronJob. The updater
-requires cluster-wide read/list of TLS secrets and update on the ones it
-matches:
+```toml
+[[Profile.Kubernetes]]
+name = "in-cluster"
+kubeConfig = ""
+
+[[Certificate]]
+name = "example"
+domains = ["*.example.com", "example.com"]
+
+[[Certificate.UpdateAction]]
+type = "kubernetes"
+profile = "in-cluster"
+```
+
+Secrets whose annotation domains fall outside the certificate's `domains`
+are skipped. The client needs cluster-wide read/list of TLS secrets and
+update on the ones it matches:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: certdx-secret-updater
+  name: certdx-client
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["list", "get", "update"]
 ```
 
-In-cluster invocation uses the pod's service account automatically. To
-run it outside the cluster, point it at a kubeconfig with `--k8sConf`.
-See [tools.md](tools.md#kubernetes-certificate-updater) for the full flag
-set.
+Because the client is a long-running process, run it as a Deployment
+rather than a CronJob; secrets are re-listed on every renewal, so ones
+created later are picked up without a restart. In-cluster it uses the
+pod's service account automatically; outside the cluster set
+`kubeConfig` on the profile. Ready-to-adapt manifests live in
+`manifests-dev/`.
 
 ### Tencent Cloud certificate replacement
 
 For Tencent Cloud resources (CLB, CDN, WAF, TEO, …) that hold an uploaded
-certificate, run `certdx_tools tencent-cloud-certificate-updater` on a
-schedule (cron / systemd timer) to fetch the latest certificate from the
-server and re-bind expiring ones. See [tools.md](tools.md#tencent-cloud-certificate-updater).
+certificate, give the certificate a `tencentCloud` update action. On each
+renewal the client re-binds the resources to the new certificate. See
+[client.md](client.md).
 
 ## 6. Operations
 

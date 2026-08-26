@@ -11,8 +11,9 @@ term enters the codebase.
   Let's Encrypt or Google Trust Services, caches certificates, and
   serves them to clients over HTTP and/or gRPC SDS.
 - **certdx_client**: a standalone daemon that pulls certificates from a
-  `certdx_server` and writes them to disk, optionally running a reload
-  command (e.g. `systemctl reload nginx`).
+  `certdx_server` and runs one or more **update actions** per certificate:
+  writing them to disk with an optional reload command, patching annotated
+  Kubernetes TLS secrets, or re-binding Tencent Cloud resources.
 - **Caddy plugin** (`exec/caddytls`): a Caddy module that consumes
   `certdx_server` directly via Caddy's `get_certificate` extension
   point, with no `certdx_client` daemon in between.
@@ -20,8 +21,7 @@ term enters the codebase.
   `certdx_server` gRPC SDS endpoint and hot-swaps certificates on
   receipt.
 - **certdx_tools**: the operator CLI for one-shot tasks (cert cache
-  inspection, mTLS material generation, ACME account registration, and
-  the Tencent Cloud / Kubernetes certificate updaters).
+  inspection, mTLS material generation, ACME account registration).
 
 ## Lifecycle vocabulary
 

@@ -16,6 +16,8 @@ Reference:
 
 Upgrading:
 
+- [Breaking changes since v0.6.0](breaking-changes-v0.7.0.md) — update
+  actions migration guide.
 - [Breaking changes since v0.5.0](breaking-changes-v0.6.0.md) — PEM bundle
   migration guide.
 

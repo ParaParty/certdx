@@ -109,8 +109,11 @@ token = "<same token as the server>"
 
 [[Certificate]]
 name = "wildcard-example"
-savePath = "/etc/ssl/certdx"
 domains = ["*.example.com", "example.com"]
+
+[[Certificate.UpdateAction]]
+type = "file"
+savePath = "/etc/ssl/certdx"
 reloadCommand = "systemctl reload nginx"
 ```
 
