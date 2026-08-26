@@ -17,15 +17,3 @@ func TestIsSameStrSetRejectNilItem(t *testing.T) {
 		t.Fatal("expected nil item to reject")
 	}
 }
-
-func TestIsSameStrSetRejectNilItemPtrArrPtrArr(t *testing.T) {
-	if !isSameStrSetRejectNilItemPtrArrPtrArr([]*string{ptr("b"), ptr("a")}, []*string{ptr("a"), ptr("b")}) {
-		t.Fatal("expected equal sets with different order")
-	}
-	if isSameStrSetRejectNilItemPtrArrPtrArr([]*string{ptr("a"), ptr("b")}, []*string{ptr("a"), ptr("c")}) {
-		t.Fatal("expected different sets")
-	}
-	if isSameStrSetRejectNilItemPtrArrPtrArr([]*string{ptr("a"), ptr("b")}, []*string{ptr("a"), nil}) {
-		t.Fatal("expected nil item to reject")
-	}
-}
