@@ -11,7 +11,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-$image = "paraparty/certdx-tools:$gitCommit"
+$image = "paraparty/certdx-client:$gitCommit"
 
 docker build `
     --build-arg "VERSION=$gitCommit" `
