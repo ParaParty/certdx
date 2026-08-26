@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 type sampleConfig struct {
@@ -60,5 +62,57 @@ func TestLoadTOMLBadSyntax(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "parse config") {
 		t.Fatalf("error should mention parse config, got %v", err)
+	}
+}
+
+func TestLoadTOMLMetaPrimitive(t *testing.T) {
+	p := writeTempTOML(t, `
+[[Item]]
+kind = "a"
+value = "first"
+
+[[Item]]
+kind = "b"
+value = "second"
+`)
+	var cfg struct {
+		Item []toml.Primitive
+	}
+	md, err := LoadTOMLMeta(p, &cfg)
+	if err != nil {
+		t.Fatalf("LoadTOMLMeta: %v", err)
+	}
+	if len(cfg.Item) != 2 {
+		t.Fatalf("expected 2 primitives, got %d", len(cfg.Item))
+	}
+
+	var kinds []string
+	for _, it := range cfg.Item {
+		var probe struct {
+			Kind string `toml:"kind"`
+		}
+		if err := md.PrimitiveDecode(it, &probe); err != nil {
+			t.Fatalf("PrimitiveDecode: %v", err)
+		}
+		kinds = append(kinds, probe.Kind)
+	}
+	if kinds[0] != "a" || kinds[1] != "b" {
+		t.Fatalf("unexpected kinds: %v", kinds)
+	}
+}
+
+func TestLoadTOMLMetaUndecoded(t *testing.T) {
+	p := writeTempTOML(t, `
+Name = "alpha"
+Unexpected = "value"
+`)
+	var cfg sampleConfig
+	md, err := LoadTOMLMeta(p, &cfg)
+	if err != nil {
+		t.Fatalf("LoadTOMLMeta: %v", err)
+	}
+	undecoded := md.Undecoded()
+	if len(undecoded) != 1 || undecoded[0].String() != "Unexpected" {
+		t.Fatalf("expected Unexpected to be undecoded, got %v", undecoded)
 	}
 }
