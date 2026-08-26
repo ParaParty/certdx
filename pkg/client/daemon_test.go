@@ -14,14 +14,14 @@ func TestAddCertToWatchOptKeepsHandlersForDuplicateDomains(t *testing.T) {
 	firstCalls := 0
 	secondCalls := 0
 	if err := daemon.AddCertToWatchOpt("namespace/first", domains, []WatchingCertsOption{
-		WithCertificateHandlerOption(func([]byte, []byte, *config.ClientCertification) {
+		WithCertificateHandlerOption(func([]byte, []byte, *config.ClientCertificate) {
 			firstCalls++
 		}),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := daemon.AddCertToWatchOpt("namespace/second", domains, []WatchingCertsOption{
-		WithCertificateHandlerOption(func([]byte, []byte, *config.ClientCertification) {
+		WithCertificateHandlerOption(func([]byte, []byte, *config.ClientCertificate) {
 			secondCalls++
 		}),
 	}); err != nil {

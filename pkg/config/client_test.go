@@ -11,7 +11,7 @@ func TestClientConfigValidateUnsupportedMode(t *testing.T) {
 	c := &ClientConfig{}
 	c.SetDefault()
 	c.Common.Mode = "websocket"
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -27,7 +27,7 @@ func TestClientConfigValidateInvalidReconnectInterval(t *testing.T) {
 	c := &ClientConfig{}
 	c.SetDefault()
 	c.Common.ReconnectInterval = "not-a-duration"
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	c.Http.MainServer.Url = "https://example.com"
@@ -40,26 +40,26 @@ func TestClientConfigValidateInvalidReconnectInterval(t *testing.T) {
 	}
 }
 
-func TestClientConfigValidateEmptyCertificationsDefault(t *testing.T) {
+func TestClientConfigValidateEmptyCertificatesDefault(t *testing.T) {
 	c := &ClientConfig{}
 	c.SetDefault()
 	c.Http.MainServer.Url = "https://example.com"
 	err := c.Validate(nil)
 	if err == nil {
-		t.Fatal("expected error on empty certifications list")
+		t.Fatal("expected error on empty certificates list")
 	}
-	if !strings.Contains(err.Error(), "no certification configured") {
+	if !strings.Contains(err.Error(), "no certificate configured") {
 		t.Fatalf("error wording drifted: %v", err)
 	}
 }
 
-func TestClientConfigValidateEmptyCertificationsAccepted(t *testing.T) {
+func TestClientConfigValidateEmptyCertificatesAccepted(t *testing.T) {
 	c := &ClientConfig{}
 	c.SetDefault()
 	c.Http.MainServer.Url = "https://example.com"
 	err := c.Validate([]ValidatingOption{WithAcceptEmptyCertificatesList(true)})
 	if err != nil {
-		t.Fatalf("expected empty certifications to be accepted with option: %v", err)
+		t.Fatalf("expected empty certificates to be accepted with option: %v", err)
 	}
 }
 
@@ -68,7 +68,7 @@ func TestClientConfigValidateHttpModeValid(t *testing.T) {
 	c.SetDefault()
 	c.Common.Mode = CLIENT_MODE_HTTP
 	c.Http.MainServer.Url = "https://example.com"
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -82,7 +82,7 @@ func TestClientConfigValidateHttpModeMissingUrl(t *testing.T) {
 	c.SetDefault()
 	c.Common.Mode = CLIENT_MODE_HTTP
 	c.Http.MainServer.Url = ""
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -106,7 +106,7 @@ func TestClientConfigValidateGrpcModeValid(t *testing.T) {
 	c.Common.Mode = CLIENT_MODE_GRPC
 	c.GRPC.MainServer.Server = "localhost:10002"
 	c.GRPC.MainServer.PEM = bundle
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -120,7 +120,7 @@ func TestClientConfigValidateGrpcModeMissingServer(t *testing.T) {
 	c.SetDefault()
 	c.Common.Mode = CLIENT_MODE_GRPC
 	c.GRPC.MainServer.Server = ""
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -138,7 +138,7 @@ func TestClientConfigValidateGrpcModeMissingMtlsFiles(t *testing.T) {
 	c.Common.Mode = CLIENT_MODE_GRPC
 	c.GRPC.MainServer.Server = "localhost:10002"
 	c.GRPC.MainServer.PEM = "/nonexistent/client.pem"
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -157,7 +157,7 @@ func TestClientConfigValidateHttpMtlsMissingFiles(t *testing.T) {
 	c.Http.MainServer.Url = "https://example.com"
 	c.Http.MainServer.AuthMethod = HTTP_AUTH_MTLS
 	c.Http.MainServer.PEM = "/nonexistent/client.pem"
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -176,7 +176,7 @@ func TestClientConfigValidateHttpTokenNoMtlsCheck(t *testing.T) {
 	c.Http.MainServer.Url = "https://example.com"
 	c.Http.MainServer.AuthMethod = HTTP_AUTH_TOKEN
 	c.Http.MainServer.Token = "secret"
-	c.Certifications = []ClientCertification{
+	c.Certificates = []ClientCertificate{
 		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
 	}
 	err := c.Validate(nil)
@@ -211,7 +211,7 @@ func TestClientConfigValidateMultipleErrors(t *testing.T) {
 	c.SetDefault()
 	c.Common.ReconnectInterval = "bad"
 	c.Common.Mode = "unknown"
-	// No certifications → error too.
+	// No certificates → error too.
 
 	err := c.Validate(nil)
 	if err == nil {
@@ -224,7 +224,7 @@ func TestClientConfigValidateMultipleErrors(t *testing.T) {
 	if !strings.Contains(msg, "unsupported mode") {
 		t.Errorf("missing unsupported mode error in: %s", msg)
 	}
-	if !strings.Contains(msg, "no certification configured") {
-		t.Errorf("missing no certification configured error in: %s", msg)
+	if !strings.Contains(msg, "no certificate configured") {
+		t.Errorf("missing no certificate configured error in: %s", msg)
 	}
 }

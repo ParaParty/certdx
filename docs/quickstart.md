@@ -107,7 +107,7 @@ url = "https://certdx.example.com:19198/certdx"
 authMethod = "token"
 token = "<same token as the server>"
 
-[[Certifications]]
+[[Certificate]]
 name = "wildcard-example"
 savePath = "/etc/ssl/certdx"
 domains = ["*.example.com", "example.com"]

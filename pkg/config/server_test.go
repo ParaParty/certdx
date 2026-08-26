@@ -44,16 +44,16 @@ func TestACMEConfigValidateMissingChallengeType(t *testing.T) {
 	}
 }
 
-func TestClientCertificationValidateRequiresFields(t *testing.T) {
+func TestClientCertificateValidateRequiresFields(t *testing.T) {
 	options := makeValidatingConfiguration()
 
 	cases := []struct {
 		name string
-		c    ClientCertification
+		c    ClientCertificate
 	}{
-		{"no domains", ClientCertification{Name: "x", SavePath: "/tmp"}},
-		{"no name", ClientCertification{Domains: []string{"example.com"}, SavePath: "/tmp"}},
-		{"no save path", ClientCertification{Name: "x", Domains: []string{"example.com"}}},
+		{"no domains", ClientCertificate{Name: "x", SavePath: "/tmp"}},
+		{"no name", ClientCertificate{Domains: []string{"example.com"}, SavePath: "/tmp"}},
+		{"no save path", ClientCertificate{Name: "x", Domains: []string{"example.com"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -64,18 +64,18 @@ func TestClientCertificationValidateRequiresFields(t *testing.T) {
 	}
 }
 
-func TestClientCertificationAcceptEmptySavePath(t *testing.T) {
+func TestClientCertificateAcceptEmptySavePath(t *testing.T) {
 	options := makeValidatingConfiguration()
 	WithAcceptEmptyCertificateSavePath(true)(options)
 
-	c := &ClientCertification{Name: "x", Domains: []string{"example.com"}}
+	c := &ClientCertificate{Name: "x", Domains: []string{"example.com"}}
 	if err := c.Validate(options); err != nil {
 		t.Fatalf("expected validation OK with empty SavePath when option set: %v", err)
 	}
 }
 
-func TestClientCertificationGetFullChainAndKeyPath(t *testing.T) {
-	c := &ClientCertification{Name: "site", SavePath: "/var/lib/certs"}
+func TestClientCertificateGetFullChainAndKeyPath(t *testing.T) {
+	c := &ClientCertificate{Name: "site", SavePath: "/var/lib/certs"}
 	full, key, err := c.GetFullChainAndKeyPath()
 	if err != nil {
 		t.Fatalf("GetFullChainAndKeyPath: %v", err)
@@ -88,8 +88,8 @@ func TestClientCertificationGetFullChainAndKeyPath(t *testing.T) {
 	}
 }
 
-func TestClientCertificationGetFullChainAndKeyPathEmpty(t *testing.T) {
-	c := &ClientCertification{}
+func TestClientCertificateGetFullChainAndKeyPathEmpty(t *testing.T) {
+	c := &ClientCertificate{}
 	_, _, err := c.GetFullChainAndKeyPath()
 	if err == nil {
 		t.Fatal("expected error on empty save path")

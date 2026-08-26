@@ -7,7 +7,7 @@ token = "KFCCrazyThursdayVMe50"
 secretID = "tencent cloud secret id"
 secretKey = "tencent cloud secret key"
 
-[[Certifications]]
+[[Certificate]]
 name = "certificate name to display"
 
 # certdx updater will match the domains with the list on https://console.cloud.tencent.com/ssl

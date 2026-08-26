@@ -431,9 +431,9 @@ data:
 ```
 
 Provide the updater with a certdx client config that lists every domain
-set under `[[Certifications]]` (a minimal example is shipped as
+set under `[[Certificate]]` (a minimal example is shipped as
 `config/client_k8s.toml`). Domains in a secret's annotation must be
-covered by one `[[Certifications]].domains` entry — secrets whose domains
+covered by one `[[Certificate]].domains` entry — secrets whose domains
 fall outside the allowlist are skipped.
 
 Run it as a one-shot Job or on a schedule with a CronJob. The updater

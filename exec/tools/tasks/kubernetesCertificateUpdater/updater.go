@@ -162,7 +162,7 @@ func (r *KubernetesCertificateUpdater) registerWatchAndHandlers(ctx context.Cont
 		r.wg.Add(1)
 
 		var once sync.Once
-		handler := func(fullchain, key []byte, _ *config.ClientCertification) {
+		handler := func(fullchain, key []byte, _ *config.ClientCertificate) {
 			// The daemon may invoke this on every renewal. We only care about
 			// the first successful delivery for this one-shot run.
 			once.Do(func() {
@@ -288,7 +288,7 @@ func parseDomainsAnnotation(domainListStr string) []string {
 }
 
 func areDomainsAllowed(certdx *client.CertDXClientDaemon, domains []string) bool {
-	for _, item := range certdx.Config.Certifications {
+	for _, item := range certdx.Config.Certificates {
 		if domain.AllAllowed(item.Domains, domains) {
 			return true
 		}

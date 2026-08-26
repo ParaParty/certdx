@@ -21,7 +21,7 @@ const (
 // CertificateUpdateHandler is invoked whenever a watched cert receives
 // fresh material. Handlers are expected to be quick; long-running work
 // should be dispatched elsewhere.
-type CertificateUpdateHandler func(fullchain, key []byte, c *config.ClientCertification)
+type CertificateUpdateHandler func(fullchain, key []byte, c *config.ClientCertificate)
 
 // ensureParentDir creates file's parent directory if needed. It reports
 // whether file already existed before we had the chance to write it.
@@ -105,7 +105,7 @@ func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, k
 // The reload command runs only when both files pre-existed; the first
 // install is effectively a bootstrap and the downstream service is
 // unlikely to be running yet.
-func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertification) {
+func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertificate) {
 	var certExists, keyExists bool
 
 	certPath, keyPath, err := c.GetFullChainAndKeyPath()

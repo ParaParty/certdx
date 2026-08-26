@@ -11,7 +11,7 @@ type ResourceTypeRegions struct {
 	Regions      []string `toml:"regions" json:"Regions,omitempty" name:"regions"`
 }
 
-type ClientCertification struct {
+type ClientCertificate struct {
 	Name                 string                `toml:"name" json:"name,omitempty"`
 	Domains              []string              `toml:"domains" json:"domains,omitempty"`
 	ResourceTypes        []string              `toml:"resourceTypes" json:"resource_types"`
@@ -21,7 +21,7 @@ type ClientCertification struct {
 	oldCertificateId string
 }
 
-func (r *ClientCertification) ToResourceTypesAndResourceTypesRegions() (resourceTypes []*string, resourceTypesRegions []*txssl.ResourceTypeRegions) {
+func (r *ClientCertificate) ToResourceTypesAndResourceTypesRegions() (resourceTypes []*string, resourceTypesRegions []*txssl.ResourceTypeRegions) {
 	resourceTypes = make([]*string, 0)
 	resourceTypesRegions = make([]*txssl.ResourceTypeRegions, 0)
 
@@ -45,7 +45,7 @@ type TencentCloudConfig struct {
 		SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
 	} `toml:"Authorization" json:"authorization,omitempty"`
 
-	Certifications []ClientCertification `toml:"Certifications" json:"certifications,omitempty"`
+	Certificates []ClientCertificate `toml:"Certificate" json:"certificates,omitempty"`
 }
 
 type txcCertsUpdateCmd struct {

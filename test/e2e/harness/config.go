@@ -123,7 +123,7 @@ type HTTPClientServer struct {
 	PEM        string
 }
 
-// ClientCert mirrors a [[Certifications]] entry.
+// ClientCert mirrors a [[Certificate]] entry.
 type ClientCert struct {
 	Name          string
 	SavePath      string
@@ -160,7 +160,7 @@ pem = "{{.Standby.PEM}}"
 {{end}}
 
 {{range .Certs}}
-[[Certifications]]
+[[Certificate]]
 name = "{{.Name}}"
 savePath = "{{.SavePath}}"
 domains = [{{range $i, $d := .Domains}}{{if $i}}, {{end}}"{{$d}}"{{end}}]
@@ -211,7 +211,7 @@ pem = "{{.Standby.PEM}}"
 {{end}}
 
 {{range .Certs}}
-[[Certifications]]
+[[Certificate]]
 name = "{{.Name}}"
 savePath = "{{.SavePath}}"
 domains = [{{range $i, $d := .Domains}}{{if $i}}, {{end}}"{{$d}}"{{end}}]
