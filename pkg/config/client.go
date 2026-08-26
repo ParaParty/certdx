@@ -6,6 +6,8 @@ import (
 	"path"
 	"time"
 
+	"github.com/BurntSushi/toml"
+
 	"pkg.para.party/certdx/pkg/paths"
 )
 
@@ -47,9 +49,15 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 		ret = append(ret, fmt.Errorf("no certificate configured"))
 	}
 
-	for _, cert := range c.Certificates {
+	for i := range c.Certificates {
+		cert := &c.Certificates[i]
 		if err := cert.Validate(option); err != nil {
 			ret = append(ret, err)
+		}
+		for _, action := range cert.Actions {
+			if err := action.Validate(c); err != nil {
+				ret = append(ret, fmt.Errorf("certificate %s: %w", cert.Name, err))
+			}
 		}
 	}
 
@@ -165,6 +173,11 @@ type ClientCertificate struct {
 	SavePath      string   `toml:"savePath" json:"save_path,omitempty"`
 	Domains       []string `toml:"domains" json:"domains,omitempty"`
 	ReloadCommand string   `toml:"reloadCommand" json:"reload_command,omitempty"`
+
+	// RawActions is resolved into Actions by ClientConfig.DecodeActions,
+	// which needs the decoder metadata that plain unmarshalling discards.
+	RawActions []toml.Primitive     `toml:"UpdateAction" json:"-"`
+	Actions    []UpdateActionConfig `toml:"-" json:"-"`
 }
 
 func (c *ClientCertificate) Validate(options *validatingConfiguration) error {
