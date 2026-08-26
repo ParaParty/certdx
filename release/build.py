@@ -45,8 +45,6 @@ import sys
 CERTDX_COPY = [
     'config/client_config.toml',
     'config/client_config_full.toml',
-    'config/client_k8s.toml',
-    'config/client_tencentcloud_certificate_updater.toml',
     'config/server_config.toml',
     'config/server_config_full.toml',
     'systemd-service/certdx-client.service',
