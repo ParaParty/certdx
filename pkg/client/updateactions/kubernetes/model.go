@@ -1,4 +1,4 @@
-package kubernetesCertificateUpdater
+package kubernetes
 
 import "time"
 
