@@ -227,4 +227,3 @@ func TestActionType(t *testing.T) {
 		t.Fatalf("Type() = %q", got)
 	}
 }
-
