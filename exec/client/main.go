@@ -12,6 +12,7 @@ import (
 
 	// Update actions are linked here rather than from pkg/client so that
 	// their SDKs stay out of the server and Caddy plugin builds.
+	_ "pkg.para.party/certdx/pkg/client/updateactions/kubernetes"
 	_ "pkg.para.party/certdx/pkg/client/updateactions/tencentcloud"
 )
 
