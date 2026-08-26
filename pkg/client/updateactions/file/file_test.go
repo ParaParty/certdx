@@ -1,7 +1,8 @@
-package client
+package file
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,12 @@ import (
 
 	"pkg.para.party/certdx/pkg/config"
 )
+
+func update(t *testing.T, savePath, reloadCommand string, c *config.ClientCertificate) error {
+	t.Helper()
+	a := New(&config.FileAction{SavePath: savePath, ReloadCommand: reloadCommand})
+	return a.Update(context.Background(), []byte("CERT"), []byte("KEY"), c)
+}
 
 func TestEnsureParentDirCreatesMissingDir(t *testing.T) {
 	root := t.TempDir()
@@ -117,14 +124,15 @@ func TestPrepareTempFileMissingDir(t *testing.T) {
 	}
 }
 
-func TestWriteCertAndDoCommandWritesBothFiles(t *testing.T) {
+func TestUpdateWritesBothFiles(t *testing.T) {
 	root := t.TempDir()
 	c := &config.ClientCertificate{
-		Name:     "site",
-		SavePath: root,
-		Domains:  []string{"example.com"},
+		Name:    "site",
+		Domains: []string{"example.com"},
 	}
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
+	if err := update(t, root, "", c); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
 
 	cert, err := os.ReadFile(filepath.Join(root, "site.pem"))
 	if err != nil {
@@ -153,16 +161,12 @@ func TestWriteCertAndDoCommandWritesBothFiles(t *testing.T) {
 	}
 }
 
-// TestWriteCertAndDoCommandWhitespaceReloadCommand pins the
+// TestUpdateWhitespaceReloadCommand pins the
 // `strings.Fields(...)` empty-slice guard added in PR #65: a
 // whitespace-only ReloadCommand must not panic args[0].
-func TestWriteCertAndDoCommandWhitespaceReloadCommand(t *testing.T) {
+func TestUpdateWhitespaceReloadCommand(t *testing.T) {
 	root := t.TempDir()
-	c := &config.ClientCertificate{
-		Name:          "site",
-		SavePath:      root,
-		ReloadCommand: "   \t  ",
-	}
+	c := &config.ClientCertificate{Name: "site"}
 	// Pre-create both files so the reload-command branch is taken.
 	if err := os.WriteFile(filepath.Join(root, "site.pem"), []byte("old"), 0o644); err != nil {
 		t.Fatalf("seed cert: %v", err)
@@ -176,44 +180,51 @@ func TestWriteCertAndDoCommandWhitespaceReloadCommand(t *testing.T) {
 			t.Fatalf("panicked on whitespace ReloadCommand: %v", r)
 		}
 	}()
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
+	if err := update(t, root, "   \t  ", c); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
 }
 
-// TestWriteCertAndDoCommandSkipsReloadOnFirstInstall covers the
+// TestUpdateSkipsReloadOnFirstInstall covers the
 // bootstrap-vs-rotation contract documented in docs/client.md: when
 // the cert files are not yet on disk, the reload command must NOT
 // run. We force that by using a sentinel reload command that would
 // fail noisily (`/nonexistent/should-not-run`); since the files do
 // not pre-exist, the command should never be invoked.
-func TestWriteCertAndDoCommandSkipsReloadOnFirstInstall(t *testing.T) {
+func TestUpdateSkipsReloadOnFirstInstall(t *testing.T) {
 	root := t.TempDir()
-	c := &config.ClientCertificate{
-		Name:          "site",
-		SavePath:      root,
-		ReloadCommand: "/nonexistent/should-not-run",
-	}
+	c := &config.ClientCertificate{Name: "site"}
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("panicked: %v", r)
 		}
 	}()
 	// First install — files don't exist yet — reload must not run.
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
+	if err := update(t, root, "/nonexistent/should-not-run", c); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
 
 	if _, err := os.Stat(filepath.Join(root, "site.pem")); err != nil {
 		t.Errorf("cert was not written: %v", err)
 	}
 }
 
-// TestWriteCertAndDoCommandEmptySavePath covers the early-return path
-// when GetFullChainAndKeyPath fails because SavePath is empty.
-func TestWriteCertAndDoCommandEmptySavePath(t *testing.T) {
-	c := &config.ClientCertificate{Name: "site", SavePath: ""}
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("panicked on empty save path: %v", r)
-		}
-	}()
-	writeCertAndDoCommand([]byte("CERT"), []byte("KEY"), c)
-	// Nothing to assert on disk — just that we returned cleanly.
+// TestUpdateEmptySavePath covers the error path when
+// GetFullChainAndKeyPath fails because SavePath is empty.
+func TestUpdateEmptySavePath(t *testing.T) {
+	c := &config.ClientCertificate{Name: "site"}
+	err := update(t, "", "", c)
+	if err == nil {
+		t.Fatal("expected error on empty save path")
+	}
+	if !strings.Contains(err.Error(), "empty save path") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
 }
+
+func TestActionType(t *testing.T) {
+	if got := New(&config.FileAction{}).Type(); got != config.UPDATE_ACTION_FILE {
+		t.Fatalf("Type() = %q", got)
+	}
+}
+
