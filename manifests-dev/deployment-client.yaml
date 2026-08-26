@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: certdx-client
+    namespace: certdx
+    labels:
+        app.kubernetes.io/name: certdx
+        app.kubernetes.io/component: client
+spec:
+    replicas: 1
+    # The client holds no leader election, and two replicas would patch the
+    # same secrets with the same material.
+    strategy:
+        type: Recreate
+    selector:
+        matchLabels:
+            app.kubernetes.io/name: certdx
+            app.kubernetes.io/component: client
+    template:
+        metadata:
+            labels:
+                app.kubernetes.io/name: certdx
+                app.kubernetes.io/component: client
+        spec:
+            serviceAccountName: certdx-client
+            securityContext:
+                runAsNonRoot: true
+                runAsUser: 65532
+                runAsGroup: 65532
+                fsGroup: 65532
+                seccompProfile:
+                    type: RuntimeDefault
+            containers:
+                - name: client
+                  image: ${IMAGE}
+                  imagePullPolicy: IfNotPresent
+                  args:
+                      - --conf=/etc/certdx/client.toml
+                  securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                          drop:
+                              - ALL
+                      readOnlyRootFilesystem: true
+                  resources:
+                      requests:
+                          cpu: 50m
+                          memory: 64Mi
+                      limits:
+                          cpu: 500m
+                          memory: 512Mi
+                  volumeMounts:
+                      - name: config
+                        mountPath: /etc/certdx
+                        readOnly: true
+            volumes:
+                - name: config
+                  secret:
+                      secretName: certdx-client-config
+                      defaultMode: 0440
