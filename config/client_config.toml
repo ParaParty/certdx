@@ -4,11 +4,14 @@ token = "KFCCrazyThursdayVMe50"
 
 [[Certificate]]
 name = "certFileNameToSave"
-savePath = "/path/to/directory/which/saves/your/certificates"
-# will save cert and key file at savePath/name.pem and savePath/name.key
 domains = [
     "*.example.com",
     "*.mm.example.com",
 ]
+
+[[Certificate.UpdateAction]]
+type = "file"
+# will save cert and key file at savePath/name.pem and savePath/name.key
+savePath = "/path/to/directory/which/saves/your/certificates"
 # command to reload your services
 reloadCommand = "systemctl reload nginx"

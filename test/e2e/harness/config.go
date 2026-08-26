@@ -162,8 +162,11 @@ pem = "{{.Standby.PEM}}"
 {{range .Certs}}
 [[Certificate]]
 name = "{{.Name}}"
-savePath = "{{.SavePath}}"
 domains = [{{range $i, $d := .Domains}}{{if $i}}, {{end}}"{{$d}}"{{end}}]
+
+[[Certificate.UpdateAction]]
+type = "file"
+savePath = "{{.SavePath}}"
 reloadCommand = "{{.ReloadCommand}}"
 {{end}}
 `
@@ -213,8 +216,11 @@ pem = "{{.Standby.PEM}}"
 {{range .Certs}}
 [[Certificate]]
 name = "{{.Name}}"
-savePath = "{{.SavePath}}"
 domains = [{{range $i, $d := .Domains}}{{if $i}}, {{end}}"{{$d}}"{{end}}]
+
+[[Certificate.UpdateAction]]
+type = "file"
+savePath = "{{.SavePath}}"
 reloadCommand = "{{.ReloadCommand}}"
 {{end}}
 `

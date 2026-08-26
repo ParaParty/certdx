@@ -56,7 +56,7 @@ func MakeKubernetesReplaceCertificate(updaterCmd *k8sCertsUpdateCmd) *Kubernetes
 func (r *KubernetesCertificateUpdater) initCertDX() error {
 	r.certDXDaemon = client.MakeCertDXClientDaemon()
 	if err := r.certDXDaemon.LoadConfigurationAndValidateOpt(r.cmd.certdxConfig, []config.ValidatingOption{
-		config.WithAcceptEmptyCertificateSavePath(true),
+		config.WithAcceptEmptyUpdateActions(true),
 		config.WithAcceptEmptyCertificatesList(false),
 	}); err != nil {
 		return fmt.Errorf("invalid certdx config: %w", err)

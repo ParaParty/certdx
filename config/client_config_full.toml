@@ -29,21 +29,27 @@ pem = "/path/to/mtls/client-bundle.pem"
 
 [[Certificate]]
 name = "certFileNameToSave"
-savePath = "/path/to/directory/which/saves/your/certificates"
-# will save cert and key file at savePath/name.pem and savePath/name.key
 domains = [
     "*.example.com",
     "*.mm.example.com",
 ]
+
+[[Certificate.UpdateAction]]
+type = "file"
+# will save cert and key file at savePath/name.pem and savePath/name.key
+savePath = "/path/to/directory/which/saves/your/certificates"
 # command to reload your services
 # reloadCommand = "systemctl reload nginx"
 reloadCommand = "bash /opt/acme/reload.sh"
 
 [[Certificate]]
 name = "cert2"
-savePath = "/path/to/directory/which/saves/your/certificates"
 domains = [
     "*.lulu.com",
     "*.mm.lulu.com",
 ]
+
+[[Certificate.UpdateAction]]
+type = "file"
+savePath = "/path/to/directory/which/saves/your/certificates"
 reloadCommand = "bash /opt/acme/reload.sh"

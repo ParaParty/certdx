@@ -64,7 +64,9 @@ func init() {
 	}
 	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)
 
-	certDXDaemon.ClientInit()
+	if err := certDXDaemon.ClientInit(); err != nil {
+		logging.Fatal("Failed to initialize client: %s", err)
+	}
 }
 
 func main() {
