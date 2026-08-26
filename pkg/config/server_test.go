@@ -47,13 +47,15 @@ func TestACMEConfigValidateMissingChallengeType(t *testing.T) {
 func TestClientCertificateValidateRequiresFields(t *testing.T) {
 	options := makeValidatingConfiguration()
 
+	fileAction := []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}
+
 	cases := []struct {
 		name string
 		c    ClientCertificate
 	}{
-		{"no domains", ClientCertificate{Name: "x", SavePath: "/tmp"}},
-		{"no name", ClientCertificate{Domains: []string{"example.com"}, SavePath: "/tmp"}},
-		{"no save path", ClientCertificate{Name: "x", Domains: []string{"example.com"}}},
+		{"no domains", ClientCertificate{Name: "x", Actions: fileAction}},
+		{"no name", ClientCertificate{Domains: []string{"example.com"}, Actions: fileAction}},
+		{"no update action", ClientCertificate{Name: "x", Domains: []string{"example.com"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -64,35 +66,35 @@ func TestClientCertificateValidateRequiresFields(t *testing.T) {
 	}
 }
 
-func TestClientCertificateAcceptEmptySavePath(t *testing.T) {
+func TestClientCertificateAcceptEmptyUpdateActions(t *testing.T) {
 	options := makeValidatingConfiguration()
-	WithAcceptEmptyCertificateSavePath(true)(options)
+	WithAcceptEmptyUpdateActions(true)(options)
 
 	c := &ClientCertificate{Name: "x", Domains: []string{"example.com"}}
 	if err := c.Validate(options); err != nil {
-		t.Fatalf("expected validation OK with empty SavePath when option set: %v", err)
+		t.Fatalf("expected validation OK with no update action when option set: %v", err)
 	}
 }
 
-func TestClientCertificateGetFullChainAndKeyPath(t *testing.T) {
-	c := &ClientCertificate{Name: "site", SavePath: "/var/lib/certs"}
-	full, key, err := c.GetFullChainAndKeyPath()
-	if err != nil {
-		t.Fatalf("GetFullChainAndKeyPath: %v", err)
+func TestClientCertificateFileAction(t *testing.T) {
+	c := &ClientCertificate{
+		Name: "site",
+		Actions: []UpdateActionConfig{
+			&KubernetesAction{Profile: "cluster-a"},
+			&FileAction{SavePath: "/var/lib/certs"},
+		},
 	}
-	if full != "/var/lib/certs/site.pem" {
-		t.Errorf("fullchain path: got %s", full)
+	got, ok := c.FileAction()
+	if !ok {
+		t.Fatal("expected a file action")
 	}
-	if key != "/var/lib/certs/site.key" {
-		t.Errorf("key path: got %s", key)
+	if got.SavePath != "/var/lib/certs" {
+		t.Fatalf("file action: got %+v", got)
 	}
-}
 
-func TestClientCertificateGetFullChainAndKeyPathEmpty(t *testing.T) {
-	c := &ClientCertificate{}
-	_, _, err := c.GetFullChainAndKeyPath()
-	if err == nil {
-		t.Fatal("expected error on empty save path")
+	none := &ClientCertificate{Name: "site", Actions: []UpdateActionConfig{&KubernetesAction{}}}
+	if _, ok := none.FileAction(); ok {
+		t.Fatal("expected no file action")
 	}
 }
 

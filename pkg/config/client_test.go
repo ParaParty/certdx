@@ -12,7 +12,7 @@ func TestClientConfigValidateUnsupportedMode(t *testing.T) {
 	c.SetDefault()
 	c.Common.Mode = "websocket"
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err == nil {
@@ -28,7 +28,7 @@ func TestClientConfigValidateInvalidReconnectInterval(t *testing.T) {
 	c.SetDefault()
 	c.Common.ReconnectInterval = "not-a-duration"
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	c.Http.MainServer.Url = "https://example.com"
 	err := c.Validate(nil)
@@ -69,7 +69,7 @@ func TestClientConfigValidateHttpModeValid(t *testing.T) {
 	c.Common.Mode = CLIENT_MODE_HTTP
 	c.Http.MainServer.Url = "https://example.com"
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err != nil {
@@ -83,7 +83,7 @@ func TestClientConfigValidateHttpModeMissingUrl(t *testing.T) {
 	c.Common.Mode = CLIENT_MODE_HTTP
 	c.Http.MainServer.Url = ""
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err == nil {
@@ -107,7 +107,7 @@ func TestClientConfigValidateGrpcModeValid(t *testing.T) {
 	c.GRPC.MainServer.Server = "localhost:10002"
 	c.GRPC.MainServer.PEM = bundle
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err != nil {
@@ -121,7 +121,7 @@ func TestClientConfigValidateGrpcModeMissingServer(t *testing.T) {
 	c.Common.Mode = CLIENT_MODE_GRPC
 	c.GRPC.MainServer.Server = ""
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err == nil {
@@ -139,7 +139,7 @@ func TestClientConfigValidateGrpcModeMissingMtlsFiles(t *testing.T) {
 	c.GRPC.MainServer.Server = "localhost:10002"
 	c.GRPC.MainServer.PEM = "/nonexistent/client.pem"
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err == nil {
@@ -158,7 +158,7 @@ func TestClientConfigValidateHttpMtlsMissingFiles(t *testing.T) {
 	c.Http.MainServer.AuthMethod = HTTP_AUTH_MTLS
 	c.Http.MainServer.PEM = "/nonexistent/client.pem"
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err == nil {
@@ -177,7 +177,7 @@ func TestClientConfigValidateHttpTokenNoMtlsCheck(t *testing.T) {
 	c.Http.MainServer.AuthMethod = HTTP_AUTH_TOKEN
 	c.Http.MainServer.Token = "secret"
 	c.Certificates = []ClientCertificate{
-		{Name: "x", SavePath: "/tmp", Domains: []string{"example.com"}},
+		{Name: "x", Domains: []string{"example.com"}, Actions: []UpdateActionConfig{&FileAction{SavePath: "/tmp"}}},
 	}
 	err := c.Validate(nil)
 	if err != nil {

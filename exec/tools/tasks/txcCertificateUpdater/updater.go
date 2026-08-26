@@ -270,7 +270,7 @@ func logMissingCerts(configured, matched []ClientCertificate) {
 func (r *TencentCloudCertificateUpdater) InitCertDX() error {
 	r.certDXDaemon = client.MakeCertDXClientDaemon()
 	if err := r.certDXDaemon.LoadConfigurationAndValidateOpt(*r.cmd.confPath, []config.ValidatingOption{
-		config.WithAcceptEmptyCertificateSavePath(true),
+		config.WithAcceptEmptyUpdateActions(true),
 		config.WithAcceptEmptyCertificatesList(false),
 	}); err != nil {
 		return fmt.Errorf("invalid certdx config: %w", err)

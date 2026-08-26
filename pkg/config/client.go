@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -169,10 +168,8 @@ func (c *ClientGRPCServer) Validate() error {
 }
 
 type ClientCertificate struct {
-	Name          string   `toml:"name" json:"name,omitempty"`
-	SavePath      string   `toml:"savePath" json:"save_path,omitempty"`
-	Domains       []string `toml:"domains" json:"domains,omitempty"`
-	ReloadCommand string   `toml:"reloadCommand" json:"reload_command,omitempty"`
+	Name    string   `toml:"name" json:"name,omitempty"`
+	Domains []string `toml:"domains" json:"domains,omitempty"`
 
 	// RawActions is resolved into Actions by ClientConfig.DecodeActions,
 	// which needs the decoder metadata that plain unmarshalling discards.
@@ -181,23 +178,24 @@ type ClientCertificate struct {
 }
 
 func (c *ClientCertificate) Validate(options *validatingConfiguration) error {
-	var savePathAccepted = c.SavePath != ""
-	if options.acceptEmptyCertificateSavePath && len(c.SavePath) == 0 {
-		savePathAccepted = true
-	}
-	if len(c.Domains) == 0 || c.Name == "" || !savePathAccepted {
+	if len(c.Domains) == 0 || c.Name == "" {
 		return fmt.Errorf("wrong certificate configuration for %s", c.Name)
+	}
+	if len(c.Actions) == 0 && !options.acceptEmptyUpdateActions {
+		return fmt.Errorf("certificate %s has no update action configured", c.Name)
 	}
 	return nil
 }
 
-func (c *ClientCertificate) GetFullChainAndKeyPath() (fullchain, key string, err error) {
-	if len(c.SavePath) == 0 || len(c.Name) == 0 {
-		return "", "", fmt.Errorf("empty save path")
+// FileAction returns the certificate's first file update action, which is
+// where previously saved material can be read back from at startup.
+func (c *ClientCertificate) FileAction() (*FileAction, bool) {
+	for _, action := range c.Actions {
+		if it, ok := action.(*FileAction); ok {
+			return it, true
+		}
 	}
-	fullchain = path.Join(c.SavePath, fmt.Sprintf("%s.pem", c.Name))
-	key = path.Join(c.SavePath, fmt.Sprintf("%s.key", c.Name))
-	return
+	return nil, false
 }
 
 // ClientProfiles holds the named credential and connection settings that
@@ -302,22 +300,22 @@ func (c *ClientConfig) SetDefault() {
 }
 
 type validatingConfiguration struct {
-	acceptEmptyCertificateSavePath bool
-	acceptEmptyCertificatesList    bool
+	acceptEmptyUpdateActions    bool
+	acceptEmptyCertificatesList bool
 }
 
 func makeValidatingConfiguration() *validatingConfiguration {
 	return &validatingConfiguration{
-		acceptEmptyCertificateSavePath: false,
-		acceptEmptyCertificatesList:    false,
+		acceptEmptyUpdateActions:    false,
+		acceptEmptyCertificatesList: false,
 	}
 }
 
 type ValidatingOption func(*validatingConfiguration)
 
-func WithAcceptEmptyCertificateSavePath(value bool) ValidatingOption {
+func WithAcceptEmptyUpdateActions(value bool) ValidatingOption {
 	return func(v *validatingConfiguration) {
-		v.acceptEmptyCertificateSavePath = value
+		v.acceptEmptyUpdateActions = value
 	}
 }
 

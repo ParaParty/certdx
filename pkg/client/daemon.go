@@ -64,6 +64,7 @@ type watchingCert struct {
 	Data           atomic.Pointer[certData]
 	Config         config.ClientCertificate
 	UpdateHandlers []CertificateUpdateHandler
+	Runners        []*actionRunner
 	UpdateChan     chan certData
 }
 
@@ -103,6 +104,9 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 				for _, handleFunc := range c.UpdateHandlers {
 					handleFunc(newCert.Fullchain, newCert.Key, &c.Config)
 				}
+				for _, runner := range c.Runners {
+					runner.notify(newCert)
+				}
 			}
 		}
 	}
@@ -124,10 +128,16 @@ func MakeCertDXClientDaemon() *CertDXClientDaemon {
 }
 
 // loadSavedCert reads any previously-persisted cert/key for this
-// certification off disk so the daemon can serve stale-but-valid
-// material until the first fresh fetch lands.
+// certificate off disk so the daemon can serve stale-but-valid
+// material until the first fresh fetch lands. Certificates without a
+// file update action have nothing on disk to read back.
 func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertificate) (fullchan, key []byte, err error) {
-	fullchanPath, keyPath, err := c.GetFullChainAndKeyPath()
+	fileAction, ok := c.FileAction()
+	if !ok {
+		return nil, nil, os.ErrNotExist
+	}
+
+	fullchanPath, keyPath, err := fileAction.GetFullChainAndKeyPath(c.Name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -147,29 +157,38 @@ func (r *CertDXClientDaemon) loadSavedCert(c *config.ClientCertificate) (fullcha
 	return
 }
 
-// ClientInit prepares one watchingCert per Certificate entry and
-// seeds it with any cert previously written to disk. Watcher goroutines
-// are not launched until HttpMain or GRPCMain runs (they own rootCtx).
-func (r *CertDXClientDaemon) ClientInit() {
+// ClientInit prepares one watchingCert per Certificate entry, builds its
+// update actions and seeds it with any cert previously written to disk.
+// Watcher goroutines are not launched until HttpMain or GRPCMain runs
+// (they own rootCtx).
+func (r *CertDXClientDaemon) ClientInit() error {
 	for _, c := range r.Config.Certificates {
-		cd := certData{
-			Domains: c.Domains,
-		}
-
-		fullchan, key, err := r.loadSavedCert(&c)
-		if err == nil {
-			cd.Fullchain, cd.Key = fullchan, key
+		actions, err := buildActions(&c, r.Config)
+		if err != nil {
+			return err
 		}
 
 		cert := &watchingCert{
 			Config:         c,
-			UpdateHandlers: []CertificateUpdateHandler{writeCertAndDoCommand},
+			UpdateHandlers: []CertificateUpdateHandler{},
 			UpdateChan:     make(chan certData, 1),
+		}
+		for _, action := range actions {
+			cert.Runners = append(cert.Runners, makeActionRunner(action, &cert.Config, r.Config.Common.RetryCount))
+		}
+
+		cd := certData{
+			Domains: c.Domains,
+		}
+		if fullchan, key, err := r.loadSavedCert(&cert.Config); err == nil {
+			cd.Fullchain, cd.Key = fullchan, key
 		}
 		cert.Data.Store(&cd)
 
 		r.certs[domain.AsKey(c.Domains)] = cert
 	}
+
+	return nil
 }
 
 // AddCertToWatchOpt registers an additional cert + handler set to be watched.
@@ -210,19 +229,33 @@ func (r *CertDXClientDaemon) AddCertToWatch(name string, domains []string) error
 	return r.AddCertToWatchOpt(name, domains, []WatchingCertsOption{})
 }
 
-// startWatchers launches one watchUpdate goroutine per registered cert.
-// Each watcher exits when the daemon's rootCtx fires.
+// startWatchers launches one watchUpdate goroutine per registered cert,
+// plus one goroutine per update action. All exit when the daemon's
+// rootCtx fires.
 func (r *CertDXClientDaemon) startWatchers() {
 	for _, c := range r.certs {
 		r.wg.Add(1)
 		go r.watchUpdate(c)
+
+		for _, runner := range c.Runners {
+			r.wg.Add(1)
+			go func() {
+				defer r.wg.Done()
+				runner.run(r.rootCtx)
+			}()
+		}
 	}
 }
 
 // LoadConfigurationAndValidateOpt parses the TOML file at path into the
-// daemon's config and runs Validate with the supplied options.
+// daemon's config, resolves its update actions and runs Validate with
+// the supplied options.
 func (r *CertDXClientDaemon) LoadConfigurationAndValidateOpt(path string, options []config.ValidatingOption) error {
-	if err := cli.LoadTOML(path, r.Config); err != nil {
+	md, err := cli.LoadTOMLMeta(path, r.Config)
+	if err != nil {
+		return err
+	}
+	if err := r.Config.DecodeActions(md); err != nil {
 		return err
 	}
 	return r.Config.Validate(options)
