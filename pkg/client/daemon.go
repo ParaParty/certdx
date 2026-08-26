@@ -67,6 +67,11 @@ type watchingCert struct {
 	UpdateChan     chan certData
 }
 
+// CertificateUpdateHandler is invoked whenever a watched cert receives
+// fresh material. Handlers are expected to be quick; long-running work
+// should be dispatched elsewhere.
+type CertificateUpdateHandler func(fullchain, key []byte, c *config.ClientCertificate)
+
 // WatchingCertsOption customises an AddCertToWatchOpt registration.
 type WatchingCertsOption func(*watchingCert)
 

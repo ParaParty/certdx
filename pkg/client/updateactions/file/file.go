@@ -1,6 +1,11 @@
-package client
+// Package file is the "file" update action: it writes renewed certificates
+// to disk and runs an optional reload command.
+//
+// It deliberately does not import pkg/client, which registers it.
+package file
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,10 +23,17 @@ const (
 	permKeyFile  os.FileMode = 0o600
 )
 
-// CertificateUpdateHandler is invoked whenever a watched cert receives
-// fresh material. Handlers are expected to be quick; long-running work
-// should be dispatched elsewhere.
-type CertificateUpdateHandler func(fullchain, key []byte, c *config.ClientCertificate)
+type Action struct {
+	cfg *config.FileAction
+}
+
+func New(cfg *config.FileAction) *Action {
+	return &Action{cfg: cfg}
+}
+
+func (a *Action) Type() string {
+	return config.UPDATE_ACTION_FILE
+}
 
 // ensureParentDir creates file's parent directory if needed. It reports
 // whether file already existed before we had the chance to write it.
@@ -97,50 +109,55 @@ func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, k
 	return nil
 }
 
-// writeCertAndDoCommand persists fullchain/key to the paths configured
-// for c and invokes the optional reload command. File perms are tight:
-// 0o644 for the public cert, 0o600 for the private key. Writes are
-// atomic via rename, so partial-file reads are not possible.
+// Update persists fullchain/key to the configured paths and invokes the
+// optional reload command. File perms are tight: 0o644 for the public
+// cert, 0o600 for the private key. Writes are atomic via rename, so
+// partial-file reads are not possible.
 //
 // The reload command runs only when both files pre-existed; the first
 // install is effectively a bootstrap and the downstream service is
-// unlikely to be running yet.
-func writeCertAndDoCommand(fullchain, key []byte, c *config.ClientCertificate) {
-	var certExists, keyExists bool
-
-	certPath, keyPath, err := c.GetFullChainAndKeyPath()
+// unlikely to be running yet. A failing reload command is logged but not
+// returned: the certificate is already on disk, so retrying the whole
+// action would rewrite identical bytes.
+func (a *Action) Update(_ context.Context, fullchain, key []byte, c *config.ClientCertificate) error {
+	certPath, keyPath, err := a.cfg.GetFullChainAndKeyPath(c.Name)
 	if err != nil {
-		logging.Debug("Failed to get cert save path: %s", err)
-		return
-	}
-	certExists, err = ensureParentDir(certPath)
-	if err != nil {
-		goto ERR
-	}
-	keyExists, err = ensureParentDir(keyPath)
-	if err != nil {
-		goto ERR
+		return fmt.Errorf("get cert save path: %w", err)
 	}
 
-	if err = writeCertKeyPairAtomic(certPath, fullchain, keyPath, key); err != nil {
-		goto ERR
+	certExists, err := ensureParentDir(certPath)
+	if err != nil {
+		return fmt.Errorf("save cert file: %w", err)
+	}
+	keyExists, err := ensureParentDir(keyPath)
+	if err != nil {
+		return fmt.Errorf("save cert file: %w", err)
+	}
+
+	if err := writeCertKeyPairAtomic(certPath, fullchain, keyPath, key); err != nil {
+		return fmt.Errorf("save cert file: %w", err)
 	}
 
 	logging.Info("Saved cert %v", c.Domains)
 
 	if certExists && keyExists {
-		// strings.Fields collapses whitespace and skips empty inputs, so
-		// a whitespace-only ReloadCommand returns an empty slice — guard
-		// against args[0] panicking instead of just !=  "".
-		if args := strings.Fields(c.ReloadCommand); len(args) > 0 {
-			logging.Debug("Executing reload command: %s", c.ReloadCommand)
-			if err = exec.Command(args[0], args[1:]...).Run(); err != nil {
-				logging.Error("Failed executing reload command %s: %s", c.ReloadCommand, err)
-			}
-		}
+		a.runReloadCommand()
 	}
-	return
 
-ERR:
-	logging.Error("Failed to save cert file: %s", err)
+	return nil
+}
+
+func (a *Action) runReloadCommand() {
+	// strings.Fields collapses whitespace and skips empty inputs, so
+	// a whitespace-only ReloadCommand returns an empty slice — guard
+	// against args[0] panicking instead of just !=  "".
+	args := strings.Fields(a.cfg.ReloadCommand)
+	if len(args) == 0 {
+		return
+	}
+
+	logging.Debug("Executing reload command: %s", a.cfg.ReloadCommand)
+	if err := exec.Command(args[0], args[1:]...).Run(); err != nil {
+		logging.Error("Failed executing reload command %s: %s", a.cfg.ReloadCommand, err)
+	}
 }
