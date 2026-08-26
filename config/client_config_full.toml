@@ -27,6 +27,25 @@ pem = "/path/to/mtls/client-bundle.pem"
 server = "192.168.1.2:9090"
 pem = "/path/to/mtls/client-bundle.pem"
 
+# Named credentials referenced by update actions. Names are scoped per
+# profile type, so a tencentCloud and a kubernetes profile may share one.
+
+# [[Profile.TencentCloud]]
+# name = "prod"
+# secretID = "tencent cloud secret id"
+# secretKey = "tencent cloud secret key"
+# defaults to ssl.tencentcloudapi.com
+# endpoint = "ssl.tencentcloudapi.com"
+
+# [[Profile.Kubernetes]]
+# name = "cluster-a"
+# empty means in-cluster, then $KUBECONFIG, then ~/.kube/config
+# kubeConfig = ""
+
+# Certificate list, indicating which certificates this certdx client
+# needs to take over for updates. Every [[Certificate.UpdateAction]]
+# belongs to the [[Certificate]] above it.
+
 [[Certificate]]
 name = "certFileNameToSave"
 domains = [
@@ -38,10 +57,28 @@ domains = [
 type = "file"
 # will save cert and key file at savePath/name.pem and savePath/name.key
 savePath = "/path/to/directory/which/saves/your/certificates"
-# command to reload your services
+# command to reload your services, runs only when the files already existed
 # reloadCommand = "systemctl reload nginx"
 reloadCommand = "bash /opt/acme/reload.sh"
 
+# Re-point Tencent Cloud resources at the renewed certificate.
+# [[Certificate.UpdateAction]]
+# type = "tencentCloud"
+# profile = "prod"
+# one of clb, cdn, waf, live, vod, ddos, tke, apigateway, tcb, teo
+# resourceTypes = ["teo", "cdn"]
+# optional per-resource-type region filter; every resourceType listed
+# here must also appear in resourceTypes above
+# resourceTypesRegions = [{ resourceType = "clb", regions = ["ap-guangzhou"] }]
+
+# Patch kubernetes.io/tls secrets annotated with
+# party.para.certdx/domains whose domains this certificate covers.
+# [[Certificate.UpdateAction]]
+# type = "kubernetes"
+# profile = "cluster-a"
+
+# A certificate may list any number of update actions, and a certificate
+# with no file action is never written to disk at all.
 [[Certificate]]
 name = "cert2"
 domains = [
