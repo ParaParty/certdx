@@ -9,6 +9,10 @@ import (
 	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
+
+	// Update actions are linked here rather than from pkg/client so that
+	// their SDKs stay out of the server and Caddy plugin builds.
+	_ "pkg.para.party/certdx/pkg/client/updateactions/tencentcloud"
 )
 
 var (

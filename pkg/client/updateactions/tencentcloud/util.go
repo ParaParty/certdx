@@ -35,15 +35,3 @@ func isSameStrSetRejectNilItem(a []*string, b []string) bool {
 	}
 	return isSameStrSetIgnoringNil(deref, b)
 }
-
-func isSameStrSetRejectNilItemPtrArrPtrArr(a []*string, b []*string) bool {
-	derefA, ok := derefAll(a)
-	if !ok {
-		return false
-	}
-	derefB, ok := derefAll(b)
-	if !ok {
-		return false
-	}
-	return isSameStrSetIgnoringNil(derefA, derefB)
-}

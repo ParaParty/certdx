@@ -1,3 +1,6 @@
+// Package tencentcloud is the "tencentCloud" update action: it re-binds
+// Tencent Cloud resources from the certificate they currently serve to the
+// newly issued one.
 package tencentcloud
 
 import (
@@ -5,336 +8,183 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
-
-	txprofile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
-	"pkg.para.party/certdx/pkg/cli"
-	"pkg.para.party/certdx/pkg/client"
-	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/domain"
-	"pkg.para.party/certdx/pkg/logging"
-	"pkg.para.party/certdx/pkg/retry"
+	"time"
 
 	txcommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	txerr "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
+	txprofile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	txssl "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl/v20191205"
+
+	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
-// updateRetryCount bounds the per-cert UpdateCertificateInstance retries.
-const updateRetryCount = 3
+const defaultEndpoint = "ssl.tencentcloudapi.com"
 
-// describeRetryCount bounds DescribeCertificates pagination retries.
-const describeRetryCount = 3
+// reqTimeout is the per-request timeout handed to the SDK, in seconds.
+const reqTimeout = 60
 
-type TencentCloudCertificateUpdater struct {
-	cmd *txcCertsUpdateCmd
+// certTimeLayout is how the SSL API formats certificate timestamps.
+const certTimeLayout = "2006-01-02 15:04:05"
 
-	cfg    *TencentCloudConfig
+type Action struct {
+	cfg    *config.TencentCloudAction
 	client *txssl.Client
-
-	wg           sync.WaitGroup
-	taskErrMu    sync.Mutex
-	taskErr      []error
-	certDXDaemon *client.CertDXClientDaemon
-
-	// ctx is captured from InvokeCertificateUpdate so the per-cert
-	// retry callbacks (closures the certdx daemon invokes on update)
-	// and the paged DescribeCertificates retries can share a single
-	// cancellation source. The updater is one-shot, so a struct-level
-	// ctx is simpler than threading it through every closure.
-	ctx context.Context
 }
 
-func MakeTencentCloudCertificateUpdater(updaterCmd *txcCertsUpdateCmd) *TencentCloudCertificateUpdater {
-	return &TencentCloudCertificateUpdater{
-		cmd: updaterCmd,
-		cfg: &TencentCloudConfig{},
+func New(cfg *config.TencentCloudAction, profile *config.TencentCloudProfile) (*Action, error) {
+	endpoint := profile.Endpoint
+	if endpoint == "" {
+		endpoint = defaultEndpoint
 	}
+
+	cpf := txprofile.NewClientProfile()
+	cpf.HttpProfile.Endpoint = endpoint
+	cpf.HttpProfile.ReqTimeout = reqTimeout
+
+	c, err := txssl.NewClient(txcommon.NewCredential(profile.SecretID, profile.SecretKey), "", cpf)
+	if err != nil {
+		return nil, fmt.Errorf("create tencent cloud client: %w", err)
+	}
+
+	return &Action{cfg: cfg, client: c}, nil
 }
 
-func isActivatingCertificateExists(activatingCertificates []*txssl.Certificates, cert *txssl.Certificates) (*txssl.Certificates, error) {
-	if cert == nil {
-		return nil, fmt.Errorf("certificate is nil")
-	}
-	for _, ac := range activatingCertificates {
-		if ac == nil {
-			return nil, fmt.Errorf("activatingCertificates contains nil certificate")
-		}
-		if ac.CertificateId != nil && cert.CertificateId != nil && *ac.CertificateId == *cert.CertificateId {
-			continue
-		}
-		if isSameStrSetRejectNilItemPtrArrPtrArr(ac.CertSANs, cert.CertSANs) {
-			return ac, nil
-		}
-	}
-	return nil, nil
+func (a *Action) Type() string {
+	return config.UPDATE_ACTION_TENCENT_CLOUD
 }
 
-func (r *TencentCloudCertificateUpdater) GetCertificateToUpdate() error {
-	logging.Info("Retrieving expiring certificates")
-	expiringCertificates, err := r.FetchTencentCloudCertificate(func(req *txssl.DescribeCertificatesRequest) {
+// Update finds the uploaded certificate currently covering the same domain
+// set and re-points the configured resources at the new material.
+//
+// Discovery runs on every update rather than once at start-up, because the
+// certificate the resources are bound to changes each time this succeeds.
+func (a *Action) Update(ctx context.Context, fullchain, key []byte, c *config.ClientCertificate) error {
+	old, err := a.findCertificateToReplace(ctx, c.Domains)
+	if err != nil {
+		return err
+	}
+	if old == nil {
+		logging.Warn("No uploaded Tencent Cloud certificate matches domains %v, nothing to replace", c.Domains)
+		return nil
+	}
+
+	return a.replaceCertificate(ctx, *old.CertificateId, fullchain, key)
+}
+
+// findCertificateToReplace returns the newest uploaded certificate whose SANs
+// equal domains, or nil when the account holds no such certificate.
+func (a *Action) findCertificateToReplace(ctx context.Context, domains []string) (*txssl.Certificates, error) {
+	certificates, err := a.fetchCertificates(ctx, func(req *txssl.DescribeCertificatesRequest) {
 		req.CertificateType = txcommon.StringPtr("SVR")          // 服务端证书
 		req.CertificateStatus = []*uint64{txcommon.Uint64Ptr(1)} // 正常状态的证书
 		req.FilterSource = txcommon.StringPtr("upload")          // 上传的证书
-		req.FilterExpiring = txcommon.Uint64Ptr(1)               // 临期证书
 	})
 	if err != nil {
-		return fmt.Errorf("fetch expiring certificates: %w", err)
+		return nil, fmt.Errorf("fetch certificates: %w", err)
 	}
 
-	logging.Info("Retrieving expiring and normal certificates")
-	activatingCertificates, err := r.FetchTencentCloudCertificate(func(req *txssl.DescribeCertificatesRequest) {
-		req.CertificateType = txcommon.StringPtr("SVR")          // 服务端证书
-		req.CertificateStatus = []*uint64{txcommon.Uint64Ptr(1)} // 正常状态的证书
-		req.FilterSource = txcommon.StringPtr("upload")          // 上传的证书
-		req.FilterExpiring = txcommon.Uint64Ptr(0)               // 临期证书和非临期证书
-	})
+	var newest *txssl.Certificates
+	var newestEnd time.Time
+
+	for _, cert := range certificates {
+		if cert == nil || cert.CertificateId == nil {
+			continue
+		}
+		if !isSameStrSetRejectNilItem(cert.CertSANs, domains) {
+			continue
+		}
+
+		// Several certificates can cover the same domains once this action
+		// has run before; the newest one is what the resources now serve.
+		end := parseCertTime(cert.CertEndTime)
+		if newest == nil || end.After(newestEnd) {
+			newest, newestEnd = cert, end
+		}
+	}
+
+	return newest, nil
+}
+
+func (a *Action) replaceCertificate(ctx context.Context, oldCertificateID string, fullchain, key []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	req := txssl.NewUpdateCertificateInstanceRequest()
+	req.OldCertificateId = txcommon.StringPtr(oldCertificateID)
+	req.CertificatePublicKey = txcommon.StringPtr(strings.TrimSpace(string(fullchain)))
+	req.CertificatePrivateKey = txcommon.StringPtr(strings.TrimSpace(string(key)))
+	req.ResourceTypes, req.ResourceTypesRegions = toResourceTypesAndRegions(a.cfg)
+	req.ExpiringNotificationSwitch = txcommon.Uint64Ptr(1)
+	req.Repeatable = txcommon.BoolPtr(false)
+
+	resp, err := a.client.UpdateCertificateInstance(req)
 	if err != nil {
-		return fmt.Errorf("fetch activating certificates: %w", err)
+		var sdkErr *txerr.TencentCloudSDKError
+		if errors.As(err, &sdkErr) && sdkErr.Code == "FailedOperation.CertificateExists" {
+			logging.Warn("Certificate already exists, skipping upload (code=%s message=%s requestId=%s)",
+				sdkErr.Code, sdkErr.Message, sdkErr.RequestId)
+			return nil
+		}
+		return fmt.Errorf("UpdateCertificateInstance: %w", err)
 	}
 
-	matchedCerts := make([]ClientCertificate, 0)
-
-	for _, expiringCert := range expiringCertificates {
-		if expiringCert.CertificateId == nil {
-			logging.Error("Unexpected nil certificate id")
-			continue
-		}
-		activatingCertificate, err := isActivatingCertificateExists(activatingCertificates, expiringCert)
-		if err != nil {
-			logging.Error("Failed to check activating certificate: %s", err)
-			continue
-		}
-		if activatingCertificate != nil {
-			logging.Info("A newer certificate exists, old cert id: %v, new cert id: %v", *expiringCert.CertificateId, *activatingCertificate.CertificateId)
-			continue
-		}
-
-		fetchedCertSANs := expiringCert.CertSANs
-
-		for _, cert := range r.cfg.Certificates {
-			if isSameStrSetRejectNilItem(fetchedCertSANs, cert.Domains) {
-				cert.oldCertificateId = *expiringCert.CertificateId
-				cert.certDxKey = domain.AsKey(cert.Domains)
-				matchedCerts = append(matchedCerts, cert)
-			}
-		}
-	}
-
-	logMissingCerts(r.cfg.Certificates, matchedCerts)
-	r.cfg.Certificates = matchedCerts
-
+	logging.Debug("UpdateCertificateInstance requestId=%s", *resp.Response.RequestId)
 	return nil
 }
 
-// AddReplaceTask registers a per-cert callback with the certdx daemon.
-// The WaitGroup counter is incremented only after AddCertToWatchOpt
-// succeeds — a registration failure leaves the wait group untouched
-// rather than leaking a permanent +1 that would hang WaitReplaceTask
-// at its deadline.
-func (r *TencentCloudCertificateUpdater) AddReplaceTask() error {
-	for _, c := range r.cfg.Certificates {
-		taskCert := c // capture by value for the closure
-
-		if err := r.certDXDaemon.AddCertToWatchOpt(taskCert.Name, taskCert.Domains, []client.WatchingCertsOption{
-			client.WithCertificateHandlerOption(r.makeReplaceHandler(taskCert)),
-		}); err != nil {
-			return fmt.Errorf("watch cert %q: %w", taskCert.Name, err)
-		}
-		r.wg.Add(1)
-	}
-	return nil
-}
-
-// makeReplaceHandler returns the per-cert callback the certdx daemon
-// fires on each cert update. It posts the new cert to Tencent Cloud
-// SSL with retries (cancellable via r.ctx) and signals the outer
-// WaitGroup whether the call succeeded or not.
-func (r *TencentCloudCertificateUpdater) makeReplaceHandler(taskCert ClientCertificate) client.CertificateUpdateHandler {
-	return func(fullchain, key []byte, _ *config.ClientCertificate) {
-		defer r.wg.Done()
-
-		req := txssl.NewUpdateCertificateInstanceRequest()
-		req.OldCertificateId = &taskCert.oldCertificateId
-		req.CertificatePublicKey = txcommon.StringPtr(strings.TrimSpace(string(fullchain)))
-		req.CertificatePrivateKey = txcommon.StringPtr(strings.TrimSpace(string(key)))
-		req.ResourceTypes, req.ResourceTypesRegions = taskCert.ToResourceTypesAndResourceTypesRegions()
-		req.ExpiringNotificationSwitch = txcommon.Uint64Ptr(1)
-		req.Repeatable = txcommon.BoolPtr(false)
-
-		err := retry.Do(r.ctx, updateRetryCount, func() error {
-			resp, err := r.client.UpdateCertificateInstance(req)
-			if err != nil {
-				var sdkErr *txerr.TencentCloudSDKError
-				if errors.As(err, &sdkErr) && sdkErr.Code == "FailedOperation.CertificateExists" {
-					logging.Warn("Certificate already exists, skipping upload (code=%s message=%s requestId=%s)",
-						sdkErr.Code, sdkErr.Message, sdkErr.RequestId)
-					return nil
-				}
-				return fmt.Errorf("UpdateCertificateInstance: %w", err)
-			}
-			logging.Debug("UpdateCertificateInstance requestId=%s", *resp.Response.RequestId)
-			return nil
-		})
-
-		if err != nil {
-			r.taskErrMu.Lock()
-			r.taskErr = append(r.taskErr, err)
-			r.taskErrMu.Unlock()
-		}
-	}
-}
-
-// WaitReplaceTask blocks until every registered handler has completed
-// or ctx fires. Cancellation is driven by the caller's ctx — a Stop
-// signal propagates through directly instead of through the previous
-// hard-coded one-hour internal timeout.
-func (r *TencentCloudCertificateUpdater) WaitReplaceTask(ctx context.Context) error {
-	wgDone := make(chan struct{})
-	go func() {
-		r.wg.Wait()
-		close(wgDone)
-	}()
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("wait for certificate replacement: %w", ctx.Err())
-	case <-wgDone:
-		r.taskErrMu.Lock()
-		defer r.taskErrMu.Unlock()
-		if len(r.taskErr) == 0 {
-			logging.Info("Certificates replaced successfully")
-			return nil
-		}
-		return errors.Join(r.taskErr...)
-	}
-}
-
-func (r *TencentCloudCertificateUpdater) FetchTencentCloudCertificate(opt func(request *txssl.DescribeCertificatesRequest)) ([]*txssl.Certificates, error) {
+func (a *Action) fetchCertificates(ctx context.Context, opt func(request *txssl.DescribeCertificatesRequest)) ([]*txssl.Certificates, error) {
 	const pageSize uint64 = 100
 	offset := uint64(0)
 
 	fetchedCertificates := make([]*txssl.Certificates, 0)
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		req := txssl.NewDescribeCertificatesRequest()
 		opt(req)
 		req.Offset = txcommon.Uint64Ptr(offset)
 		req.Limit = txcommon.Uint64Ptr(pageSize)
 
-		noMoreResult := false
-		err := retry.Do(r.ctx, describeRetryCount, func() error {
-			resp, err := r.client.DescribeCertificates(req)
-			if err != nil {
-				return fmt.Errorf("DescribeCertificates: %w", err)
-			}
-			logging.Debug("DescribeCertificates requestId=%s", *resp.Response.RequestId)
-
-			fetchedCertificates = append(fetchedCertificates, resp.Response.Certificates...)
-			noMoreResult = len(resp.Response.Certificates) == 0
-			return nil
-		})
+		resp, err := a.client.DescribeCertificates(req)
 		if err != nil {
-			return nil, fmt.Errorf("list certificates: %w", err)
+			return nil, fmt.Errorf("DescribeCertificates: %w", err)
+		}
+		logging.Debug("DescribeCertificates requestId=%s", *resp.Response.RequestId)
+
+		fetchedCertificates = append(fetchedCertificates, resp.Response.Certificates...)
+		if len(resp.Response.Certificates) == 0 {
+			break
 		}
 
 		offset += pageSize
-		if noMoreResult {
-			break
-		}
 	}
+
 	return fetchedCertificates, nil
 }
 
-// logMissingCerts emits a warning for each cert that is configured for
-// the updater but did not match any expiring certificate fetched from
-// Tencent Cloud. The previous nil-returning err signature was dead
-// code; the caller had no way to distinguish "all matched" from "some
-// missing".
-func logMissingCerts(configured, matched []ClientCertificate) {
-	matchedKeys := make(map[string]struct{}, len(matched))
-	for _, cert := range matched {
-		key := cert.Name + "|" + strings.Join(cert.Domains, ",")
-		matchedKeys[key] = struct{}{}
+func parseCertTime(value *string) time.Time {
+	if value == nil {
+		return time.Time{}
 	}
-
-	for _, cert := range configured {
-		key := cert.Name + "|" + strings.Join(cert.Domains, ",")
-		if _, found := matchedKeys[key]; !found {
-			logging.Warn("Cert in configuration but not in tencent cloud updating tasks: name=%s domains=%v",
-				cert.Name, cert.Domains)
-		}
-	}
-}
-
-func (r *TencentCloudCertificateUpdater) InitCertDX() error {
-	r.certDXDaemon = client.MakeCertDXClientDaemon()
-	if err := r.certDXDaemon.LoadConfigurationAndValidateOpt(*r.cmd.confPath, []config.ValidatingOption{
-		config.WithAcceptEmptyUpdateActions(true),
-		config.WithAcceptEmptyCertificatesList(false),
-	}); err != nil {
-		return fmt.Errorf("invalid certdx config: %w", err)
-	}
-	logging.Debug("Reconnect duration is: %s", r.certDXDaemon.Config.Common.ReconnectDuration)
-	return nil
-}
-
-// InitTencentCloud parses the same TOML file once into the Tencent
-// Cloud-specific schema and constructs the SDK client. The certdx-
-// schema parse happened in InitCertDX; the file is opened once per
-// schema rather than read+parsed twice into the same struct.
-func (r *TencentCloudCertificateUpdater) InitTencentCloud() error {
-	if err := cli.LoadTOML(*r.cmd.confPath, r.cfg); err != nil {
-		return err
-	}
-
-	credential := txcommon.NewCredential(r.cfg.Authorization.SecretID, r.cfg.Authorization.SecretKey)
-
-	cpf := txprofile.NewClientProfile()
-	cpf.HttpProfile.Endpoint = "ssl.tencentcloudapi.com"
-	cpf.HttpProfile.ReqTimeout = 60
-
-	c, err := txssl.NewClient(credential, "", cpf)
+	parsed, err := time.Parse(certTimeLayout, *value)
 	if err != nil {
-		return fmt.Errorf("create tencent cloud client: %w", err)
+		return time.Time{}
 	}
-	r.client = c
-	return nil
+	return parsed
 }
 
-func (r *TencentCloudCertificateUpdater) InitCertificateUpdater() error {
-	if err := r.InitCertDX(); err != nil {
-		return fmt.Errorf("init certdx: %w", err)
+func toResourceTypesAndRegions(cfg *config.TencentCloudAction) ([]*string, []*txssl.ResourceTypeRegions) {
+	resourceTypesRegions := make([]*txssl.ResourceTypeRegions, 0, len(cfg.ResourceTypesRegions))
+	for _, it := range cfg.ResourceTypesRegions {
+		resourceTypesRegions = append(resourceTypesRegions, &txssl.ResourceTypeRegions{
+			ResourceType: txcommon.StringPtr(it.ResourceType),
+			Regions:      txcommon.StringPtrs(it.Regions),
+		})
 	}
-	if err := r.InitTencentCloud(); err != nil {
-		return fmt.Errorf("init tencent cloud: %w", err)
-	}
-	return nil
-}
-
-// InvokeCertificateUpdate captures ctx on the updater and drives a
-// one-shot replace pass: pull expiring certs, register per-cert
-// replace handlers, start the certdx daemon, then wait for every
-// handler to complete (or ctx to fire).
-func (r *TencentCloudCertificateUpdater) InvokeCertificateUpdate(ctx context.Context) error {
-	r.ctx = ctx
-
-	if err := r.GetCertificateToUpdate(); err != nil {
-		return fmt.Errorf("get certificates to update: %w", err)
-	}
-	if err := r.AddReplaceTask(); err != nil {
-		return fmt.Errorf("add replace task: %w", err)
-	}
-
-	switch r.certDXDaemon.Config.Common.Mode {
-	case config.CLIENT_MODE_HTTP:
-		go r.certDXDaemon.HttpMain()
-	case config.CLIENT_MODE_GRPC:
-		go r.certDXDaemon.GRPCMain()
-	default:
-		return fmt.Errorf("unsupported mode: %s", r.certDXDaemon.Config.Common.Mode)
-	}
-	defer r.certDXDaemon.Stop()
-
-	return r.WaitReplaceTask(ctx)
+	return txcommon.StringPtrs(cfg.ResourceTypes), resourceTypesRegions
 }
