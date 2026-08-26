@@ -22,6 +22,8 @@ type ClientConfig struct {
 		StandbyServer ClientGRPCServer `toml:"StandbyServer" json:"standby_server,omitempty"`
 	} `toml:"GRPC" json:"GRPC,omitempty"`
 
+	Profiles ClientProfiles `toml:"Profile" json:"profiles,omitempty"`
+
 	Certificates []ClientCertificate `toml:"Certificate" json:"certificates,omitempty"`
 }
 
@@ -34,6 +36,10 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 	var ret []error
 
 	if err := c.parseDuration(); err != nil {
+		ret = append(ret, err)
+	}
+
+	if err := c.Profiles.Validate(); err != nil {
 		ret = append(ret, err)
 	}
 
@@ -179,6 +185,96 @@ func (c *ClientCertificate) GetFullChainAndKeyPath() (fullchain, key string, err
 	fullchain = path.Join(c.SavePath, fmt.Sprintf("%s.pem", c.Name))
 	key = path.Join(c.SavePath, fmt.Sprintf("%s.key", c.Name))
 	return
+}
+
+// ClientProfiles holds the named credential and connection settings that
+// update actions reference by name. Names are scoped per profile type.
+type ClientProfiles struct {
+	TencentCloud []TencentCloudProfile `toml:"TencentCloud" json:"tencent_cloud,omitempty"`
+	Kubernetes   []KubernetesProfile   `toml:"Kubernetes" json:"kubernetes,omitempty"`
+}
+
+func (p *ClientProfiles) Validate() error {
+	var ret []error
+
+	tencentCloudNames := make(map[string]struct{}, len(p.TencentCloud))
+	for _, it := range p.TencentCloud {
+		if err := it.Validate(); err != nil {
+			ret = append(ret, err)
+			continue
+		}
+		if _, dup := tencentCloudNames[it.Name]; dup {
+			ret = append(ret, fmt.Errorf("duplicated tencentCloud profile name: %s", it.Name))
+			continue
+		}
+		tencentCloudNames[it.Name] = struct{}{}
+	}
+
+	kubernetesNames := make(map[string]struct{}, len(p.Kubernetes))
+	for _, it := range p.Kubernetes {
+		if err := it.Validate(); err != nil {
+			ret = append(ret, err)
+			continue
+		}
+		if _, dup := kubernetesNames[it.Name]; dup {
+			ret = append(ret, fmt.Errorf("duplicated kubernetes profile name: %s", it.Name))
+			continue
+		}
+		kubernetesNames[it.Name] = struct{}{}
+	}
+
+	return errors.Join(ret...)
+}
+
+type TencentCloudProfile struct {
+	Name      string `toml:"name" json:"name,omitempty"`
+	SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
+	SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
+	Endpoint  string `toml:"endpoint" json:"endpoint,omitempty"`
+}
+
+func (p *TencentCloudProfile) Validate() error {
+	if p.Name == "" {
+		return fmt.Errorf("tencentCloud profile has no name")
+	}
+	if p.SecretID == "" || p.SecretKey == "" {
+		return fmt.Errorf("tencentCloud profile %s: secretID and secretKey are required", p.Name)
+	}
+	return nil
+}
+
+type KubernetesProfile struct {
+	// KubeConfig empty means in-cluster config, then the default client-go chain.
+	KubeConfig string `toml:"kubeConfig" json:"kube_config,omitempty"`
+	Name       string `toml:"name" json:"name,omitempty"`
+}
+
+func (p *KubernetesProfile) Validate() error {
+	if p.Name == "" {
+		return fmt.Errorf("kubernetes profile has no name")
+	}
+	if p.KubeConfig != "" && !paths.FileExists(p.KubeConfig) {
+		return fmt.Errorf("kubernetes profile %s: file not found: %s", p.Name, p.KubeConfig)
+	}
+	return nil
+}
+
+func (c *ClientConfig) FindTencentCloudProfile(name string) (*TencentCloudProfile, bool) {
+	for i := range c.Profiles.TencentCloud {
+		if c.Profiles.TencentCloud[i].Name == name {
+			return &c.Profiles.TencentCloud[i], true
+		}
+	}
+	return nil, false
+}
+
+func (c *ClientConfig) FindKubernetesProfile(name string) (*KubernetesProfile, bool) {
+	for i := range c.Profiles.Kubernetes {
+		if c.Profiles.Kubernetes[i].Name == name {
+			return &c.Profiles.Kubernetes[i], true
+		}
+	}
+	return nil, false
 }
 
 func (c *ClientConfig) SetDefault() {
