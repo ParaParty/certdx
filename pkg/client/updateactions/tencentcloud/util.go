@@ -1,4 +1,4 @@
-package txcCertificateUpdater
+package tencentcloud
 
 func isSameStrSetIgnoringNil(a, b []string) bool {
 	if len(a) != len(b) {

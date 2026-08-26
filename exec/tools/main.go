@@ -8,7 +8,6 @@ import (
 
 	"pkg.para.party/certdx/exec/tools/tasks"
 	"pkg.para.party/certdx/exec/tools/tasks/kubernetesCertificateUpdater"
-	"pkg.para.party/certdx/exec/tools/tasks/txcCertificateUpdater"
 	"pkg.para.party/certdx/pkg/cli"
 )
 
@@ -41,9 +40,6 @@ var commands = map[string]command{
 	"make-ca":        {tasks.MakeCA, "Generate mTLS CA certificate and key", nil},
 	"make-server":    {tasks.MakeServer, "Generate mTLS server certificate and key", nil},
 	"make-client":    {tasks.MakeClient, "Generate mTLS client certificate and key", nil},
-	"tencent-cloud-certificate-updater": {txcCertificateUpdater.TencentCloudReplaceCertificate,
-		"Update expiring Tencent Cloud certificates",
-		[]string{"tx-update", "tencent-cloud-certificates-updater"}},
 	"kubernetes-certificate-updater": {kubernetesCertificateUpdater.KubernetesReplaceCertificate,
 		"Update annotated Kubernetes TLS secrets",
 		[]string{"k8s-update", "k8s-certificate-updater"}},
@@ -68,7 +64,7 @@ var groups = []commandGroup{
 	{"Certificate Inspection", []string{"show-certs"}},
 	{"ACME", []string{"google-account"}},
 	{"mTLS Setup", []string{"make-ca", "make-server", "make-client"}},
-	{"Certificate Updaters", []string{"tencent-cloud-certificate-updater", "kubernetes-certificate-updater"}},
+	{"Certificate Updaters", []string{"kubernetes-certificate-updater"}},
 }
 
 func main() {
