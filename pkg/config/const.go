@@ -22,3 +22,9 @@ const (
 	CLIENT_MODE_HTTP string = "http"
 	CLIENT_MODE_GRPC string = "grpc"
 )
+
+const (
+	UPDATE_ACTION_FILE          string = "file"
+	UPDATE_ACTION_TENCENT_CLOUD string = "tencentCloud"
+	UPDATE_ACTION_KUBERNETES    string = "kubernetes"
+)
