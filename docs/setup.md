@@ -468,7 +468,7 @@ rather than a CronJob; secrets are re-listed on every renewal, so ones
 created later are picked up without a restart. In-cluster it uses the
 pod's service account automatically; outside the cluster set
 `kubeConfig` on the profile. Ready-to-adapt manifests live in
-`manifests-dev/`.
+`config/kubernetes/`.
 
 ### Tencent Cloud certificate replacement
 

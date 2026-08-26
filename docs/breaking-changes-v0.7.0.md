@@ -107,7 +107,7 @@ certdx_client -c client.toml
 Behaviour changes:
 
 - **Run it as a Deployment, not a CronJob.** The client is long-running.
-  `manifests-dev/` ships an example Deployment.
+  `config/kubernetes/` ships an example Deployment.
 - Annotated secrets are re-listed on **every renewal** instead of once at
   start-up, so secrets created later are picked up without a restart.
 - The ten-minute completion deadline is gone; there is nothing to
