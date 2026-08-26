@@ -1,4 +1,4 @@
-package txcCertificateUpdater
+package tencentcloud
 
 import (
 	txcommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"

@@ -1,4 +1,4 @@
-package txcCertificateUpdater
+package tencentcloud
 
 import (
 	"context"
