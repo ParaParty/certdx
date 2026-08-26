@@ -2,83 +2,67 @@ package kubernetes
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"sync/atomic"
+	"errors"
+	"reflect"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
+
 	"k8s.io/client-go/kubernetes/fake"
-	"pkg.para.party/certdx/pkg/api"
-	"pkg.para.party/certdx/pkg/client"
 	"pkg.para.party/certdx/pkg/config"
 )
 
-func TestDuplicateDomainSecretsShareWatchAndAllUpdate(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		if err := json.NewEncoder(w).Encode(api.HttpCertResp{
-			RenewTimeLeft: time.Hour,
-			FullChain:     []byte("new-cert"),
-			Key:           []byte("new-key"),
-		}); err != nil {
-			t.Errorf("encode response: %v", err)
+var errBoom = errors.New("boom")
+
+func newTLSSecret(namespace, name, annotation string, cert, key []byte) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:   namespace,
+			Name:        name,
+			Annotations: map[string]string{certDxDomainAnnotation: annotation},
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			corev1.TLSCertKey:       cert,
+			corev1.TLSPrivateKeyKey: key,
+		},
+	}
+}
+
+func certificate(domains ...string) *config.ClientCertificate {
+	return &config.ClientCertificate{Name: "newtest", Domains: domains}
+}
+
+func updateCount(clientset *fake.Clientset) int {
+	count := 0
+	for _, action := range clientset.Actions() {
+		if action.Matches("update", "secrets") {
+			count++
 		}
-	}))
-	defer server.Close()
-
-	domains := []string{"newtest.campuses.cn", "*.newtest.campuses.cn"}
-	newSecret := func(name string) corev1.Secret {
-		return corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   "namespace",
-				Name:        name,
-				Annotations: map[string]string{certDxDomainAnnotation: "newtest.campuses.cn,*.newtest.campuses.cn"},
-			},
-			Type: corev1.SecretTypeTLS,
-			Data: map[string][]byte{
-				corev1.TLSCertKey:       []byte("old-cert"),
-				corev1.TLSPrivateKeyKey: []byte("old-key"),
-			},
-		}
 	}
-	first := newSecret("first")
-	second := newSecret("second")
+	return count
+}
 
-	daemon := client.MakeCertDXClientDaemon()
-	daemon.Config.Http.MainServer.Url = server.URL
-	daemon.Config.Certificates = []config.ClientCertificate{{Name: "newtest", Domains: domains}}
+// Two secrets sharing a domain set must both be patched by a single
+// certificate delivery. Regression test for the one-secret-per-cert bug.
+func TestUpdatePatchesAllMatchingSecrets(t *testing.T) {
+	annotation := "newtest.campuses.cn,*.newtest.campuses.cn"
+	clientset := fake.NewClientset(
+		newTLSSecret("namespace", "first", annotation, []byte("old-cert"), []byte("old-key")),
+		newTLSSecret("namespace", "second", annotation, []byte("old-cert"), []byte("old-key")),
+	)
+	action := &Action{kubeClient: clientset}
 
-	updater := MakeKubernetesReplaceCertificate(&k8sCertsUpdateCmd{})
-	updater.certDXDaemon = daemon
-	updater.kubeClient = fake.NewSimpleClientset(&first, &second)
-	if registered := updater.registerWatchAndHandlers(context.Background(), []corev1.Secret{first, second}); registered != 2 {
-		t.Fatalf("registered secrets = %d, want 2", registered)
+	cert := certificate("newtest.campuses.cn", "*.newtest.campuses.cn")
+	if err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), cert); err != nil {
+		t.Fatalf("Update: %v", err)
 	}
 
-	go daemon.HttpMain()
-	defer daemon.Stop()
-
-	done := make(chan struct{})
-	go func() {
-		updater.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for both secrets to update")
-	}
-
-	if got := requests.Load(); got != 1 {
-		t.Fatalf("certificate requests = %d, want 1", got)
-	}
 	for _, name := range []string{"first", "second"} {
-		secret, err := updater.kubeClient.CoreV1().Secrets("namespace").Get(context.Background(), name, metav1.GetOptions{})
+		secret, err := clientset.CoreV1().Secrets("namespace").Get(context.Background(), name, metav1.GetOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,6 +71,127 @@ func TestDuplicateDomainSecretsShareWatchAndAllUpdate(t *testing.T) {
 		}
 		if got := string(secret.Data[corev1.TLSPrivateKeyKey]); got != "new-key" {
 			t.Errorf("secret %s tls.key = %q, want %q", name, got, "new-key")
+		}
+	}
+}
+
+// A secret annotated with a subdomain is covered by the certificate's parent
+// domain. Note that a literal "*.example.com" entry only matches itself.
+func TestUpdateMatchesSecretsCoveredByParentDomain(t *testing.T) {
+	clientset := fake.NewClientset(
+		newTLSSecret("namespace", "covered", "foo.example.com", []byte("old"), []byte("old")),
+	)
+	action := &Action{kubeClient: clientset}
+
+	if err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), certificate("example.com")); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	secret, err := clientset.CoreV1().Secrets("namespace").Get(context.Background(), "covered", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(secret.Data[corev1.TLSCertKey]); got != "new-cert" {
+		t.Fatalf("tls.crt = %q, want new-cert", got)
+	}
+}
+
+func TestUpdateSkipsSecretsOutsideTheCertificate(t *testing.T) {
+	clientset := fake.NewClientset(
+		newTLSSecret("namespace", "other", "other.example.org", []byte("old"), []byte("old")),
+	)
+	action := &Action{kubeClient: clientset}
+
+	if err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), certificate("example.com")); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if got := updateCount(clientset); got != 0 {
+		t.Fatalf("update calls = %d, want 0", got)
+	}
+}
+
+func TestUpdateIgnoresSecretsWithoutAnnotationOrWrongType(t *testing.T) {
+	noAnnotation := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "namespace", Name: "bare"},
+		Type:       corev1.SecretTypeTLS,
+	}
+	opaque := newTLSSecret("namespace", "opaque", "foo.example.com", []byte("old"), []byte("old"))
+	opaque.Type = corev1.SecretTypeOpaque
+
+	clientset := fake.NewClientset(noAnnotation, opaque)
+	action := &Action{kubeClient: clientset}
+
+	if err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), certificate("example.com")); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if got := updateCount(clientset); got != 0 {
+		t.Fatalf("update calls = %d, want 0", got)
+	}
+}
+
+// Rewriting identical material would restart every consuming pod.
+func TestUpdateIsNoOpWhenSecretAlreadyCurrent(t *testing.T) {
+	clientset := fake.NewClientset(
+		newTLSSecret("namespace", "current", "foo.example.com", []byte("new-cert"), []byte("new-key")),
+	)
+	action := &Action{kubeClient: clientset}
+
+	if err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), certificate("example.com")); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if got := updateCount(clientset); got != 0 {
+		t.Fatalf("update calls = %d, want 0", got)
+	}
+}
+
+func TestUpdateRejectsEmptyMaterial(t *testing.T) {
+	action := &Action{kubeClient: fake.NewClientset()}
+	if err := action.Update(context.Background(), nil, []byte("key"), certificate("example.com")); err == nil {
+		t.Fatal("expected error on empty fullchain")
+	}
+	if err := action.Update(context.Background(), []byte("cert"), nil, certificate("example.com")); err == nil {
+		t.Fatal("expected error on empty key")
+	}
+}
+
+func TestUpdateReportsPerSecretErrors(t *testing.T) {
+	clientset := fake.NewClientset(
+		newTLSSecret("namespace", "broken", "foo.example.com", []byte("old"), []byte("old")),
+	)
+	clientset.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errBoom
+	})
+	action := &Action{kubeClient: clientset}
+
+	err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), certificate("example.com"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("expected the underlying error to be wrapped, got %v", err)
+	}
+}
+
+func TestParseDomainsAnnotation(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"a.example.com, B.example.com ,a.example.com", []string{"a.example.com", "b.example.com"}},
+		{"  ", nil},
+		{"", nil},
+		{",,", nil},
+	}
+	for _, tc := range cases {
+		got := parseDomainsAnnotation(tc.in)
+		if len(got) == 0 && len(tc.want) == 0 {
+			continue
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("parseDomainsAnnotation(%q) = %v, want %v", tc.in, got, tc.want)
 		}
 	}
 }
