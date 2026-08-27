@@ -133,6 +133,7 @@ type GoogleCloudCredential map[string]string
 type DnsProvider struct {
 	Type                                  string `toml:"type" json:"type,omitempty"`
 	DisableCompletePropagationRequirement bool   `toml:"disableCompletePropagationRequirement" json:"disable_complete_propagation_requirement,omitempty"`
+	ConservativeDNSCheck                  bool   `toml:"conservativeDnsCheck" json:"conservative_dns_check,omitempty"`
 
 	// DNS propagation check settings
 	Nameservers []string `toml:"nameservers" json:"nameservers,omitempty"`

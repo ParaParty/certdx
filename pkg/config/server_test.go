@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestACMEConfigValidateEmptyAllowedDomains(t *testing.T) {
@@ -158,6 +160,23 @@ func TestDnsProviderValidateDNSTimeout(t *testing.T) {
 		if !strings.Contains(err.Error(), "dnsTimeout") {
 			t.Fatalf("error wording drifted: %v", err)
 		}
+	}
+}
+
+func TestDnsProviderConservativeDNSCheckTOMLKey(t *testing.T) {
+	var c ServerConfig
+	err := toml.Unmarshal([]byte(`
+[DnsProvider]
+conservativeDnsCheck = true
+`), &c)
+	if err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if c.DnsProvider == nil {
+		t.Fatal("DnsProvider was not decoded")
+	}
+	if !c.DnsProvider.ConservativeDNSCheck {
+		t.Fatal("conservativeDnsCheck did not enable ConservativeDNSCheck")
 	}
 }
 

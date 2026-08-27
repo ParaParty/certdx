@@ -11,6 +11,7 @@ allowedDomains = [
 [DnsProvider]
 # cloudflare auth token and zone token
 type = "cloudflare"
+conservativeDnsCheck = false
 authToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
 zoneToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
 

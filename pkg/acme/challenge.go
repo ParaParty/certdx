@@ -21,8 +21,9 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 	switch typ {
 	case config.ChallengeTypeDns01:
 		opt := make([]dns01.ChallengeOption, 0)
+		dnsTimeout := defaultConservativeDNSTimeout
 
-		if p.DnsProvider.DisableCompletePropagationRequirement {
+		if p.DnsProvider.DisableCompletePropagationRequirement && !p.DnsProvider.ConservativeDNSCheck {
 			opt = append(opt, dns01.DisableAuthoritativeNssPropagationRequirement())
 		}
 
@@ -37,7 +38,14 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 			if err != nil {
 				return fmt.Errorf("invalid dnsTimeout %q: %w", p.DnsProvider.DNSTimeout, err)
 			}
+			dnsTimeout = timeout
+			clg = overridePropagationTimeout(clg, timeout)
 			opt = append(opt, dns01.AddDNSTimeout(timeout))
+		}
+
+		if p.DnsProvider.ConservativeDNSCheck {
+			checker := newConservativeChecker(p.DnsProvider.Nameservers, dnsTimeout)
+			opt = append(opt, dns01.WrapPreCheck(checker.Wrap))
 		}
 
 		if err := instance.Client.Challenge.SetDNS01Provider(clg, opt...); err != nil {
@@ -52,6 +60,33 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 	}
 
 	return nil
+}
+
+type propagationTimeoutProvider struct {
+	challenge.Provider
+	timeout  time.Duration
+	interval time.Duration
+}
+
+func (p *propagationTimeoutProvider) Timeout() (time.Duration, time.Duration) {
+	return p.timeout, p.interval
+}
+
+// overridePropagationTimeout keeps the provider's polling cadence while
+// allowing the configured DNS timeout to extend lego's overall propagation
+// wait. AddDNSTimeout separately applies the same value to individual DNS
+// exchanges.
+func overridePropagationTimeout(provider challenge.Provider, timeout time.Duration) challenge.Provider {
+	interval := dns01.DefaultPollingInterval
+	if timedProvider, ok := provider.(challenge.ProviderTimeout); ok {
+		_, interval = timedProvider.Timeout()
+	}
+
+	return &propagationTimeoutProvider{
+		Provider: provider,
+		timeout:  timeout,
+		interval: interval,
+	}
 }
 
 func getChallenger(legoCfg *lego.Config, p *config.ServerConfig) (string, challenge.Provider, error) {
