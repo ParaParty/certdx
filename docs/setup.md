@@ -64,6 +64,12 @@ Required for wildcard certificates. Configure `[DnsProvider]`:
   `zoneToken` (scoped tokens).
 - `tencentcloud` — `secretID` + `secretKey`.
 
+Set `conservativeDnsCheck = true` to resolve every authoritative nameserver to
+all of its IPv4 and IPv6 addresses and require the DNS-01 TXT value from each
+reachable address before lego asks the ACME server to validate the challenge.
+Addresses that do not respond to the direct DNS request are skipped; at least
+one address must respond for the check to pass.
+
 ### HTTP-01
 
 Configure `[HttpProvider]` with `type = "s3"` and the S3-compatible bucket

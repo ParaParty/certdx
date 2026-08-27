@@ -11,6 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.105.1
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0
 	github.com/go-acme/lego/v4 v4.35.2
+	github.com/miekg/dns v1.1.72
 	google.golang.org/api v0.288.0
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
@@ -46,7 +47,6 @@ require (
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.18 // indirect
 	github.com/googleapis/gax-go/v2 v2.23.0 // indirect
-	github.com/miekg/dns v1.1.72 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.135 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

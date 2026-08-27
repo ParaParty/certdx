@@ -34,10 +34,16 @@ client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/acme-u
 [DnsProvider]
 disableCompletePropagationRequirement = false
 
+# Resolve every authoritative nameserver to all of its A/AAAA addresses and
+# require the expected TXT record on each reachable address. Unreachable
+# addresses are skipped, but at least one address must respond.
+conservativeDnsCheck = false
+
 # DNS propagation check settings
 # Use public DNS servers to check TXT record propagation
 # nameservers = ["8.8.8.8:53", "1.1.1.1:53"]
-# dnsTimeout = "30s"
+# Timeout for each DNS request and the overall propagation wait.
+# dnsTimeout = "120s"
 
 # cloudflare global api key and email
 type = "cloudflare"
