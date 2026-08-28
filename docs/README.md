@@ -13,6 +13,7 @@ Reference:
 - [Client](client.md) — every option in `client_config.toml`.
 - [Caddy plugin](caddytls.md) — Caddyfile syntax.
 - [Tools](tools.md) — `certdx_tools` subcommands.
+- [Docker](docker.md) — the container image and how to run it.
 
 Upgrading:
 

@@ -182,11 +182,30 @@ are commented examples in `config/client_config_full.toml` now.
 
 ## 5. Container image
 
-The published image entrypoint changes from `certdx_tools` to
-`certdx_client`. Drop the sub-command argument:
+The tools-only `paraparty/certdx-tools` image is replaced by the unified
+`paraparty/certdx` image. The old image contained only `certdx_tools`
+and used it as the entrypoint. The new image contains `certdx_server`,
+`certdx_client` and `certdx_tools` in `/app`, symlinked into
+`/usr/local/bin`, and has no entrypoint. Every invocation must therefore
+name the binary, including existing tools commands:
 
 ```diff
+-docker run --rm paraparty/certdx-tools:<tag> show-certs
++docker run --rm paraparty/certdx:<tag> certdx_tools show-certs
+```
+
+Kubernetes workloads moving from the removed updater command to the
+long-running client must set `command` explicitly:
+
+```diff
++image: paraparty/certdx:<tag>
++command:
++  - certdx_client
  args:
 -  - kubernetes-certificate-updater
    - --conf=/etc/certdx/client.toml
 ```
+
+Because the binaries now live in `/app`, they resolve paths in
+Local install mode; the image pins `CERTDX_DATA_DIR=/data`, so mTLS
+material and state both live under `/data`. See [docker.md](docker.md).

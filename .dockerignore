@@ -1,0 +1,30 @@
+# .git is intentionally NOT ignored: build.py runs `git describe` in the
+# builder stage, and a partial worktree would always report -dirty.
+
+# Build outputs
+release/certdx_*
+release/certdx-*
+release/caddy_certdx_*
+release/*.deb
+release/*.rpm
+release/.nfpm-*.yaml
+/exec/server/server
+/exec/client/client
+/exec/tools/tools
+*.exe
+*.test
+
+# Local state and configs
+/*.toml
+private
+/mtls
+cache.json
+*Caddyfile
+*caddy
+*.service.toml
+*_config.service.toml
+
+# Editor / VCS noise
+.idea
+.github
+.vscode

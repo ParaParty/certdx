@@ -255,6 +255,11 @@ In either mode you can move the state root with `--data-dir <path>` (or
 isolate state per instance. It does not affect where the config file is
 read from — that is controlled by `--conf`.
 
+### Container image
+
+The `paraparty/certdx` image ships all three binaries and no entrypoint,
+so each container names the binary it runs. See [docker.md](docker.md).
+
 ## 5. Client-side install
 
 ### Standalone client
