@@ -135,8 +135,8 @@ module explicitly (it does not honor `go.work`):
       --with pkg.para.party/certdx/exec/caddytls=./exec/caddytls \
       --replace pkg.para.party/certdx=./
 
-`release/build.py` does this for releases. See `docs/caddytls.md` for
-the full xcaddy invocation.
+`release/build.py` does this for its `caddy` and `release` targets. See
+`docs/caddytls.md` for the full xcaddy invocation.
 
 ## Wire contracts (must-not-break)
 

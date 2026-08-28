@@ -2,14 +2,23 @@
 
 set -euo pipefail
 
+dev=0
+for arg in "$@"; do
+    case "$arg" in
+        --dev) dev=1 ;;
+        *) printf 'Unknown argument: %s\nUsage: %s [--dev]\n' "$arg" "$0" >&2; exit 2 ;;
+    esac
+done
+
 repo_root="$(git rev-parse --show-toplevel)"
 git_commit="$(git -C "$repo_root" rev-parse --short=8 HEAD)"
-build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-image="paraparty/certdx-client:${git_commit}"
+image="paraparty/certdx:${git_commit}"
+if [[ $dev -eq 1 ]]; then
+    image="${image}-dev"
+fi
 
 docker build \
-    --build-arg "VERSION=${git_commit}" \
-    --build-arg "BUILD_DATE=${build_date}" \
+    --build-arg "DEV=${dev}" \
     --tag "$image" \
     "$repo_root"
 

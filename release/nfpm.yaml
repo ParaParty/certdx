@@ -6,8 +6,8 @@
 #
 #   VERSION   debian/rpm-policy-friendly version string (no leading 'v')
 #   ARCH      nfpm arch token (amd64, arm64, arm7)
-#   GOARCH    Go GOARCH value (amd64, arm64, arm) - used to locate the
-#             staging directory release/certdx_linux_GOARCH/
+#   STAGING   repo-relative staging directory holding the built binaries,
+#             e.g. release/certdx_linux_amd64
 #
 # nfpm is invoked with cwd=repo_root, so all source paths below are
 # relative to the repository root.
@@ -31,21 +31,21 @@ description: |
   /var/lib/certdx).
 
 contents:
-  - src: release/certdx_linux_${GOARCH}/certdx_server
+  - src: ${STAGING}/certdx_server
     dst: /usr/bin/certdx_server
     file_info:
       mode: 0755
       owner: root
       group: root
 
-  - src: release/certdx_linux_${GOARCH}/certdx_client
+  - src: ${STAGING}/certdx_client
     dst: /usr/bin/certdx_client
     file_info:
       mode: 0755
       owner: root
       group: root
 
-  - src: release/certdx_linux_${GOARCH}/certdx_tools
+  - src: ${STAGING}/certdx_tools
     dst: /usr/bin/certdx_tools
     file_info:
       mode: 0755

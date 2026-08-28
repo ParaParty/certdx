@@ -38,7 +38,7 @@ GOWORK=off xcaddy build \
 inside the repo (which sits in the `go.work` workspace). Without it,
 Go enters workspace mode and bypasses the `--replace` flags, leading
 to "cannot find module" failures or silent fallback to the registry
-version. `release/build.py --dev` sets this for you.
+version. `release/build.py caddy --dev` sets this for you.
 
 To verify the resulting binary actually picked up your local code,
 inspect its embedded build metadata:

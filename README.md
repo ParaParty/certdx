@@ -87,5 +87,6 @@ Full walk-through: [docs/quickstart.md](docs/quickstart.md).
 | [Client reference](docs/client.md) | Every option in `client_config.toml`. |
 | [Caddy plugin](docs/caddytls.md) | Caddyfile syntax. |
 | [Tools](docs/tools.md) | `certdx_tools` subcommands (cache inspection, mTLS material, ACME accounts). |
+| [Docker](docs/docker.md) | The container image: contents, building, running server/client/tools. |
 
 External: [DeepWiki](https://deepwiki.com/ParaParty/certdx).
