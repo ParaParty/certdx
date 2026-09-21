@@ -40,6 +40,13 @@ Go enters workspace mode and bypasses the `--replace` flags, leading
 to "cannot find module" failures or silent fallback to the registry
 version. `release/build.py caddy --dev` sets this for you.
 
+Add `--archive` to include `config/Caddyfile_full` and `LICENSE` in a
+platform-specific `.tar.gz` or `.zip` release archive:
+
+```sh
+python3 release/build.py caddy linux amd64 --dev --archive
+```
+
 To verify the resulting binary actually picked up your local code,
 inspect its embedded build metadata:
 

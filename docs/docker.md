@@ -31,20 +31,29 @@ docker run --rm paraparty/certdx:<tag> certdx_client --version
 ## Building the image
 
 ```sh
-release/build-docker.sh          # paraparty/certdx:<short-commit>
-release/build-docker.sh --dev    # paraparty/certdx:<short-commit>-dev
+python3 release/build.py docker
+python3 release/build.py docker --dev
 ```
 
-On Windows use `release/build-docker.ps1` with the optional `-Dev`
-switch.
+The build script cross-compiles the three static Linux executables on the host,
+then uses Docker when available (or Podman as a fallback) to copy them into the
+runtime image. Go and the container engine must therefore both be installed on
+the build host; the Dockerfile has no builder stage.
 
-The builder stage runs `release/build.py docker`, the same script that
-produces release archives, so the container binaries carry the same
-version stamp as a release build. That stamp comes from `git describe`
-executed inside the builder, which is why the whole repository —
-including `.git` — is part of the build context. Build from a clean
-checkout: uncommitted changes surface as a `-dirty` suffix in
-`--version`.
+The image tag is `paraparty/certdx:<version>`, where `<version>` is the exact
+`git describe` value embedded in the executables. Development builds append
+`-dev` to that tag.
+
+Container images target Linux and support `amd64`, `arm64`, and ARM v7. The host
+architecture is used by default; pass a target pair to cross-build:
+
+```sh
+python3 release/build.py docker linux arm64
+```
+
+The build script derives the version from `git describe` and embeds it while
+building the host binaries, so the image tag and `--version` output stay aligned.
+Build from a clean checkout: uncommitted changes surface as a `-dirty` suffix.
 
 `--dev` keeps debug symbols and disables optimisation and inlining, so
 the binaries can be attached to with delve. Everything else about the
