@@ -6,6 +6,7 @@ replace pkg.para.party/certdx => ../..
 
 require (
 	github.com/spf13/pflag v1.0.10
+	golang.org/x/term v0.46.0
 	pkg.para.party/certdx v0.7.0
 )
 
@@ -15,6 +16,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.1 // indirect
 	cloud.google.com/go/security v1.27.0 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.47.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.33.5 // indirect
