@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	cloud.google.com/go/security v1.27.0
 	github.com/BurntSushi/toml v1.6.0
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/aws/aws-sdk-go-v2 v1.47.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.5

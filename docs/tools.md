@@ -26,6 +26,7 @@ Available commands:
 | [`make-ca`](#make-ca) | Create the mTLS CA. |
 | [`make-server`](#make-server) | Issue an mTLS server certificate. |
 | [`make-client`](#make-client) | Issue an mTLS client certificate. |
+| [`update`](#update) | Update an installed deb or RPM package from GitHub. |
 
 The mTLS commands write into an `mtls/` directory under the resolved
 config root. The root is picked in this order:
@@ -150,4 +151,50 @@ certdx_tools make-client --name caddy-edge -d edge.example.com
 ```
 
 Distribute the resulting `<name>.pem` bundle to the client.
+
+## `update`
+
+Updates an official Linux deb or RPM installation to the latest stable GitHub
+release. The command verifies that the running `certdx_tools` executable is
+owned by the installed `certdx` package, selects the package for the installed
+architecture, and verifies GitHub's published SHA-256 digest before installing
+it. Tarball, container, macOS, and Windows installations are not supported.
+
+```sh
+certdx_tools update
+```
+
+The command shows the installed version, latest version, and selected package,
+then asks `Continue? [y/N]` before downloading or changing the system. A
+non-root invocation uses `sudo`; use `-y` / `--yes` to approve an unattended
+update. Without `--yes`, non-interactive invocations fail rather than proceeding
+silently.
+
+The deb/RPM upgrade scripts stop and disable the certdx services while replacing
+the binaries. The update command records the enabled and running state of
+`certdx-server.service` and `certdx-client.service`, then restores that state
+after a successful or failed package installation.
+
+| Flag | Description |
+| --- | --- |
+| `--check` | Show the installed and latest versions without prompting, downloading, or installing. |
+| `--force` | Reinstall or downgrade to GitHub's latest stable release. Confirmation is still required. |
+| `-y`, `--yes` | Approve installation without an interactive confirmation. |
+| `-h`, `--help` | Print help. |
+
+Examples:
+
+```sh
+# Check without making changes.
+certdx_tools update --check
+
+# Update interactively.
+certdx_tools update
+
+# Update from an unattended deployment script.
+certdx_tools update --yes
+
+# Reinstall the latest stable package, still with confirmation.
+certdx_tools update --force
+```
 

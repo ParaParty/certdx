@@ -39,6 +39,7 @@ var commands = map[string]command{
 	"make-ca":        {tasks.MakeCA, "Generate mTLS CA certificate and key", nil},
 	"make-server":    {tasks.MakeServer, "Generate mTLS server certificate and key", nil},
 	"make-client":    {tasks.MakeClient, "Generate mTLS client certificate and key", nil},
+	"update":         {tasks.Update, "Update a deb/RPM installation from GitHub", nil},
 }
 
 // lookup maps every name (canonical + aliases) to the canonical command
@@ -60,6 +61,7 @@ var groups = []commandGroup{
 	{"Certificate Inspection", []string{"show-certs"}},
 	{"ACME", []string{"google-account"}},
 	{"mTLS Setup", []string{"make-ca", "make-server", "make-client"}},
+	{"Maintenance", []string{"update"}},
 }
 
 func main() {
