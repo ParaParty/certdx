@@ -13,6 +13,7 @@ func MakeCA(name string, args []string) error {
 	var (
 		org        = fs.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		commonName = fs.StringP("common-name", "c", "CertDX Private Certificate Authority", "Subject Common Name")
+		validFor   = registerValidForFlag(fs)
 		dataDir    = registerDataDirFlag(fs)
 		help       = fs.BoolP("help", "h", false, "Print help")
 	)
@@ -24,9 +25,14 @@ func MakeCA(name string, args []string) error {
 		return nil
 	}
 
+	opts, err := validForOptions(fs, *validFor)
+	if err != nil {
+		return err
+	}
+
 	applyDataDir(*dataDir)
 
-	if err := tools.MakeCA(*org, *commonName); err != nil {
+	if err := tools.MakeCA(*org, *commonName, opts...); err != nil {
 		return fmt.Errorf("create CA: %w", err)
 	}
 	return nil

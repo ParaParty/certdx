@@ -47,7 +47,15 @@ The `make-*` commands print the path of each file they wrote rather
 than dumping the PEM blocks to stdout.
 
 `make-client` and `make-server` reserve the name `ca` (case-insensitive,
-trimmed) so a typo cannot silently overwrite the CA bundle.
+trimmed) so a typo cannot silently overwrite the CA bundle. The name must
+also be a plain file name: values containing `/`, `\`, or equal to `.` /
+`..` are rejected.
+
+Certificates from `make-ca`, `make-server` and `make-client` are valid
+until 2100-01-01 by default. Pass `--valid-for <duration>` (Go duration
+syntax, e.g. `17520h` for two years) to issue a shorter-lived certificate
+instead; the period counts from the moment of issuance and must be
+positive.
 
 ---
 
@@ -105,6 +113,7 @@ bundle with `0600`.
 | --- | --- | --- |
 | `-o`, `--organization` | `CertDX Private` | Subject `O`. |
 | `-c`, `--common-name` | `CertDX Private Certificate Authority` | Subject `CN`. |
+| `--valid-for` | *(until 2100-01-01)* | Optional validity period, e.g. `87600h`. |
 | `--data-dir` | *(install-mode default)* | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 ## `make-server`
@@ -118,6 +127,7 @@ server key + CA cert) signed by the CA. Run after `make-ca`.
 | `-d`, `--dns-names` | yes | Comma-separated SANs. Must include every name a client will dial. |
 | `-o`, `--organization` | | Subject `O`. Default `CertDX Private`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Secret Discovery Service`. |
+| `--valid-for` | | Validity period, e.g. `17520h`. Default: until 2100-01-01. |
 | `--data-dir` | | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 Example:
@@ -141,6 +151,7 @@ silently overwrite the CA bundle.
 | `-d`, `--dns-names` | | Optional SANs. |
 | `-o`, `--organization` | | Subject `O`. |
 | `-c`, `--common-name` | | Subject `CN`. Default `CertDX Client: <name>`. |
+| `--valid-for` | | Validity period, e.g. `17520h`. Default: until 2100-01-01. |
 | `--data-dir` | | Parent directory of `mtls/`. Env: `CERTDX_DATA_DIR`. |
 
 Example:
