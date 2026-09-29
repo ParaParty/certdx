@@ -204,6 +204,15 @@ killed, so a command that hangs cannot hold back later updates.
   both required.
 - `certificate <name> has no update action configured` — add at least one
   `[[Certificate.UpdateAction]]`.
+- `certificate <a> duplicates the domain set of certificate <b>` — two
+  certificates cover the same domains (compared case-insensitively and in
+  any order). Merge them into one `[[Certificate]]` with all of their
+  update actions.
+- `duplicate certificate name: <name>` — in gRPC mode the name is the SDS
+  resource name, so it must be unique.
+- `certificate <a>: file update action writes <path>, which certificate <b>
+  also writes` — two file actions share a `savePath` and certificate
+  `name`; give one of them a different `savePath` or `name`.
 - `update action #<n>: no type set` / `unsupported type: <x>` — every
   action needs a known `type`.
 - `<action> update action: no such profile: <name>` — the `profile` does
