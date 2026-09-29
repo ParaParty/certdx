@@ -57,8 +57,17 @@ func (certdx *CertDXTls) Validate() error {
 	return nil
 }
 
-func (certdx CertDXTls) GetCertificate(ctx context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return certdx.certDXApp.GetCertificate(ctx, certdx.certHash)
+// GetCertificate serves the cert pack bound to this manager's cert-id.
+// The ServerName is deliberately not checked against the pack's domains:
+// Caddy only consults this manager for names matching the automation
+// policy it is configured on, so a mismatch is a configuration error, and
+// a peer rejects a certificate that does not cover its name anyway.
+func (certdx *CertDXTls) GetCertificate(ctx context.Context, _ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	cert, err := certdx.certDXApp.GetCertificate(ctx, certdx.certHash)
+	if err != nil {
+		return nil, fmt.Errorf("certdx certificate %q: %w", certdx.CertId, err)
+	}
+	return cert, nil
 }
 
 // UnmarshalCaddyfile deserializes Caddyfile tokens.
