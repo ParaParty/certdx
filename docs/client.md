@@ -98,10 +98,27 @@ stops the others or the daemon.
 #### `type = "tencentCloud"`
 
 Re-points Tencent Cloud resources at the renewed certificate. On each
-update it looks up the newest uploaded certificate whose SANs equal this
-certificate's `domains` and calls `UpdateCertificateInstance` on it. If
-the account holds no matching certificate, the action logs a warning and
-does nothing — it never uploads a certificate that is not already bound.
+update it looks up the uploaded certificates whose SANs equal this
+certificate's `domains`, picks the newest one that expires before the
+renewed certificate (by comparing `CertEndTime` with the renewed
+certificate's real expiry), and calls `UpdateCertificateInstance` on it.
+If the account holds no matching certificate, the action logs a warning
+and does nothing — it never uploads a certificate that is not already
+bound. Uploaded certificates that expire after the renewed one are never
+replaced.
+
+The action then polls the deploy record
+(`DescribeHostUpdateRecordDetail`) until every resource has been
+re-bound, for up to five minutes, and reports failed resources as an
+error. Grant the profile's credentials `ssl:DescribeHostUpdateRecordDetail`
+so the update is confirmed; without it the action logs a warning and
+assumes the deploy succeeded. If Tencent Cloud already stores the renewed
+certificate (an earlier delivery uploaded it but did not finish), the
+resources are re-bound to the stored copy instead.
+
+Throttling and other transient API errors are retried with backoff. A
+deploy that failed or could not be confirmed is reported once and not
+retried: replaying the upload cannot change the outcome.
 
 | Key | Type | Notes |
 | --- | --- | --- |
