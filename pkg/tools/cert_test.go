@@ -371,6 +371,50 @@ func TestWithLifetimeRejectsNonPositive(t *testing.T) {
 	}
 }
 
+func TestLeafDefaultExpiryCappedAtCA(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn", WithLifetime(48*time.Hour)); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+	if err := MakeServerCert("server", "org", "cn", []string{"localhost"}); err != nil {
+		t.Fatalf("MakeServerCert: %v", err)
+	}
+
+	caPath, _ := paths.MtlsCAPath()
+	srvPath, _ := paths.MtlsBundlePath("server")
+	ca := firstCertInBundle(t, caPath)
+	srv := firstCertInBundle(t, srvPath)
+	if !srv.NotAfter.Equal(ca.NotAfter) {
+		t.Errorf("leaf NotAfter = %s, want capped at CA NotAfter %s", srv.NotAfter, ca.NotAfter)
+	}
+}
+
+func TestLeafExplicitLifetimeBeyondCARejected(t *testing.T) {
+	withDataDir(t)
+
+	if err := MakeCA("org", "cn", WithLifetime(48*time.Hour)); err != nil {
+		t.Fatalf("MakeCA: %v", err)
+	}
+	before := readCounter(t)
+
+	if err := MakeClientCert("client", "org", "cn", nil, WithLifetime(72*time.Hour)); err == nil {
+		t.Fatal("MakeClientCert with a lifetime beyond the CA: want error, got nil")
+	}
+	cliPath, _ := paths.MtlsBundlePath("client")
+	if paths.FileExists(cliPath) {
+		t.Fatal("rejected MakeClientCert still wrote a bundle")
+	}
+	if got := readCounter(t); got.Cmp(before) != 0 {
+		t.Errorf("counter = %s after rejected issuance, want unchanged %s", got, before)
+	}
+
+	// A lifetime inside the CA's validity is still accepted.
+	if err := MakeClientCert("client", "org", "cn", nil, WithLifetime(24*time.Hour)); err != nil {
+		t.Fatalf("MakeClientCert within CA validity: %v", err)
+	}
+}
+
 // A lifetime shorter than the elapsed part of the current hour must still
 // yield a certificate valid after issuance: NotAfter counts from the
 // issuance time, not from the backdated NotBefore.
