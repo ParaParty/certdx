@@ -8,6 +8,9 @@ const (
 const (
 	DnsProviderTypeCloudflare   string = "cloudflare"
 	DnsProviderTypeTencentCloud string = "tencentcloud"
+	// DnsProviderTypeTencent is a short alias of DnsProviderTypeTencentCloud,
+	// kept because the shipped sample config spells it that way.
+	DnsProviderTypeTencent string = "tencent"
 
 	HttpProviderTypeS3    string = "s3"
 	HttpProviderTypeLocal string = "local"
