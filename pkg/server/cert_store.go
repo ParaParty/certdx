@@ -10,6 +10,7 @@ import (
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/paths"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 type certStoreEntry struct {
@@ -40,8 +41,9 @@ func NewCertStore() (CertStore, error) {
 
 // Load reads and unmarshals the persisted certificate store. It returns
 // os.ErrNotExist when the backing file hasn't been created yet.
-// Expired certificates are discarded and domain keys are re-generated
-// so that entries written by a previous key algorithm are migrated.
+// Expired certificates are discarded, and domains are canonicalized and
+// their keys re-generated so that entries written by a previous key
+// algorithm or with non-canonical domains are migrated.
 func (s *CertStore) Load() error {
 	if !paths.FileExists(s.path) {
 		return os.ErrNotExist
@@ -58,23 +60,37 @@ func (s *CertStore) Load() error {
 	}
 
 	for _, entry := range raw {
+		if entry == nil {
+			continue
+		}
 		if !entry.Cert.IsValid() {
 			logging.Info("Discarding expired cert for domains: %v", entry.Domains)
 			continue
 		}
-		s.entries[domain.AsKey(entry.Domains)] = entry
+		// Stores written before domains were canonicalized at the request
+		// boundary may hold them in any case/order; the cache only ever
+		// holds the canonical form.
+		domains := domain.Canonical(entry.Domains)
+		if len(domains) == 0 {
+			logging.Warn("Discarding cached cert with no domains")
+			continue
+		}
+		entry.Domains = domains
+		s.entries[domain.AsKey(domains)] = entry
 	}
 
 	return nil
 }
 
+// save persists the whole store atomically, so a crash mid-write leaves the
+// previous cache.json intact instead of an empty or truncated file.
 func (s *CertStore) save() error {
 	jsonBytes, err := json.Marshal(s.entries)
 	if err != nil {
 		return fmt.Errorf("marshal cert store: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, jsonBytes, 0o600); err != nil {
+	if err := utils.WriteFileAtomic(s.path, jsonBytes, 0o600); err != nil {
 		return fmt.Errorf("write cert store: %w", err)
 	}
 

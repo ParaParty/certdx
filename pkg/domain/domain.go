@@ -22,10 +22,10 @@ var ErrNotAllowed = errors.New("domain not allowed")
 // to use as a map key for cert-cache lookups.
 type Key uint64
 
-// AsKey hashes a slice of domain names into a Key. The input is canonicalized
-// before hashing, so case, trailing root dots, duplicates, and input order do
-// not affect the result.
-func AsKey(domains []string) Key {
+// Canonical returns domains in canonical form: lower-cased, trailing root dot
+// trimmed, empty names dropped, de-duplicated and sorted. Two slices naming
+// the same domain set canonicalize equal. The input slice is not modified.
+func Canonical(domains []string) []string {
 	canon := make([]string, 0, len(domains))
 	seen := make(map[string]struct{}, len(domains))
 	for _, d := range domains {
@@ -40,9 +40,15 @@ func AsKey(domains []string) Key {
 		canon = append(canon, d)
 	}
 	sort.Strings(canon)
+	return canon
+}
 
+// AsKey hashes a slice of domain names into a Key. The input is canonicalized
+// with Canonical before hashing, so case, trailing root dots, duplicates, and
+// input order do not affect the result.
+func AsKey(domains []string) Key {
 	h := fnv.New64a()
-	h.Write([]byte(strings.Join(canon, "\x00")))
+	h.Write([]byte(strings.Join(Canonical(domains), "\x00")))
 	return Key(h.Sum64())
 }
 

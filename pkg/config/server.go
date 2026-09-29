@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"pkg.para.party/certdx/pkg/acme/acmeproviders"
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/paths"
 )
 
@@ -229,6 +230,8 @@ func (c *HttpServerConfig) Validate() error {
 		c.APIPath = fmt.Sprintf("/%s", c.APIPath)
 	}
 
+	// The server's cert cache only ever holds canonical domain sets.
+	c.Names = domain.Canonical(c.Names)
 	if c.Secure && len(c.Names) == 0 {
 		return fmt.Errorf("secure http server with no name")
 	}

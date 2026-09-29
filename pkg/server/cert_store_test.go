@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -76,6 +77,42 @@ func TestCertStoreLoadValid(t *testing.T) {
 	}
 }
 
+// Entries persisted with non-canonical domains (older stores, hand edits)
+// come back canonical and keyed by their canonical set; entries with no
+// usable domain are dropped.
+func TestCertStoreLoadCanonicalizesDomains(t *testing.T) {
+	cs := makeTempCertStore(t)
+
+	valid := CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)}
+	raw := map[string]*certStoreEntry{
+		"1": {Domains: []string{"WWW.Example.COM.", "example.com", "www.example.com"}, Cert: valid},
+		"2": {Domains: []string{"", "."}, Cert: valid},
+		"3": nil,
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(cs.path, b, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := cs.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cs.entries) != 1 {
+		t.Fatalf("expected exactly the one usable entry, got %d", len(cs.entries))
+	}
+	want := []string{"example.com", "www.example.com"}
+	loaded, ok := cs.entries[domain.AsKey(want)]
+	if !ok {
+		t.Fatal("entry not keyed by its canonical domain set")
+	}
+	if !slices.Equal(loaded.Domains, want) {
+		t.Fatalf("domains: got %v want %v", loaded.Domains, want)
+	}
+}
+
 func TestCertStoreSaveAndLoad(t *testing.T) {
 	cs := makeTempCertStore(t)
 
@@ -117,6 +154,51 @@ func TestCertStoreSaveAndLoad(t *testing.T) {
 	}
 	if string(loaded.Cert.FullChain) != "fc" || string(loaded.Cert.Key) != "k" {
 		t.Fatalf("cert data mismatch: fc=%q k=%q", loaded.Cert.FullChain, loaded.Cert.Key)
+	}
+}
+
+// save must go through a temp file + rename so a crash mid-write can't leave
+// cache.json truncated, and must not leave the temp file behind.
+func TestCertStoreSaveIsAtomic(t *testing.T) {
+	cs := makeTempCertStore(t)
+
+	if err := os.WriteFile(cs.path, []byte(`{"1":{"domains":["old.com"],"cert":{}}}`), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	entry := &certStoreEntry{
+		Domains: []string{"new.com"},
+		Cert:    CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)},
+	}
+	if err := cs.saveEntry(entry); err != nil {
+		t.Fatalf("saveEntry: %v", err)
+	}
+
+	files, err := os.ReadDir(filepath.Dir(cs.path))
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(files) != 1 || files[0].Name() != filepath.Base(cs.path) {
+		t.Fatalf("temp file left behind: %v", files)
+	}
+
+	var reloaded map[domain.Key]*certStoreEntry
+	b, err := os.ReadFile(cs.path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if err := json.Unmarshal(b, &reloaded); err != nil {
+		t.Fatalf("store is not valid JSON after save: %v", err)
+	}
+	if _, ok := reloaded[domain.AsKey([]string{"new.com"})]; !ok {
+		t.Fatal("saved entry missing from the store file")
+	}
+	st, err := os.Stat(cs.path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := st.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("perm: got %o want 0600", mode)
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -199,18 +200,44 @@ func TestWaitForUpdateRespectsContextCancel(t *testing.T) {
 	}
 }
 
+func mustGet(t *testing.T, cc *certCache, domains []string) *certEntry {
+	t.Helper()
+	entry, err := cc.get(domains)
+	if err != nil {
+		t.Fatalf("get(%v): %v", domains, err)
+	}
+	return entry
+}
+
 func TestCertCacheGetCreatesAndDeduplicates(t *testing.T) {
 	cc := makeCertCache()
 
-	e1 := cc.get([]string{"a.com"})
-	e2 := cc.get([]string{"a.com"})
+	e1 := mustGet(t, &cc, []string{"a.com"})
+	e2 := mustGet(t, &cc, []string{"a.com"})
 	if e1 != e2 {
 		t.Fatal("get returned different entries for the same domains")
 	}
 
-	e3 := cc.get([]string{"b.com"})
+	e3 := mustGet(t, &cc, []string{"b.com"})
 	if e1 == e3 {
 		t.Fatal("get returned the same entry for different domains")
+	}
+}
+
+func TestCertCacheRejectsEmptyDomains(t *testing.T) {
+	cc := makeCertCache()
+
+	for _, domains := range [][]string{nil, {}} {
+		entry, err := cc.get(domains)
+		if !errors.Is(err, ErrNoDomains) {
+			t.Fatalf("get(%v): err = %v, want ErrNoDomains", domains, err)
+		}
+		if entry != nil {
+			t.Fatalf("get(%v) returned an entry", domains)
+		}
+	}
+	if len(cc.entries) != 0 {
+		t.Fatalf("cache size = %d, want 0", len(cc.entries))
 	}
 }
 
