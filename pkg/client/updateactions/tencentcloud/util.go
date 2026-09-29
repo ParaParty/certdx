@@ -1,7 +1,9 @@
 package tencentcloud
 
 import (
+	"crypto/sha1"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -18,8 +20,9 @@ import (
 const txcTimeLayout = "2006-01-02 15:04:05"
 
 // txcTimeZone is the zone those zone-less timestamps are expressed in.
-// Tencent Cloud reports Beijing time (UTC+8); parsing them as UTC made them
-// compare eight hours off against a certificate's real NotAfter.
+// Tencent Cloud reports Beijing time (the SDK documents CertEndTime as
+// GMT+8); parsing them as UTC made them compare eight hours off against a
+// certificate's real NotAfter.
 var txcTimeZone = time.FixedZone("CST", 8*60*60)
 
 const (
@@ -174,25 +177,34 @@ func parseTxcTime(raw *string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// leafNotAfter returns the expiry of the first certificate in a PEM
-// fullchain, which is the leaf.
-func leafNotAfter(fullchain []byte) (time.Time, error) {
+// parseLeaf returns the first certificate in a PEM fullchain, which is the
+// leaf.
+func parseLeaf(fullchain []byte) (*x509.Certificate, error) {
 	rest := fullchain
 	for {
 		var block *pem.Block
 		block, rest = pem.Decode(rest)
 		if block == nil {
-			return time.Time{}, fmt.Errorf("no certificate in PEM data")
+			return nil, fmt.Errorf("no certificate in PEM data")
 		}
 		if block.Type != "CERTIFICATE" {
 			continue
 		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return time.Time{}, err
-		}
-		return cert.NotAfter, nil
+		return x509.ParseCertificate(block.Bytes)
 	}
+}
+
+// sha1Fingerprint returns the lowercase hex SHA-1 of cert's DER encoding,
+// the form normalizeFingerprint brings CertFingerprint into.
+func sha1Fingerprint(cert *x509.Certificate) string {
+	sum := sha1.Sum(cert.Raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// normalizeFingerprint lowercases a hex fingerprint and drops the colon or
+// space separators it may be formatted with.
+func normalizeFingerprint(fp string) string {
+	return strings.ToLower(strings.NewReplacer(":", "", " ", "").Replace(strings.TrimSpace(fp)))
 }
 
 // deployRecordListsResources reports whether a host-update record detail

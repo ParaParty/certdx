@@ -2,6 +2,7 @@ package tencentcloud
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,23 +103,41 @@ func TestParseTxcTimeUsesBeijingZone(t *testing.T) {
 	}
 }
 
-func TestLeafNotAfter(t *testing.T) {
+func TestParseLeaf(t *testing.T) {
 	notAfter := time.Date(2027, 3, 4, 5, 6, 7, 0, time.UTC)
 	fullchain := selfSignedPEM(t, notAfter)
 
 	// A second certificate (the issuer) must not be mistaken for the leaf.
 	fullchain = append(fullchain, selfSignedPEM(t, notAfter.Add(365*24*time.Hour))...)
 
-	got, err := leafNotAfter(fullchain)
+	got, err := parseLeaf(fullchain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Equal(notAfter) {
-		t.Fatalf("leafNotAfter = %s, want %s", got, notAfter)
+	if !got.NotAfter.Equal(notAfter) {
+		t.Fatalf("parseLeaf NotAfter = %s, want %s", got.NotAfter, notAfter)
 	}
 
-	if _, err := leafNotAfter([]byte("not pem")); err == nil {
+	if _, err := parseLeaf([]byte("not pem")); err == nil {
 		t.Fatal("expected an error for data without a certificate")
+	}
+}
+
+func TestNormalizeFingerprint(t *testing.T) {
+	leaf, err := parseLeaf(selfSignedPEM(t, time.Date(2027, 3, 4, 5, 6, 7, 0, time.UTC)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sha1Fingerprint(leaf)
+
+	colons := make([]string, 0, len(want)/2)
+	for i := 0; i < len(want); i += 2 {
+		colons = append(colons, strings.ToUpper(want[i:i+2]))
+	}
+	for _, spelling := range []string{want, strings.ToUpper(want), strings.Join(colons, ":"), " " + want + " "} {
+		if got := normalizeFingerprint(spelling); got != want {
+			t.Fatalf("normalizeFingerprint(%q) = %q, want %q", spelling, got, want)
+		}
 	}
 }
 
