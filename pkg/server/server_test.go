@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/pem"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -340,12 +341,27 @@ func TestRenewShortCertLifeTimeIsValidImmediately(t *testing.T) {
 	}
 }
 
+// loadPersisted reads back what the cache-file writer put on disk.
+func loadPersisted(t *testing.T, s *CertDXServer) map[domain.Key]*certStoreEntry {
+	t.Helper()
+	cs := CertStore{
+		path:    s.certStore.path,
+		entries: make(map[domain.Key]*certStoreEntry),
+	}
+	if err := cs.Load(); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("load persisted store: %v", err)
+	}
+	return cs.entries
+}
+
 // A cancelled caller ctx (subscription or HTTP request) must not cost us a
-// real issuance: the cert still reaches the cache-file writer.
+// real issuance: the cert still reaches the cache-file writer, and is on disk
+// once Stop returns.
 func TestRenewPersistsWhenCallerCtxCancelled(t *testing.T) {
 	s := newTestServer(t)
 	s.Config.ACME.CertLifeTimeDuration = 168 * time.Hour
 	s.Config.ACME.RenewTimeLeftDuration = time.Hour
+	s.startStoreWriter()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -363,13 +379,92 @@ func TestRenewPersistsWhenCallerCtxCancelled(t *testing.T) {
 		t.Fatalf("renew: obtained=%v err=%v", obtained, err)
 	}
 
-	select {
-	case fe := <-s.certStore.update:
-		if len(fe.Domains) != 1 || fe.Domains[0] != "example.com" {
-			t.Fatalf("persisted domains: %v", fe.Domains)
+	s.Stop()
+	if _, ok := loadPersisted(t, s)[domain.AsKey([]string{"example.com"})]; !ok {
+		t.Fatal("obtained cert was broadcast but never persisted")
+	}
+}
+
+// An obtain that returns after the cache-file writer has shut down (lego's
+// Obtain is not context-aware, so a renewer can outlive Stop) must not be
+// queued into a buffer nobody will ever read again.
+func TestRenewAfterStopIsNotQueued(t *testing.T) {
+	s := newTestServer(t)
+	s.Config.ACME.CertLifeTimeDuration = 168 * time.Hour
+	s.Config.ACME.RenewTimeLeftDuration = time.Hour
+	s.acme = acme.NewMockACME(48 * time.Hour)
+	s.startStoreWriter()
+	s.Stop()
+
+	entry := newCertEntry([]string{"example.com"})
+	obtained, err := s.renew(context.Background(), entry, false)
+	if err != nil || !obtained {
+		t.Fatalf("renew: obtained=%v err=%v", obtained, err)
+	}
+	if cert := entry.Cert(); !cert.IsValid() {
+		t.Fatal("cert obtained after Stop was not broadcast")
+	}
+	if n := len(s.certStore.update); n != 0 {
+		t.Fatalf("%d update(s) queued after the writer shut down", n)
+	}
+}
+
+// Handoffs racing Stop are either persisted or refused, never stranded in
+// the channel buffer.
+func TestStoreHandoffRacingStopIsNeverStranded(t *testing.T) {
+	for range 10 {
+		s := newTestServer(t)
+		s.startStoreWriter()
+
+		const senders = 10
+		var accepted atomic.Int64
+		var wg sync.WaitGroup
+		for i := range senders {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				fe := &certStoreEntry{
+					Domains: []string{fmt.Sprintf("d%d.example.com", i)},
+					Cert:    CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)},
+				}
+				if s.handOffToStore(fe) {
+					accepted.Add(1)
+				}
+			}()
 		}
-	default:
-		t.Fatal("obtained cert was broadcast but never handed to the cert store")
+		s.Stop()
+		wg.Wait()
+
+		if n := len(s.certStore.update); n != 0 {
+			t.Fatalf("%d update(s) stranded in the buffer", n)
+		}
+		if got, want := len(loadPersisted(t, s)), int(accepted.Load()); got != want {
+			t.Fatalf("persisted %d entries, want the %d accepted handoffs", got, want)
+		}
+	}
+}
+
+// A healthy renewer must not sleep past the cert's validBefore: a cert that
+// lives shorter than RenewTimeLeft/4 would otherwise sit expired for hours.
+func TestHealthyCheckIntervalBoundedByValidBefore(t *testing.T) {
+	s := newTestServer(t)
+	s.Config.ACME.RenewTimeLeftDuration = 24 * time.Hour // renewCheckInterval = 6h
+	now := time.Now()
+
+	cases := []struct {
+		name        string
+		validBefore time.Time
+		want        time.Duration
+	}{
+		{"long-lived cert", now.Add(30 * 24 * time.Hour), 6 * time.Hour},
+		{"short-lived cert", now.Add(5 * time.Minute), 5 * time.Minute},
+		{"about to lapse", now.Add(time.Second), renewCheckMinInterval},
+		{"already lapsed", now.Add(-time.Minute), renewCheckMinInterval},
+	}
+	for _, tc := range cases {
+		if got := s.healthyCheckInterval(now, tc.validBefore); got != tc.want {
+			t.Errorf("%s: interval = %s, want %s", tc.name, got, tc.want)
+		}
 	}
 }
 

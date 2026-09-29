@@ -69,6 +69,15 @@ type CertDXServer struct {
 	// issuance in flight and race the caller's own shutdown deadline. They
 	// are best-effort on shutdown and select on rootCtx between attempts.
 	wg sync.WaitGroup
+
+	// storeMu guards storeOpen, which says whether the cache-file writer
+	// still accepts handoffs. A renewer registers in storeSenders under
+	// storeMu before sending, and the writer keeps receiving until every
+	// registered sender has landed, so a handoff is either persisted or
+	// refused (and logged), never left in a buffer nobody reads.
+	storeMu      sync.Mutex
+	storeOpen    bool
+	storeSenders sync.WaitGroup
 }
 
 func MakeCertDXServer() (*CertDXServer, error) {
@@ -107,20 +116,69 @@ func (s *CertDXServer) Init() error {
 		logging.Warn("Load cache file failed: %s", err)
 	}
 
-	// The cache-file writer is the one goroutine Stop joins. Adding to wg
-	// after Stop has already drained would race wg.Wait, so an Init that
-	// somehow runs against a stopped server just skips it — listenUpdate
-	// would return on the cancelled rootCtx immediately anyway.
+	s.startStoreWriter()
+	return nil
+}
+
+// startStoreWriter starts the cache-file writer, the one goroutine Stop
+// joins. Adding to wg after Stop has already drained would race wg.Wait, so
+// on a stopped server it does nothing — the writer would return on the
+// cancelled rootCtx immediately anyway.
+func (s *CertDXServer) startStoreWriter() {
 	if s.rootCtx.Err() != nil {
-		return nil
+		return
 	}
+
+	s.storeMu.Lock()
+	s.storeOpen = true
+	s.storeMu.Unlock()
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.certStore.listenUpdate(s.rootCtx)
-	}()
 
-	return nil
+		// Refuse new handoffs, then finish the ones that registered before
+		// the close: they come from renewers that already hold a fresh cert
+		// and are only a channel send away.
+		s.storeMu.Lock()
+		s.storeOpen = false
+		s.storeMu.Unlock()
+
+		senders := make(chan struct{})
+		go func() {
+			s.storeSenders.Wait()
+			close(senders)
+		}()
+		for {
+			select {
+			case fe := <-s.certStore.update:
+				s.certStore.persist(fe)
+			case <-senders:
+				s.certStore.drainQueued()
+				return
+			}
+		}
+	}()
+}
+
+// handOffToStore queues fe for the cache-file writer. It reports false when
+// the writer is not accepting handoffs (not started, or already shut down),
+// in which case fe is not persisted. The send may block while the buffer is
+// full, but never past the writer's exit: the writer waits for every
+// registered sender before returning.
+func (s *CertDXServer) handOffToStore(fe *certStoreEntry) bool {
+	s.storeMu.Lock()
+	if !s.storeOpen {
+		s.storeMu.Unlock()
+		return false
+	}
+	s.storeSenders.Add(1)
+	s.storeMu.Unlock()
+	defer s.storeSenders.Done()
+
+	s.certStore.update <- fe
+	return true
 }
 
 func (s *CertDXServer) loadCertStore() error {
@@ -242,22 +300,12 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	c.stateMu.Unlock()
 
 	// Hand off the persisted cert to the cache-file writer. The handoff is
-	// gated on the writer's lifecycle (rootCtx), never on the caller's ctx:
-	// a cancelled request/subscription must not lose a real ACME issuance
-	// that has already been broadcast. Try the buffered channel first, and
-	// only then block until the writer takes it or the writer is gone.
-	storeEntry := &certStoreEntry{
-		Domains: c.domains,
-		Cert:    newCert,
-	}
-	select {
-	case s.certStore.update <- storeEntry:
-	default:
-		select {
-		case s.certStore.update <- storeEntry:
-		case <-s.rootCtx.Done():
-			logging.Warn("Cert store writer stopped, new cert %v was not persisted", c.domains)
-		}
+	// gated on the writer's lifecycle, never on the caller's ctx: a
+	// cancelled request/subscription must not lose a real ACME issuance
+	// that has already been broadcast. An obtain that returns after the
+	// writer has shut down can only be logged.
+	if !s.handOffToStore(&certStoreEntry{Domains: c.domains, Cert: newCert}) {
+		logging.Warn("Cert store writer stopped, new cert %v was not persisted", c.domains)
 	}
 
 	logging.Info("Obtained new cert: %v", c.domains)
@@ -397,7 +445,7 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 		var wait time.Duration
 		cert := c.Cert()
 		if err == nil && (obtained || cert.IsValid()) {
-			wait = s.renewCheckInterval()
+			wait = s.healthyCheckInterval(time.Now(), cert.ValidBefore)
 			backoff = retryMin
 		} else {
 			wait = backoff
@@ -427,6 +475,19 @@ func (s *CertDXServer) renewCheckInterval() time.Duration {
 	return interval
 }
 
+// healthyCheckInterval is how long a renewer holding a valid cert sleeps:
+// renewCheckInterval, but never past the cert's validBefore, so a cert that
+// lives shorter than RenewTimeLeft/4 (see clampFloored) is renewed when it
+// lapses rather than hours later. Floored like renewCheckInterval so a cert
+// at the edge of its validity can't spin the renewer.
+func (s *CertDXServer) healthyCheckInterval(now, validBefore time.Time) time.Duration {
+	interval := s.renewCheckInterval()
+	if untilExpiry := validBefore.Sub(now); untilExpiry < interval {
+		interval = max(untilExpiry, renewCheckMinInterval)
+	}
+	return interval
+}
+
 // Subscribe registers a consumer for the entry's renewal stream. The first
 // subscriber kicks off a per-entry renewal goroutine whose context is
 // derived from rootCtx (so server Stop signals it); further subscribers just
@@ -436,8 +497,9 @@ func (s *CertDXServer) renewCheckInterval() time.Duration {
 // inside lego's Obtain, which is not context-aware, so Stop could not
 // unblock it and would simply burn shutdownDrainTimeout before giving up —
 // long enough to blow past the caller's own shutdown deadline. Renewers are
-// best-effort on shutdown; they check rootCtx between attempts, and a cert
-// obtained during shutdown is handed to the store writer, which *is* joined.
+// best-effort on shutdown; they check rootCtx between attempts. A cert
+// obtained before the store writer shut down is persisted by it (the writer
+// *is* joined); one obtained after is logged as not persisted.
 func (s *CertDXServer) subscribe(c *certEntry) {
 	var (
 		ctx    context.Context

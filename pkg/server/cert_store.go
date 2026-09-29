@@ -120,27 +120,32 @@ func (s *CertStore) PrintCertInfo() {
 // channel before exiting so a renewal that landed right at shutdown is
 // not silently dropped.
 func (s *CertStore) listenUpdate(ctx context.Context) {
-	persist := func(fe *certStoreEntry) {
-		logging.Info("Update domains cache to file")
-		if err := s.saveEntry(fe); err != nil {
-			logging.Warn("Update domains cache to file failed: %s", err)
-		}
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
-			// Drain whatever's already queued before exiting.
-			for {
-				select {
-				case fe := <-s.update:
-					persist(fe)
-				default:
-					return
-				}
-			}
+			s.drainQueued()
+			return
 		case fe := <-s.update:
-			persist(fe)
+			s.persist(fe)
 		}
+	}
+}
+
+// drainQueued persists every update already queued, without waiting for more.
+func (s *CertStore) drainQueued() {
+	for {
+		select {
+		case fe := <-s.update:
+			s.persist(fe)
+		default:
+			return
+		}
+	}
+}
+
+func (s *CertStore) persist(fe *certStoreEntry) {
+	logging.Info("Update domains cache to file")
+	if err := s.saveEntry(fe); err != nil {
+		logging.Warn("Update domains cache to file failed: %s", err)
 	}
 }
