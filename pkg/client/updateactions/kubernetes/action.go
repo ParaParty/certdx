@@ -85,13 +85,19 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, c *config.Cl
 // matchingSecrets lists kubernetes.io/tls secrets cluster-wide and keeps the
 // ones whose domain annotation is covered by the certificate's domains.
 func (a *Action) matchingSecrets(ctx context.Context, certDomains []string) ([]corev1.Secret, error) {
-	raw, err := a.kubeClient.CoreV1().Secrets("").List(ctx, metav1.ListOptions{})
+	// Only TLS secrets can ever be updated, so let the apiserver do the
+	// filtering instead of returning every secret in the cluster.
+	raw, err := a.kubeClient.CoreV1().Secrets("").List(ctx, metav1.ListOptions{
+		FieldSelector: tlsSecretFieldSelector,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list secrets in kubernetes: %w", err)
 	}
 
 	ret := make([]corev1.Secret, 0, len(raw.Items))
 	for _, secret := range raw.Items {
+		// Still checked locally: the result is only as good as whatever
+		// served the list, and a non-TLS secret must never be rewritten.
 		if secret.Type != corev1.SecretTypeTLS {
 			continue
 		}
@@ -107,7 +113,10 @@ func (a *Action) matchingSecrets(ctx context.Context, certDomains []string) ([]c
 			continue
 		}
 
-		if !domain.AllAllowed(certDomains, domains) {
+		// The certificate's domains are the names it was issued for, so a
+		// wildcard entry counts: "*.example.com" covers a secret annotated
+		// "foo.example.com".
+		if !domain.AllCovered(certDomains, domains) {
 			continue
 		}
 

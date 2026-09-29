@@ -123,10 +123,18 @@ skipped, so consuming pods are not restarted for nothing.
 | `profile` | string | Name of a `[[Profile.Kubernetes]]` entry. |
 
 Annotation domains are comma-separated, case-insensitive and
-de-duplicated. Matching follows the same parent-domain rule as the
-server's allowlist: a certificate listing `example.com` covers a secret
-annotated `foo.example.com`, while a certificate listing only
-`*.example.com` matches the literal string `*.example.com`.
+de-duplicated. A secret is patched when every annotated domain is
+covered by one of the certificate's `domains`:
+
+- a plain entry covers itself and any subdomain, like the server's
+  allowlist: `example.com` covers `foo.example.com`;
+- a wildcard entry covers itself and names exactly one label below it:
+  `*.example.com` covers `*.example.com` and `foo.example.com`, but not
+  `foo.bar.example.com` and not the apex `example.com` — list the apex
+  explicitly if the secret needs it.
+
+Only `kubernetes.io/tls` secrets are listed (a `type=kubernetes.io/tls`
+field selector), so other secrets never leave the apiserver.
 
 The service account needs cluster-wide `list`, `get` and `update` on
 secrets:
