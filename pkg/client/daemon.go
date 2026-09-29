@@ -40,6 +40,14 @@ type CertDXClientDaemon struct {
 	certs map[domain.Key]*watchingCert
 	wg    sync.WaitGroup
 
+	// httpClients caches the config-derived CertDXHttpClient per server.
+	// The clients are immutable once built, so every poll round reuses
+	// the same transport instead of leaking one idle TLS connection pool
+	// per attempt. Guarded by httpClientsMu — one poller goroutine runs
+	// per watched cert.
+	httpClientsMu sync.Mutex
+	httpClients   map[*config.ClientHttpServer]*CertDXHttpClient
+
 	// rootCtx is the lifecycle parent for every daemon subgoroutine
 	// (watchers, pollers, the gRPC failover state machine). Stop cancels
 	// it exactly once via stopOnce. There is no separate stop chan —
@@ -117,14 +125,35 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 func MakeCertDXClientDaemon() *CertDXClientDaemon {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	ret := &CertDXClientDaemon{
-		Config:     &config.ClientConfig{},
-		ClientOpt:  make([]CertDXHttpClientOption, 0),
-		certs:      make(map[domain.Key]*watchingCert),
-		rootCtx:    rootCtx,
-		rootCancel: rootCancel,
+		Config:      &config.ClientConfig{},
+		ClientOpt:   make([]CertDXHttpClientOption, 0),
+		certs:       make(map[domain.Key]*watchingCert),
+		httpClients: make(map[*config.ClientHttpServer]*CertDXHttpClient),
+		rootCtx:     rootCtx,
+		rootCancel:  rootCancel,
 	}
 	ret.Config.SetDefault()
 	return ret
+}
+
+// httpClientFor returns the shared client for server, building it on
+// first use. A build failure (e.g. an unreadable mTLS bundle) is
+// returned as an ordinary — hence retryable — error; it must never take
+// the process down, since the same code runs inside the Caddy plugin.
+func (r *CertDXClientDaemon) httpClientFor(server *config.ClientHttpServer) (*CertDXHttpClient, error) {
+	r.httpClientsMu.Lock()
+	defer r.httpClientsMu.Unlock()
+
+	if c, ok := r.httpClients[server]; ok {
+		return c, nil
+	}
+
+	c, err := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(server))...)
+	if err != nil {
+		return nil, err
+	}
+	r.httpClients[server] = c
+	return c, nil
 }
 
 // loadSavedCert reads any previously-persisted cert/key for this
