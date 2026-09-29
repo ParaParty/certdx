@@ -487,7 +487,6 @@ func TestServerConfigParseDurationRejectsNonPositive(t *testing.T) {
 		{"negative life time", "-168h", "24h", "CertLifeTime must be positive"},
 		{"zero renew time", "168h", "0s", "RenewTimeLeft must be positive"},
 		{"negative renew time", "168h", "-1h", "RenewTimeLeft must be positive"},
-		{"renew longer than life time", "24h", "168h", "must not be longer than CertLifeTime"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -507,18 +506,30 @@ func TestServerConfigParseDurationRejectsNonPositive(t *testing.T) {
 	}
 }
 
-// TestServerConfigParseDurationRenewEqualsCertLifeTime pins the "renew at half
-// life" setup (certLifeTime == renewTimeLeft): the cert is asked to live twice
-// certLifeTime and is renewed halfway through. Only renewTimeLeft strictly
-// longer than certLifeTime is rejected.
-func TestServerConfigParseDurationRenewEqualsCertLifeTime(t *testing.T) {
-	c := &ServerConfig{}
-	c.SetDefault()
-	c.ACME.Provider = "r3"
-	c.ACME.CertLifeTime = "720h"
-	c.ACME.RenewTimeLeft = "720h"
-	if err := c.parseDuration(); err != nil {
-		t.Fatalf("renewTimeLeft == certLifeTime should be accepted: %v", err)
+// TestServerConfigParseDurationRenewLongerThanCertLifeTime pins that the two
+// durations are independent: the cert is asked to live certLifeTime +
+// renewTimeLeft and is rotated after certLifeTime, so a renew window equal
+// to or longer than certLifeTime (e.g. rotate after 30d with 60d left) is a
+// valid setup, as long as the total fits the provider.
+func TestServerConfigParseDurationRenewLongerThanCertLifeTime(t *testing.T) {
+	cases := []struct {
+		provider, certLifeTime, renewTimeLeft string
+	}{
+		{"r3", "720h", "720h"},
+		{"r3", "24h", "168h"},
+		// 720h + 1440h = 2160h, exactly the 90d Google maximum.
+		{"google", "720h", "1440h"},
+	}
+	for _, tc := range cases {
+		c := &ServerConfig{}
+		c.SetDefault()
+		c.ACME.Provider = tc.provider
+		c.ACME.CertLifeTime = tc.certLifeTime
+		c.ACME.RenewTimeLeft = tc.renewTimeLeft
+		if err := c.parseDuration(); err != nil {
+			t.Fatalf("%s certLifeTime=%s renewTimeLeft=%s should be accepted: %v",
+				tc.provider, tc.certLifeTime, tc.renewTimeLeft, err)
+		}
 	}
 }
 

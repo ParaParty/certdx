@@ -10,7 +10,7 @@ challengeType = "dns"
 # Certification will have a life time of certLifeTime + renewTimeLeft
 # If certLifeTime is passed, server will renew this certification
 # Server and client will check certification every renewTimeLeft/4
-# Both must be positive and renewTimeLeft must not be longer than certLifeTime.
+# Both must be positive.
 # Their sum is what is asked of the ACME provider: Google rejects anything over
 # the 90 days it can issue, Let's Encrypt ignores the request (the server only
 # logs a warning).

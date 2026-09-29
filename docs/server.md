@@ -43,7 +43,7 @@ The configuration is a TOML file. Top-level sections:
 | `retryCount` | int | `5` | Per-issuance retry count. |
 | `challengeType` | string | `"dns"` | `dns` or `http`. |
 | `certLifeTime` | duration string | `"168h"` | Lifetime of issued certificates the server requests/tracks. Must be positive. |
-| `renewTimeLeft` | duration string | `"24h"` | Renew when remaining lifetime drops below this. The renewal check runs every `renewTimeLeft / 4`. Must be positive and not longer than `certLifeTime`. |
+| `renewTimeLeft` | duration string | `"24h"` | Renew when remaining lifetime drops below this. The renewal check runs every `renewTimeLeft / 4`. Must be positive. |
 | `allowedDomains` | string list | *(required)* | Root domains the server is allowed to issue. Requests for domains outside this list are rejected. |
 
 A certificate is requested to stay valid for `certLifeTime + renewTimeLeft`.
@@ -200,9 +200,8 @@ The config is checked on startup; any failure aborts the process.
 - `secure http server with no name` — set `HttpServer.names` when `secure = true`.
 - `DnsProvider Cloudflare: empty Email or APIKey` — provide either the
   global key pair or the auth/zone token pair.
-- `CertLifeTime must be positive` / `RenewTimeLeft must be positive` /
-  `RenewTimeLeft (...) must not be longer than CertLifeTime (...)` — fix the
-  `[ACME]` durations.
+- `CertLifeTime must be positive` / `RenewTimeLeft must be positive` — fix
+  the `[ACME]` durations.
 - `CertLifeTime (...) + RenewTimeLeft (...) is ..., longer than the ...` —
   shorten the lifetime for the Google providers (90 days at most).
 - `DnsProvider: nameserver "..." ...` — use `host` or `host:port`.
@@ -226,8 +225,7 @@ setting that did not work, or did not do what it said, anyway:
   HTTP server started.)
 - `authMethod` values other than `token` and `mtls` are rejected when the
   config is loaded instead of when the HTTP server starts.
-- `certLifeTime` and `renewTimeLeft` must be positive, and `renewTimeLeft`
-  must not be longer than `certLifeTime`.
+- `certLifeTime` and `renewTimeLeft` must be positive.
 - With `provider = "google"` or `"googletest"`, `certLifeTime +
   renewTimeLeft` must not exceed 90 days (other providers only log a
   warning).

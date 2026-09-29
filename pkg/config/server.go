@@ -105,14 +105,6 @@ func (c *ServerConfig) parseDuration() error {
 		return fmt.Errorf("RenewTimeLeft must be positive, got %q", c.ACME.RenewTimeLeft)
 	}
 
-	// RenewTimeLeft == CertLifeTime is the "renew at half life" setup and is
-	// perfectly fine; only a renew window longer than the life time is
-	// pathological (the cert would be due for renewal before it is issued).
-	if c.ACME.RenewTimeLeftDuration > c.ACME.CertLifeTimeDuration {
-		return fmt.Errorf("RenewTimeLeft (%q) must not be longer than CertLifeTime (%q)",
-			c.ACME.RenewTimeLeft, c.ACME.CertLifeTime)
-	}
-
 	// A cert is requested to stay valid for CertLifeTime + RenewTimeLeft.
 	//
 	// Only Google's ACME gets that sum put on the wire as the order's
