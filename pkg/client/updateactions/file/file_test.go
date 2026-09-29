@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"pkg.para.party/certdx/pkg/config"
 )
@@ -225,5 +227,108 @@ func TestUpdateEmptySavePath(t *testing.T) {
 func TestActionType(t *testing.T) {
 	if got := New(&config.FileAction{}).Type(); got != config.UPDATE_ACTION_FILE {
 		t.Fatalf("Type() = %q", got)
+	}
+}
+
+// TestPrepareTempFileSurvivesFsyncFailure pins the best-effort fsync:
+// some FUSE/container mounts answer fsync with ENOSYS/EINVAL, and that
+// must not stop a certificate write that would otherwise land.
+func TestPrepareTempFileSurvivesFsyncFailure(t *testing.T) {
+	orig := syncFile
+	t.Cleanup(func() { syncFile = orig })
+	syncFile = func(*os.File) error { return syscall.ENOSYS }
+
+	root := t.TempDir()
+	p := filepath.Join(root, "cert.pem")
+	tmp, err := prepareTempFile(root, "cert.pem", []byte("CERT"), 0o600)
+	if err != nil {
+		t.Fatalf("fsync failure must not fail the write: %v", err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if got, err := os.ReadFile(p); err != nil || string(got) != "CERT" {
+		t.Fatalf("contents: got %q err %v", got, err)
+	}
+}
+
+// TestUpdateSurvivesFsyncFailure walks the same mount through the full
+// write path: a refused fsync must still deliver both cert and key.
+func TestUpdateSurvivesFsyncFailure(t *testing.T) {
+	orig := syncFile
+	t.Cleanup(func() { syncFile = orig })
+	syncFile = func(*os.File) error { return syscall.EINVAL }
+
+	root := t.TempDir()
+	c := &config.ClientCertificate{Name: "site", Domains: []string{"example.com"}}
+	if err := update(t, root, "", c); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(root, "site.pem")); err != nil || string(got) != "CERT" {
+		t.Fatalf("cert not delivered on a mount that refuses fsync: got %q err %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "site.key")); err != nil || string(got) != "KEY" {
+		t.Fatalf("key not delivered on a mount that refuses fsync: got %q err %v", got, err)
+	}
+}
+
+// TestWriteCertKeyPairAtomicSeparateDirs covers cert and key living in
+// different directories: both renames must land, and the parent-dir
+// syncs must not turn a successful write into an error.
+func TestWriteCertKeyPairAtomicSeparateDirs(t *testing.T) {
+	certPath := filepath.Join(t.TempDir(), "site.pem")
+	keyPath := filepath.Join(t.TempDir(), "site.key")
+
+	if err := writeCertKeyPairAtomic(certPath, []byte("CERT"), keyPath, []byte("KEY")); err != nil {
+		t.Fatalf("writeCertKeyPairAtomic: %v", err)
+	}
+	if got, err := os.ReadFile(certPath); err != nil || string(got) != "CERT" {
+		t.Fatalf("cert: got %q err %v", got, err)
+	}
+	if got, err := os.ReadFile(keyPath); err != nil || string(got) != "KEY" {
+		t.Fatalf("key: got %q err %v", got, err)
+	}
+}
+
+// TestSyncDirMissingDirIsBestEffort: syncing a directory that isn't
+// there must not panic — the sync is durability polish, not a
+// precondition.
+func TestSyncDirMissingDirIsBestEffort(t *testing.T) {
+	syncDir(filepath.Join(t.TempDir(), "nope"))
+}
+
+// TestRunReloadCommandKillsHungCommand pins the hang fix: a reload
+// command that never exits must be killed at the timeout so the action
+// runner regains control.
+func TestRunReloadCommandKillsHungCommand(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runReloadCommand(context.Background(), "sleep 30", 100*time.Millisecond)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runReloadCommand did not return, a hung reload wedges the runner")
+	}
+}
+
+// TestRunReloadCommandHonoursContext covers the daemon-stop path: a
+// cancelled context must terminate the reload command too.
+func TestRunReloadCommandHonoursContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runReloadCommand(ctx, "sleep 30", time.Minute)
+	}()
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runReloadCommand ignored context cancellation")
 	}
 }
