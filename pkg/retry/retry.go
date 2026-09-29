@@ -13,10 +13,14 @@
 //     assumption that the failure is not transient and retrying would
 //     just busy-loop. This early-bail is preserved verbatim from the
 //     pre-refactor pkg/utils.Retry — it is intentional, not a bug.
+//   - If work returns an error wrapped with [Permanent], Do gives up
+//     immediately however long the attempt took. This is for verdicts
+//     that arrive slowly but are final, where a replay cannot help.
 package retry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -51,6 +55,10 @@ func Do(ctx context.Context, retryCount int, work func() error) error {
 			return nil
 		}
 
+		if IsPermanent(err) {
+			return fmt.Errorf("failed permanently, not retrying: %w", err)
+		}
+
 		if elapsed := time.Since(begin); elapsed < fastFailThreshold {
 			return fmt.Errorf("errored too fast, give up retry. last error is: %w", err)
 		}
@@ -69,4 +77,29 @@ func Do(ctx context.Context, retryCount int, work func() error) error {
 	}
 
 	return fmt.Errorf("errored too many times, give up retry. last error is: %w", err)
+}
+
+// permanentError marks an error that [Do] must not retry.
+type permanentError struct {
+	err error
+}
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
+// Permanent wraps err so that [Do] returns it without retrying. The
+// wrapped error stays reachable through errors.Is / errors.As. A nil
+// err stays nil.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &permanentError{err: err}
+}
+
+// IsPermanent reports whether err, or any error it wraps, was marked
+// with [Permanent].
+func IsPermanent(err error) bool {
+	var p *permanentError
+	return errors.As(err, &p)
 }
