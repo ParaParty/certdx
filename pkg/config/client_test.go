@@ -185,6 +185,118 @@ func TestClientConfigValidateHttpTokenNoMtlsCheck(t *testing.T) {
 	}
 }
 
+func fileActions(savePaths ...string) []UpdateActionConfig {
+	ret := make([]UpdateActionConfig, 0, len(savePaths))
+	for _, it := range savePaths {
+		ret = append(ret, &FileAction{SavePath: it})
+	}
+	return ret
+}
+
+// TestClientConfigValidateSameFileTwice: same name AND same savePath means
+// both entries would write the same /tmp/x.pem and /tmp/x.key.
+func TestClientConfigValidateSameFileTwice(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	c.Certificates = []ClientCertificate{
+		{Name: "x", Domains: []string{"a.example.com"}, Actions: fileActions("/tmp")},
+		{Name: "x", Domains: []string{"b.example.com"}, Actions: fileActions("/tmp/")},
+	}
+	err := c.Validate(nil)
+	if err == nil {
+		t.Fatal("expected error on two certificates writing the same file")
+	}
+	if !strings.Contains(err.Error(), "also writes") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func TestClientConfigValidateSameFileTwiceInOneCertificate(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	c.Certificates = []ClientCertificate{
+		{Name: "x", Domains: []string{"a.example.com"}, Actions: fileActions("/tmp", "/tmp")},
+	}
+	if err := c.Validate(nil); err == nil {
+		t.Fatal("expected error on two file actions writing the same file")
+	}
+}
+
+// TestClientConfigValidateSameNameDifferentSavePath: in HTTP mode the
+// on-disk identity is savePath + name, so reusing a name under a
+// different savePath is a valid config and must keep loading.
+func TestClientConfigValidateSameNameDifferentSavePath(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	c.Certificates = []ClientCertificate{
+		{Name: "site", Domains: []string{"a.example.com"}, Actions: fileActions("/etc/nginx/certs")},
+		{Name: "site", Domains: []string{"b.example.com"}, Actions: fileActions("/etc/haproxy/certs")},
+	}
+	if err := c.Validate(nil); err != nil {
+		t.Fatalf("same name under different savePaths should validate: %v", err)
+	}
+}
+
+// TestClientConfigValidateGrpcDuplicateNames: the name is the SDS resource
+// name on the wire in gRPC mode, so it must be unique there.
+func TestClientConfigValidateGrpcDuplicateNames(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "client.pem")
+	if err := os.WriteFile(bundle, []byte("dummy"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Common.Mode = CLIENT_MODE_GRPC
+	c.GRPC.MainServer.Server = "localhost:10002"
+	c.GRPC.MainServer.PEM = bundle
+	c.Certificates = []ClientCertificate{
+		{Name: "site", Domains: []string{"a.example.com"}, Actions: fileActions("/etc/nginx/certs")},
+		{Name: "site", Domains: []string{"b.example.com"}, Actions: fileActions("/etc/haproxy/certs")},
+	}
+	err := c.Validate(nil)
+	if err == nil {
+		t.Fatal("expected error on duplicate SDS resource name in grpc mode")
+	}
+	if !strings.Contains(err.Error(), "duplicate certificate name") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func TestClientConfigValidateDuplicateDomainSets(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	// Same domain set, differing only in case, order and a trailing dot.
+	c.Certificates = []ClientCertificate{
+		{Name: "x", Domains: []string{"a.example.com", "b.example.com"}, Actions: fileActions("/tmp")},
+		{Name: "y", Domains: []string{"B.example.com", "a.example.com."}, Actions: fileActions("/tmp")},
+	}
+	err := c.Validate(nil)
+	if err == nil {
+		t.Fatal("expected error on duplicate domain set")
+	}
+	if !strings.Contains(err.Error(), "duplicates the domain set") {
+		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func TestClientConfigValidateDistinctCertificates(t *testing.T) {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Http.MainServer.Url = "https://example.com"
+	c.Certificates = []ClientCertificate{
+		{Name: "x", Domains: []string{"a.example.com"}, Actions: fileActions("/tmp")},
+		{Name: "y", Domains: []string{"b.example.com"}, Actions: fileActions("/tmp")},
+	}
+	if err := c.Validate(nil); err != nil {
+		t.Fatalf("distinct certificates should validate: %v", err)
+	}
+}
+
 func TestClientConfigSetDefault(t *testing.T) {
 	c := &ClientConfig{}
 	c.SetDefault()

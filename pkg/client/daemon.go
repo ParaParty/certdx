@@ -15,6 +15,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
 	"os"
@@ -39,6 +40,14 @@ type CertDXClientDaemon struct {
 
 	certs map[domain.Key]*watchingCert
 	wg    sync.WaitGroup
+
+	// httpClients caches the config-derived CertDXHttpClient per server.
+	// Every poll round reuses the same transport instead of leaking one
+	// idle TLS connection pool per attempt; a client is only rebuilt when
+	// its mTLS bundle changes on disk. Guarded by httpClientsMu — one
+	// poller goroutine runs per watched cert.
+	httpClientsMu sync.Mutex
+	httpClients   map[*config.ClientHttpServer]*cachedHttpClient
 
 	// rootCtx is the lifecycle parent for every daemon subgoroutine
 	// (watchers, pollers, the gRPC failover state machine). Stop cancels
@@ -117,14 +126,71 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 func MakeCertDXClientDaemon() *CertDXClientDaemon {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	ret := &CertDXClientDaemon{
-		Config:     &config.ClientConfig{},
-		ClientOpt:  make([]CertDXHttpClientOption, 0),
-		certs:      make(map[domain.Key]*watchingCert),
-		rootCtx:    rootCtx,
-		rootCancel: rootCancel,
+		Config:      &config.ClientConfig{},
+		ClientOpt:   make([]CertDXHttpClientOption, 0),
+		certs:       make(map[domain.Key]*watchingCert),
+		httpClients: make(map[*config.ClientHttpServer]*cachedHttpClient),
+		rootCtx:     rootCtx,
+		rootCancel:  rootCancel,
 	}
 	ret.Config.SetDefault()
 	return ret
+}
+
+// cachedHttpClient is one entry of CertDXClientDaemon.httpClients.
+type cachedHttpClient struct {
+	client *CertDXHttpClient
+	// bundleSum fingerprints the mTLS bundle the client was built from.
+	// It is the zero value for servers that do not use mTLS.
+	bundleSum [sha256.Size]byte
+}
+
+// mtlsBundleSum fingerprints server's mTLS bundle, or returns the zero
+// value when the server does not use mTLS.
+func mtlsBundleSum(server *config.ClientHttpServer) ([sha256.Size]byte, error) {
+	if server.AuthMethod != config.HTTP_AUTH_MTLS {
+		return [sha256.Size]byte{}, nil
+	}
+	data, err := os.ReadFile(server.PEM)
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("load mtls bundle: %w", err)
+	}
+	return sha256.Sum256(data), nil
+}
+
+// httpClientFor returns the shared client for server, building it on
+// first use. A build failure (e.g. an unreadable mTLS bundle) is
+// returned as an ordinary — hence retryable — error; it must never take
+// the process down, since the same code runs inside the Caddy plugin.
+//
+// The mTLS bundle is re-read on every call and the client rebuilt when
+// it changed, so a renewed or replaced client certificate takes effect
+// on the next poll round without restarting the daemon. The bundle is
+// a small local file read at most once per request attempt.
+func (r *CertDXClientDaemon) httpClientFor(server *config.ClientHttpServer) (*CertDXHttpClient, error) {
+	r.httpClientsMu.Lock()
+	defer r.httpClientsMu.Unlock()
+
+	sum, err := mtlsBundleSum(server)
+	if err != nil {
+		return nil, err
+	}
+
+	if cached, ok := r.httpClients[server]; ok {
+		if cached.bundleSum == sum {
+			return cached.client, nil
+		}
+		logging.Info("mTLS bundle %s changed, reloading client", server.PEM)
+		cached.client.HttpClient.CloseIdleConnections()
+		delete(r.httpClients, server)
+	}
+
+	c, err := MakeCertDXHttpClient(append(r.ClientOpt, WithCertDXServerInfo(server))...)
+	if err != nil {
+		return nil, err
+	}
+	r.httpClients[server] = &cachedHttpClient{client: c, bundleSum: sum}
+	return c, nil
 }
 
 // loadSavedCert reads any previously-persisted cert/key for this

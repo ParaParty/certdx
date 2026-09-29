@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,8 +15,17 @@ import (
 	"pkg.para.party/certdx/pkg/config"
 )
 
+func mustHttpClient(t *testing.T, opts ...CertDXHttpClientOption) *CertDXHttpClient {
+	t.Helper()
+	c, err := MakeCertDXHttpClient(opts...)
+	if err != nil {
+		t.Fatalf("MakeCertDXHttpClient: %v", err)
+	}
+	return c
+}
+
 func TestMakeCertDXHttpClientDefaults(t *testing.T) {
-	c := MakeCertDXHttpClient()
+	c := mustHttpClient(t)
 	if c.HttpClient == nil {
 		t.Fatal("HttpClient is nil")
 	}
@@ -27,7 +38,7 @@ func TestMakeCertDXHttpClientDefaults(t *testing.T) {
 }
 
 func TestWithCertDXInsecure(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXInsecure())
+	c := mustHttpClient(t, WithCertDXInsecure())
 	tr, ok := c.HttpClient.Transport.(*http.Transport)
 	if !ok {
 		t.Fatal("transport is not *http.Transport")
@@ -43,14 +54,14 @@ func TestWithCertDXServerInfo(t *testing.T) {
 		AuthMethod: config.HTTP_AUTH_TOKEN,
 		Token:      "tok",
 	}
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(srv))
+	c := mustHttpClient(t, WithCertDXServerInfo(srv))
 	if c.Server != srv {
 		t.Fatal("Server not set by option")
 	}
 }
 
 func TestMakeGetCertRequestMethod(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: "https://example.com/api",
 	}))
 
@@ -67,7 +78,7 @@ func TestMakeGetCertRequestMethod(t *testing.T) {
 }
 
 func TestMakeGetCertRequestTokenHeader(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url:        "https://example.com",
 		AuthMethod: config.HTTP_AUTH_TOKEN,
 		Token:      "secret",
@@ -84,7 +95,7 @@ func TestMakeGetCertRequestTokenHeader(t *testing.T) {
 }
 
 func TestMakeGetCertRequestNoTokenHeader(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url:        "https://example.com",
 		AuthMethod: config.HTTP_AUTH_TOKEN,
 		Token:      "",
@@ -100,7 +111,7 @@ func TestMakeGetCertRequestNoTokenHeader(t *testing.T) {
 }
 
 func TestMakeGetCertRequestBody(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: "https://example.com",
 	}))
 
@@ -136,7 +147,7 @@ func TestGetCertCtxSuccess(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 
@@ -161,7 +172,7 @@ func TestGetCertCtxNon200(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 
@@ -178,7 +189,7 @@ func TestGetCertCtxBadJSON(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 
@@ -200,7 +211,7 @@ func TestGetCertDelegatesToGetCertCtx(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustHttpClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 
@@ -210,5 +221,35 @@ func TestGetCertDelegatesToGetCertCtx(t *testing.T) {
 	}
 	if string(got.FullChain) != "fc" {
 		t.Errorf("fullchain: got %q", got.FullChain)
+	}
+}
+
+// TestWithCertDXServerInfoMTLSLoadFailure pins the fix for the
+// os.Exit-on-bad-bundle bug: a missing/broken mTLS bundle must come
+// back as an error from MakeCertDXHttpClient, never kill the process.
+func TestWithCertDXServerInfoMTLSLoadFailure(t *testing.T) {
+	_, err := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+		Url:              "https://example.com",
+		AuthMethod:       config.HTTP_AUTH_MTLS,
+		ClientMtlsConfig: config.ClientMtlsConfig{PEM: filepath.Join(t.TempDir(), "does-not-exist.pem")},
+	}))
+	if err == nil {
+		t.Fatal("expected error for unreadable mtls bundle")
+	}
+	if !strings.Contains(err.Error(), "load mtls bundle") {
+		t.Errorf("error wrap: %v", err)
+	}
+}
+
+// TestTransportsBoundIdleConns guards against the per-poll transport
+// leak: transports we build must expire idle connections.
+func TestTransportsBoundIdleConns(t *testing.T) {
+	c := mustHttpClient(t, WithCertDXInsecure())
+	tr, ok := c.HttpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("transport is not *http.Transport")
+	}
+	if tr.IdleConnTimeout != httpIdleConnTimeout {
+		t.Fatalf("IdleConnTimeout: got %v want %v", tr.IdleConnTimeout, httpIdleConnTimeout)
 	}
 }

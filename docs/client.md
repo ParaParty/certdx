@@ -93,7 +93,7 @@ stops the others or the daemon.
 | Key | Type | Notes |
 | --- | --- | --- |
 | `savePath` | path | Output directory. The certificate is written to `<savePath>/<name>.pem` and the private key to `<savePath>/<name>.key`. |
-| `reloadCommand` | string | Shell command executed after a successful write. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
+| `reloadCommand` | string | Shell command executed after a successful write; killed if it runs longer than 5 minutes. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
 
 #### `type = "tencentCloud"`
 
@@ -180,15 +180,22 @@ profile = "cluster-a"
 ## Renewal cadence
 
 The client polls the server on the same cadence as the server's renewal
-check (`ACME.renewTimeLeft / 4`). When the server returns a newer
+check (`ACME.renewTimeLeft / 4`). A server that reports a zero or
+negative `renewTimeLeft` is polled once a minute instead, so a bad value
+cannot turn the poller into a hot loop. A round in which no server could
+be reached does not wait that long: it retries after 15s and backs off
+up to 60s until a server answers again. A server that answers with an
+error keeps the normal interval. When the server returns a newer
 certificate, every update action configured for it runs.
 
 The file action's writes are atomic via a temp-file-and-rename, so a
 downstream service reading the cert mid-update never observes a torn or
-partial file. Its reload command runs only when both
+partial file; the files are fsynced before the rename where the
+filesystem supports it. Its reload command runs only when both
 `<savePath>/<name>.pem` and `.key` already existed — the very first
 install is treated as a bootstrap where the downstream service is not
-yet up.
+yet up. `reloadCommand` is given 5 minutes to finish before it is
+killed, so a command that hangs cannot hold back later updates.
 
 ## Common validation errors
 
@@ -197,6 +204,15 @@ yet up.
   both required.
 - `certificate <name> has no update action configured` — add at least one
   `[[Certificate.UpdateAction]]`.
+- `certificate <a> duplicates the domain set of certificate <b>` — two
+  certificates cover the same domains (compared case-insensitively and in
+  any order). Merge them into one `[[Certificate]]` with all of their
+  update actions.
+- `duplicate certificate name: <name>` — in gRPC mode the name is the SDS
+  resource name, so it must be unique.
+- `certificate <a>: file update action writes <path>, which certificate <b>
+  also writes` — two file actions share a `savePath` and certificate
+  `name`; give one of them a different `savePath` or `name`.
 - `update action #<n>: no type set` / `unsupported type: <x>` — every
   action needs a known `type`.
 - `<action> update action: no such profile: <name>` — the `profile` does

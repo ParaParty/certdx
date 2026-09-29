@@ -7,6 +7,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/paths"
 )
 
@@ -60,6 +61,10 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 		}
 	}
 
+	if err := c.validateCertificateIdentities(); err != nil {
+		ret = append(ret, err)
+	}
+
 	switch c.Common.Mode {
 	case CLIENT_MODE_HTTP:
 		err := c.validateHttpMode()
@@ -73,6 +78,70 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 		}
 	default:
 		ret = append(ret, fmt.Errorf("unsupported mode: %s", c.Common.Mode))
+	}
+
+	return errors.Join(ret...)
+}
+
+// validateCertificateIdentities rejects certificates that would collide at
+// runtime:
+//
+//   - The daemon keys its watchers on the domain set, so a second
+//     certificate over the same set would silently replace the first and
+//     its update actions would never run. Merge their actions instead.
+//   - In gRPC mode the name is the SDS resource name on the wire, so it
+//     has to be unique (pkg/client/sds.go guards this again at runtime).
+//     In HTTP mode reusing a name is fine as long as the files differ.
+//   - Two file actions writing the same <savePath>/<name>.pem would race
+//     each other and run their reload commands twice.
+//
+// Certificates that already failed their own validation are skipped.
+func (c *ClientConfig) validateCertificateIdentities() error {
+	var ret []error
+
+	grpcMode := c.Common.Mode == CLIENT_MODE_GRPC
+	seenNames := make(map[string]struct{}, len(c.Certificates))
+	seenDomains := make(map[domain.Key]string, len(c.Certificates))
+	seenFiles := make(map[string]string)
+
+	for i := range c.Certificates {
+		cert := &c.Certificates[i]
+		if len(cert.Domains) == 0 || cert.Name == "" {
+			continue
+		}
+
+		key := domain.AsKey(cert.Domains)
+		if first, dup := seenDomains[key]; dup {
+			ret = append(ret, fmt.Errorf("certificate %s duplicates the domain set of certificate %s: %v",
+				cert.Name, first, cert.Domains))
+		} else {
+			seenDomains[key] = cert.Name
+		}
+
+		if grpcMode {
+			if _, dup := seenNames[cert.Name]; dup {
+				ret = append(ret, fmt.Errorf("duplicate certificate name: %s", cert.Name))
+			} else {
+				seenNames[cert.Name] = struct{}{}
+			}
+		}
+
+		for _, action := range cert.Actions {
+			fileAction, ok := action.(*FileAction)
+			if !ok {
+				continue
+			}
+			fullchain, _, err := fileAction.GetFullChainAndKeyPath(cert.Name)
+			if err != nil {
+				continue // reported by FileAction.Validate
+			}
+			if first, dup := seenFiles[fullchain]; dup {
+				ret = append(ret, fmt.Errorf("certificate %s: file update action writes %s, which certificate %s also writes",
+					cert.Name, fullchain, first))
+			} else {
+				seenFiles[fullchain] = cert.Name
+			}
+		}
 	}
 
 	return errors.Join(ret...)

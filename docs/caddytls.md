@@ -104,16 +104,16 @@ Top-level directives:
 | Directive | Notes |
 | --- | --- |
 | `url` | Full URL including the server's `apiPath`. |
-| `authMethod` | `token` (default) or `mtls`. |
+| `authMethod` | `token` (default) or `mtls`. Any other value fails `caddy adapt` instead of being silently ignored. |
 | `token` | Bearer token for `authMethod token`. |
-| `pem` | PEM bundle (client cert + key + CA cert) for `authMethod mtls`. |
+| `pem` | PEM bundle (client cert + key + CA cert) for `authMethod mtls`. A missing file fails the config load. |
 
 ### `GRPC { main_server | standby_server }` block
 
 | Directive | Notes |
 | --- | --- |
 | `server` | `host:port` of the certdx gRPC SDS endpoint. |
-| `pem` | PEM bundle (client cert + key + CA cert). |
+| `pem` | PEM bundle (client cert + key + CA cert). A missing file fails the config load. |
 
 ### Per-site usage
 
