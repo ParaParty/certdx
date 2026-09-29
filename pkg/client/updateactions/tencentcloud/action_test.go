@@ -70,6 +70,48 @@ type fakeSSL struct {
 
 	recordResults []recordResult
 	recordReqs    int
+
+	// details maps a certificate id to what DescribeCertificateDetail
+	// returns for it; ids missing from it fail the test.
+	details    map[string]detailResult
+	detailReqs []string
+}
+
+type detailResult struct {
+	detail *txssl.DescribeCertificateDetailResponseParams
+	err    error
+}
+
+// store adds an uploaded certificate holding pemCert, expiring at end, with
+// the test domains.
+func (f *fakeSSL) store(id string, pemCert []byte, end time.Time) *txssl.Certificates {
+	c := cert(id, end, testDomains...)
+	f.certificates = append(f.certificates, c)
+	if f.details == nil {
+		f.details = make(map[string]detailResult)
+	}
+	f.details[id] = detailResult{detail: &txssl.DescribeCertificateDetailResponseParams{
+		CertificatePublicKey: ptr(string(pemCert)),
+	}}
+	return c
+}
+
+func (f *fakeSSL) DescribeCertificateDetailWithContext(_ context.Context, req *txssl.DescribeCertificateDetailRequest) (*txssl.DescribeCertificateDetailResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := *req.CertificateId
+	f.detailReqs = append(f.detailReqs, id)
+	res, ok := f.details[id]
+	if !ok {
+		f.t.Fatalf("unexpected DescribeCertificateDetail call for %s", id)
+	}
+	if res.err != nil {
+		return nil, res.err
+	}
+
+	resp := txssl.NewDescribeCertificateDetailResponse()
+	resp.Response = res.detail
+	return resp, nil
 }
 
 type updateResult struct {
@@ -190,44 +232,140 @@ func clientCert() *config.ClientCertificate {
 	return &config.ClientCertificate{Name: "web", Domains: testDomains}
 }
 
+func mustParseLeaf(t *testing.T, fullchain []byte) *x509.Certificate {
+	t.Helper()
+	leaf, err := parseLeaf(fullchain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return leaf
+}
+
 func TestPickCertificates(t *testing.T) {
-	newEnd := time.Date(2027, 3, 1, 12, 0, 0, 0, time.UTC)
+	action, fake, fullchain, newEnd := fixture(t)
+	leaf := mustParseLeaf(t, fullchain)
 	day := 24 * time.Hour
 
-	older := cert("older", newEnd.Add(-120*day), "example.com", "www.example.com")
-	current := cert("current", newEnd.Add(-60*day), "www.example.com", "example.com")
-	stored := cert("stored", newEnd, "example.com", "www.example.com")
-	later := cert("later", newEnd.Add(300*day), "example.com", "www.example.com")
-	otherDomains := cert("other", newEnd.Add(-10*day), "other.example.com")
-	broken := &txssl.Certificates{
-		CertificateId: ptr("broken"),
-		CertEndTime:   ptr("unknown"),
-		CertSANs:      []*string{ptr("example.com"), ptr("www.example.com")},
-	}
+	stored := fake.store("stored", fullchain, newEnd)
+	fake.certificates = append(fake.certificates,
+		cert("later", newEnd.Add(300*day), testDomains...),
+		&txssl.Certificates{
+			CertificateId: ptr("broken"),
+			CertEndTime:   ptr("unknown"),
+			CertSANs:      []*string{ptr("example.com"), ptr("www.example.com")},
+		},
+		nil,
+		&txssl.Certificates{},
+	)
 
-	all := []*txssl.Certificates{older, current, stored, later, otherDomains, broken, nil, {}}
-	old, gotStored := pickCertificates(all, testDomains, newEnd)
-	if old != current {
+	old, gotStored, err := action.pickCertificates(context.Background(), fake.certificates, testDomains, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old == nil || *old.CertificateId != "current" {
 		t.Fatalf("old = %v, want the newest certificate expiring before the renewed one", old)
 	}
 	if gotStored != stored {
-		t.Fatalf("stored = %v, want the certificate expiring with the renewed one", gotStored)
+		t.Fatalf("stored = %v, want the uploaded copy of the renewed certificate", gotStored)
 	}
-
-	// The stored copy's CertEndTime has no zone and only second precision;
-	// it must still be recognized as the renewed certificate, never as the
-	// one to replace.
-	skewed := cert("skewed", newEnd.Add(8*time.Hour), "example.com", "www.example.com")
-	old, gotStored = pickCertificates([]*txssl.Certificates{skewed}, testDomains, newEnd)
-	if old != nil || gotStored != skewed {
-		t.Fatalf("pickCertificates(skewed) = (%v, %v), want (nil, skewed)", old, gotStored)
+	// Only the candidate expiring with the renewed certificate is looked up.
+	if len(fake.detailReqs) != 1 || fake.detailReqs[0] != "stored" {
+		t.Fatalf("DescribeCertificateDetail calls = %v, want [stored]", fake.detailReqs)
 	}
 
 	// A longer-lived certificate is never "old": replacing it would move
 	// the resources to a shorter-lived one.
-	old, gotStored = pickCertificates([]*txssl.Certificates{later, otherDomains, broken}, testDomains, newEnd)
-	if old != nil || gotStored != nil {
-		t.Fatalf("pickCertificates(later only) = (%v, %v), want (nil, nil)", old, gotStored)
+	later := cert("later", newEnd.Add(300*day), testDomains...)
+	old, gotStored, err = action.pickCertificates(context.Background(), []*txssl.Certificates{later}, testDomains, leaf)
+	if err != nil || old != nil || gotStored != nil {
+		t.Fatalf("pickCertificates(later only) = (%v, %v, %v), want (nil, nil, nil)", old, gotStored, err)
+	}
+}
+
+// A same-SAN reissue uploaded within a day of the renewed certificate
+// (emergency key rotation, reissue after revocation) is a different
+// certificate. Expiring close to the renewed one must not make it count as
+// already uploaded.
+func TestPickCertificatesReissueWithinADayIsNotStored(t *testing.T) {
+	action, fake, fullchain, newEnd := fixture(t)
+	leaf := mustParseLeaf(t, fullchain)
+
+	fake.certificates = []*txssl.Certificates{
+		cert("hour-earlier", newEnd.Add(-time.Hour), testDomains...),
+	}
+	old, stored, err := action.pickCertificates(context.Background(), fake.certificates, testDomains, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old == nil || *old.CertificateId != "hour-earlier" || stored != nil {
+		t.Fatalf("pickCertificates = (%v, %v), want (hour-earlier, nil)", old, stored)
+	}
+	if len(fake.detailReqs) != 0 {
+		t.Fatalf("DescribeCertificateDetail calls = %v, want none (the expiry already differs)", fake.detailReqs)
+	}
+
+	// Even an identical expiry is only a candidate: a reissue with different
+	// content is a certificate to replace, not the renewed one.
+	fake.certificates = nil
+	fake.store("same-expiry", selfSignedPEM(t, newEnd), newEnd)
+	old, stored, err = action.pickCertificates(context.Background(), fake.certificates, testDomains, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old == nil || *old.CertificateId != "same-expiry" || stored != nil {
+		t.Fatalf("pickCertificates = (%v, %v), want (same-expiry, nil)", old, stored)
+	}
+}
+
+// The detail may carry only the SHA-1 fingerprint, in any case and with
+// separators.
+func TestPickCertificatesMatchesByFingerprint(t *testing.T) {
+	action, fake, fullchain, newEnd := fixture(t)
+	leaf := mustParseLeaf(t, fullchain)
+
+	stored := fake.store("stored", fullchain, newEnd)
+	fp := strings.ToUpper(sha1Fingerprint(leaf))
+	fake.details["stored"] = detailResult{detail: &txssl.DescribeCertificateDetailResponseParams{
+		CertFingerprint: ptr(fp[:2] + ":" + fp[2:]),
+	}}
+
+	_, got, err := action.pickCertificates(context.Background(), fake.certificates, testDomains, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != stored {
+		t.Fatalf("stored = %v, want the certificate with the matching fingerprint", got)
+	}
+}
+
+// Identity that cannot be checked must not be guessed.
+func TestUpdateFailsWhenStoredIdentityCannotBeChecked(t *testing.T) {
+	action, fake, fullchain, newEnd := fixture(t)
+	fake.store("stored", fullchain, newEnd)
+	fake.details["stored"] = detailResult{err: sdkErr("UnauthorizedOperation")}
+
+	err := action.Update(context.Background(), fullchain, []byte("key"), clientCert())
+	if err == nil || !strings.Contains(err.Error(), "is the renewed certificate") {
+		t.Fatalf("expected an identity check error, got %v", err)
+	}
+	if len(fake.updateReqs) != 0 {
+		t.Fatalf("UpdateCertificateInstance calls = %d, want 0", len(fake.updateReqs))
+	}
+}
+
+// A reissue within a day of the renewed certificate is replaced, not
+// mistaken for the renewed certificate and skipped.
+func TestUpdateReplacesReissueExpiringWithinADay(t *testing.T) {
+	action, fake, fullchain, newEnd := fixture(t)
+	fake.certificates = []*txssl.Certificates{cert("reissue", newEnd.Add(-time.Hour), testDomains...)}
+	fake.updateResults = []updateResult{{deployRecordID: 42}}
+	fake.recordResults = []recordResult{deployed(1)}
+
+	if err := action.Update(context.Background(), fullchain, []byte("key"), clientCert()); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(fake.updateReqs) != 1 || *fake.updateReqs[0].OldCertificateId != "reissue" {
+		t.Fatalf("expected the reissue to be replaced, got %d UpdateCertificateInstance calls", len(fake.updateReqs))
 	}
 }
 
@@ -325,7 +463,7 @@ func TestUpdateWithoutPermissionToConfirmSucceeds(t *testing.T) {
 // re-bind to the stored copy instead of reporting a no-op as success.
 func TestUpdateRebindsToAlreadyUploadedCertificate(t *testing.T) {
 	action, fake, fullchain, newEnd := fixture(t)
-	fake.certificates = append(fake.certificates, cert("stored", newEnd, "example.com", "www.example.com"))
+	fake.store("stored", fullchain, newEnd)
 	fake.updateResults = []updateResult{
 		{err: sdkErr(codeCertificateExists)},
 		{deployRecordID: 43},
@@ -356,7 +494,7 @@ func TestUpdateRebindsToAlreadyUploadedCertificate(t *testing.T) {
 // certificate, which is success.
 func TestUpdateRedeliveryAfterRebindIsNoOp(t *testing.T) {
 	action, fake, fullchain, newEnd := fixture(t)
-	fake.certificates = append(fake.certificates, cert("stored", newEnd, "example.com", "www.example.com"))
+	fake.store("stored", fullchain, newEnd)
 	fake.updateResults = []updateResult{
 		{err: sdkErr(codeCertificateExists)},
 		{err: sdkErr(codeCertificateNotDeployInstance)},
@@ -377,11 +515,29 @@ func TestUpdateCertificateExistsWithoutStoredCopyFails(t *testing.T) {
 	}
 }
 
+// A same-SAN certificate expiring with the renewed one but holding other
+// content must never become the rebind target.
+func TestUpdateCertificateExistsDoesNotRebindToUnrelatedCertificate(t *testing.T) {
+	action, fake, fullchain, newEnd := fixture(t)
+	fake.certificates = nil
+	fake.store("sibling", selfSignedPEM(t, newEnd), newEnd)
+	fake.updateResults = []updateResult{{err: sdkErr(codeCertificateExists)}}
+
+	err := action.Update(context.Background(), fullchain, []byte("key"), clientCert())
+	if err == nil || !strings.Contains(err.Error(), "no stored certificate") {
+		t.Fatalf("expected an error naming the missing stored certificate, got %v", err)
+	}
+	if len(fake.updateReqs) != 1 {
+		t.Fatalf("UpdateCertificateInstance calls = %d, want 1 (no rebind to the sibling)", len(fake.updateReqs))
+	}
+}
+
 // When the account only holds the renewed certificate there is nothing
 // older to re-point, and nothing may be uploaded.
 func TestUpdateSkipsWhenOnlyRenewedCertificateIsStored(t *testing.T) {
 	action, fake, fullchain, newEnd := fixture(t)
-	fake.certificates = []*txssl.Certificates{cert("stored", newEnd, "example.com", "www.example.com")}
+	fake.certificates = nil
+	fake.store("stored", fullchain, newEnd)
 
 	if err := action.Update(context.Background(), fullchain, []byte("key"), clientCert()); err != nil {
 		t.Fatalf("Update: %v", err)

@@ -4,7 +4,9 @@
 package tencentcloud
 
 import (
+	"bytes"
 	"context"
+	"crypto/x509"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,11 +31,13 @@ const (
 	// failed with a recognizably transient code (see isTransientTxcError).
 	transientRetryCount = 3
 
-	// sameExpiryTolerance is how far apart two expiry times may be and
-	// still denote the same certificate. The SSL API reports CertEndTime
-	// without a zone, and successive renewals expire weeks apart, so a day
-	// absorbs any zone mismatch without confusing two renewals.
-	sameExpiryTolerance = 24 * time.Hour
+	// sameExpiryTolerance is how far apart a CertEndTime and the renewed
+	// certificate's NotAfter may be and still be treated as the same
+	// instant. Both have one-second precision and CertEndTime is parsed in
+	// its documented GMT+8 zone, so this only absorbs rounding. Matching
+	// expiry alone never proves identity: a candidate within it is
+	// verified with DescribeCertificateDetail (see sameCertificate).
+	sameExpiryTolerance = 2 * time.Second
 )
 
 // Variables rather than constants so tests do not have to sleep through
@@ -67,6 +71,7 @@ type sslAPI interface {
 	DescribeCertificatesWithContext(ctx context.Context, req *txssl.DescribeCertificatesRequest) (*txssl.DescribeCertificatesResponse, error)
 	UpdateCertificateInstanceWithContext(ctx context.Context, req *txssl.UpdateCertificateInstanceRequest) (*txssl.UpdateCertificateInstanceResponse, error)
 	DescribeHostUpdateRecordDetailWithContext(ctx context.Context, req *txssl.DescribeHostUpdateRecordDetailRequest) (*txssl.DescribeHostUpdateRecordDetailResponse, error)
+	DescribeCertificateDetailWithContext(ctx context.Context, req *txssl.DescribeCertificateDetailRequest) (*txssl.DescribeCertificateDetailResponse, error)
 }
 
 type Action struct {
@@ -107,7 +112,7 @@ func (a *Action) Type() string {
 // resources, a deploy that never settles) are marked retry.Permanent, so the
 // action runner does not replay the whole upload and deploy for them.
 func (a *Action) Update(ctx context.Context, fullchain, key []byte, c *config.ClientCertificate) error {
-	newEnd, err := leafNotAfter(fullchain)
+	leaf, err := parseLeaf(fullchain)
 	if err != nil {
 		return fmt.Errorf("parse renewed certificate: %w", err)
 	}
@@ -117,7 +122,10 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, c *config.Cl
 		return fmt.Errorf("fetch certificates: %w", err)
 	}
 
-	old, stored := pickCertificates(certificates, c.Domains, newEnd)
+	old, stored, err := a.pickCertificates(ctx, certificates, c.Domains, leaf)
+	if err != nil {
+		return err
+	}
 	if old == nil {
 		if stored != nil {
 			logging.Info("Tencent Cloud already holds the renewed certificate %s for domains %v and no older one, nothing to replace",
@@ -170,7 +178,7 @@ func (a *Action) replaceCertificate(ctx context.Context, certName string, old, s
 func (a *Action) rebindStoredCertificate(ctx context.Context, certName, oldID string, stored *txssl.Certificates) error {
 	if stored == nil {
 		return fmt.Errorf("tencent cloud reports the certificate for %q as uploaded, "+
-			"but no stored certificate with the same domains expires with it", certName)
+			"but no stored certificate with the same domains holds it", certName)
 	}
 	storedID := *stored.CertificateId
 
@@ -336,19 +344,23 @@ func (a *Action) fetchCertificates(ctx context.Context) ([]*txssl.Certificates, 
 }
 
 // pickCertificates sorts the uploaded certificates whose SANs equal domains
-// by their CertEndTime relative to newEnd, the expiry of the renewed
-// certificate:
+// against leaf, the renewed certificate:
 //
-//   - old is the newest one expiring before it: the certificate the
-//     resources serve now and the one to replace;
-//   - stored is the one expiring with it, i.e. the renewed certificate
-//     itself, already uploaded by an earlier delivery.
+//   - stored is the renewed certificate itself, already uploaded by an
+//     earlier delivery. Only a certificate whose CertEndTime matches the
+//     leaf's NotAfter to the second is a candidate, and it is confirmed by
+//     content (sameCertificate): a same-SAN reissue can share, or come
+//     within hours of, the renewed certificate's expiry.
+//   - old is the newest other certificate expiring no later than the
+//     renewed one: the certificate the resources serve now and the one to
+//     replace.
 //
 // Certificates expiring after the renewed one are neither: replacing them
 // would move resources to a shorter-lived certificate. A certificate whose
 // expiry cannot be parsed is skipped, as nothing about it can be proven.
-func pickCertificates(certificates []*txssl.Certificates, domains []string, newEnd time.Time) (old, stored *txssl.Certificates) {
-	var oldEnd, storedEnd time.Time
+func (a *Action) pickCertificates(ctx context.Context, certificates []*txssl.Certificates, domains []string,
+	leaf *x509.Certificate) (old, stored *txssl.Certificates, err error) {
+	var oldEnd time.Time
 	for _, cert := range certificates {
 		if cert == nil || cert.CertificateId == nil {
 			continue
@@ -364,24 +376,67 @@ func pickCertificates(certificates []*txssl.Certificates, domains []string, newE
 			continue
 		}
 
-		switch {
-		case end.Before(newEnd.Add(-sameExpiryTolerance)):
-			// Several certificates can cover the same domains once this
-			// action has run before; the newest one is what the resources
-			// now serve.
-			if old == nil || end.After(oldEnd) {
-				old, oldEnd = cert, end
-			}
-		case !end.After(newEnd.Add(sameExpiryTolerance)):
-			if stored == nil || end.After(storedEnd) {
-				stored, storedEnd = cert, end
-			}
-		default:
+		if end.After(leaf.NotAfter.Add(sameExpiryTolerance)) {
 			logging.Info("Ignoring Tencent Cloud certificate %s: it expires at %s, after the renewed certificate",
 				*cert.CertificateId, end.Format(time.RFC3339))
+			continue
+		}
+
+		if !end.Before(leaf.NotAfter.Add(-sameExpiryTolerance)) {
+			same, err := a.sameCertificate(ctx, *cert.CertificateId, leaf)
+			if err != nil {
+				return nil, nil, fmt.Errorf("check whether certificate %s is the renewed certificate: %w",
+					*cert.CertificateId, err)
+			}
+			if same {
+				stored = cert
+				continue
+			}
+			// A different certificate expiring with the renewed one, such
+			// as a reissue: it is a candidate for replacement like any
+			// other.
+		}
+
+		// Several certificates can cover the same domains once this action
+		// has run before; the newest one is what the resources now serve.
+		if old == nil || end.After(oldEnd) {
+			old, oldEnd = cert, end
 		}
 	}
-	return old, stored
+	return old, stored, nil
+}
+
+// sameCertificate reports whether the uploaded certificate id holds leaf,
+// by comparing the stored public certificate or, failing that, its SHA-1
+// fingerprint.
+func (a *Action) sameCertificate(ctx context.Context, id string, leaf *x509.Certificate) (bool, error) {
+	req := txssl.NewDescribeCertificateDetailRequest()
+	req.CertificateId = txcommon.StringPtr(id)
+
+	var detail *txssl.DescribeCertificateDetailResponseParams
+	err := callTxcAPI(ctx, "DescribeCertificateDetail", func() error {
+		resp, err := a.client.DescribeCertificateDetailWithContext(ctx, req)
+		if err != nil {
+			return err
+		}
+		detail = resp.Response
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+
+	if detail.CertificatePublicKey != nil && strings.TrimSpace(*detail.CertificatePublicKey) != "" {
+		stored, err := parseLeaf([]byte(*detail.CertificatePublicKey))
+		if err != nil {
+			return false, fmt.Errorf("parse stored public certificate: %w", err)
+		}
+		return bytes.Equal(stored.Raw, leaf.Raw), nil
+	}
+	if detail.CertFingerprint != nil && *detail.CertFingerprint != "" {
+		return normalizeFingerprint(*detail.CertFingerprint) == sha1Fingerprint(leaf), nil
+	}
+	return false, fmt.Errorf("certificate detail carries neither the public certificate nor its fingerprint")
 }
 
 // callTxcAPI runs one Tencent Cloud SDK call, retrying it with exponential

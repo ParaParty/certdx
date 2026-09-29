@@ -105,7 +105,11 @@ certificate's real expiry), and calls `UpdateCertificateInstance` on it.
 If the account holds no matching certificate, the action logs a warning
 and does nothing — it never uploads a certificate that is not already
 bound. Uploaded certificates that expire after the renewed one are never
-replaced.
+replaced. A certificate expiring at the same second as the renewed one is
+checked with `DescribeCertificateDetail` (grant
+`ssl:DescribeCertificateDetail`): if it holds the same certificate it is
+treated as already uploaded, otherwise (e.g. a same-domain reissue) it is
+replaced like any other.
 
 The action then polls the deploy record
 (`DescribeHostUpdateRecordDetail`) until every resource has been
