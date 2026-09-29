@@ -292,6 +292,17 @@ func makeCert(bundlePath, organization, commonName string,
 	}
 
 	notBefore, notAfter := o.validity(now())
+	// A leaf outliving its CA stops verifying once the CA expires. Cap
+	// the default expiry at the CA's; an explicit lifetime that
+	// overshoots is a mistake worth surfacing instead.
+	if notAfter.After(caCert.NotAfter) {
+		if o.lifetime > 0 {
+			return fmt.Errorf("certificate would expire at %s, after its CA (%s); use a shorter lifetime or re-issue the CA",
+				notAfter.UTC().Format(time.RFC3339), caCert.NotAfter.UTC().Format(time.RFC3339))
+		}
+		notAfter = caCert.NotAfter
+		fmt.Printf("Capping certificate expiry at the CA's: %s\n", notAfter.UTC().Format(time.RFC3339))
+	}
 	cert := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{

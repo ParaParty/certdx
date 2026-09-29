@@ -56,7 +56,9 @@ Certificates from `make-ca`, `make-server` and `make-client` are valid
 until 2100-01-01 by default. Pass `--valid-for <duration>` (Go duration
 syntax, e.g. `17520h` for two years) to issue a shorter-lived certificate
 instead; the period counts from the moment of issuance and must be
-positive.
+positive. A server or client certificate never outlives its CA: without
+`--valid-for` its expiry is capped at the CA's, and a `--valid-for` that
+would end after the CA expires is rejected.
 
 ---
 

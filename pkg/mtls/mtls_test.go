@@ -160,6 +160,17 @@ func TestParseBundleMissingCA(t *testing.T) {
 	}
 }
 
+func TestParseBundleNonCATrustCert(t *testing.T) {
+	c := newTestChain(t)
+	// A second leaf where the CA belongs parses fine but can never anchor
+	// a chain, so it must not satisfy the missing-CA check.
+	path := writeBundle(t, c.leafPEM, c.leafKey, c.leafPEM)
+
+	if _, _, err := parseBundle(path); err == nil {
+		t.Fatal("expected an error for a bundle whose trust section has no CA certificate")
+	}
+}
+
 func TestParseBundleReorderedCAFirst(t *testing.T) {
 	c := newTestChain(t)
 	// CA first means tls.X509KeyPair pairs the CA cert with the leaf
