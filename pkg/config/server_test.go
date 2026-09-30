@@ -105,6 +105,50 @@ func TestDnsProviderValidateCloudflareGlobal(t *testing.T) {
 	}
 }
 
+func TestDnsProviderValidateAli(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config DnsProvider
+		valid  bool
+	}{
+		{"access keys", DnsProvider{Type: DnsProviderTypeAli, AccessKeyId: "id", AccessKeySecret: "secret"}, true},
+		{"temporary credentials", DnsProvider{Type: DnsProviderTypeAli, AccessKeyId: "id", AccessKeySecret: "secret", SecurityToken: "sts"}, true},
+		{"missing ID", DnsProvider{Type: DnsProviderTypeAli, AccessKeySecret: "secret"}, false},
+		{"missing secret", DnsProvider{Type: DnsProviderTypeAli, AccessKeyId: "id"}, false},
+		{"cloudflare tokens", DnsProvider{Type: DnsProviderTypeAli, AuthToken: "token", ZoneToken: "zone"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Validate()
+			if tc.valid && err != nil {
+				t.Fatalf("valid Ali DNS config: %v", err)
+			}
+			if !tc.valid && (err == nil || !strings.Contains(err.Error(), "AccessKeyId")) {
+				t.Fatalf("expected missing Ali DNS credentials error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestDnsProviderAliTOMLKeys(t *testing.T) {
+	var c ServerConfig
+	err := toml.Unmarshal([]byte(`
+[DnsProvider]
+type = "ali"
+accessKeyId = "id"
+accessKeySecret = "secret"
+securityToken = "sts"
+`), &c)
+	if err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if c.DnsProvider == nil || c.DnsProvider.AccessKeyId != "id" || c.DnsProvider.AccessKeySecret != "secret" || c.DnsProvider.SecurityToken != "sts" {
+		t.Fatalf("Ali DNS credentials not decoded: %+v", c.DnsProvider)
+	}
+	if err := c.DnsProvider.Validate(); err != nil {
+		t.Fatalf("decoded Ali DNS config: %v", err)
+	}
+}
+
 func TestDnsProviderValidateCloudflareZone(t *testing.T) {
 	p := &DnsProvider{Type: DnsProviderTypeCloudflare, AuthToken: "tok", ZoneToken: "zone"}
 	if err := p.Validate(); err != nil {

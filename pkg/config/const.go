@@ -6,6 +6,7 @@ const (
 )
 
 const (
+	DnsProviderTypeAli          string = "ali"
 	DnsProviderTypeCloudflare   string = "cloudflare"
 	DnsProviderTypeTencentCloud string = "tencentcloud"
 

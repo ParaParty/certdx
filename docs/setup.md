@@ -63,6 +63,7 @@ Required for wildcard certificates. Configure `[DnsProvider]`:
 
 - `cloudflare` — either `email` + `apiKey` (global API key) or `authToken` +
   `zoneToken` (scoped tokens).
+- `ali` — `accessKeyId` + `accessKeySecret`; add `securityToken` for STS credentials.
 - `tencentcloud` — `secretID` + `secretKey`.
 
 Set `conservativeDnsCheck = true` to resolve every authoritative nameserver to

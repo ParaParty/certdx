@@ -12,8 +12,8 @@ allowedDomains = [
 # cloudflare auth token and zone token
 type = "cloudflare"
 conservativeDnsCheck = false
-authToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
-zoneToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
+authToken = "KFCCrazyThursdayVMe50"
+zoneToken = "KFCCrazyThursdayVMe50"
 
 [HttpServer]
 enabled = true

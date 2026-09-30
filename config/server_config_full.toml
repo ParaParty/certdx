@@ -55,10 +55,16 @@ apiKey = ""
 # authToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
 # zoneToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
 
+# or Alibaba Cloud DNS (securityToken is optional for STS credentials)
+# type = "ali"
+# accessKeyId = ""
+# accessKeySecret = ""
+# securityToken = ""
+
 # or you can use tencent cloud
-# type = "tencent"
+# type = "tencentcloud"
 # secretID = ""
-# SecretKey = ""
+# secretKey = ""
 
 [HttpProvider]
 type = "s3"

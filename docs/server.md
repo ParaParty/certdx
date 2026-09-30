@@ -71,16 +71,27 @@ block is in `config/server_config_full.toml`.
 
 | Key | Type | Notes |
 | --- | --- | --- |
-| `type` | string | `cloudflare` or `tencentcloud`. |
+| `type` | string | `ali`, `cloudflare`, or `tencentcloud`. |
 | `disableCompletePropagationRequirement` | bool | Skip the lego "wait for full propagation" step. |
 | `conservativeDnsCheck` | bool | Resolve every authoritative NS to all A/AAAA addresses and require the challenge TXT value on each reachable address. Unreachable addresses are skipped, but at least one address must respond. Overrides `disableCompletePropagationRequirement` when enabled. |
 | `nameservers` | string list | Recursive DNS servers used for zone, NS, A, and AAAA discovery. Defaults to the system resolver configuration. |
 | `dnsTimeout` | duration | Timeout for each DNS request and the overall propagation wait, such as `120s`. |
 | `email`, `apiKey` | string | Cloudflare global API key auth. |
 | `authToken`, `zoneToken` | string | Cloudflare scoped token auth (alternative to global). |
+| `accessKeyId`, `accessKeySecret` | string | Alibaba Cloud DNS AccessKey credentials. |
+| `securityToken` | string | Optional Alibaba Cloud STS security token. |
 | `secretID`, `secretKey` | string | Tencent Cloud credentials. |
 
 Exactly one credential set must be configured for the chosen `type`.
+For Alibaba Cloud DNS:
+
+```toml
+[DnsProvider]
+type = "ali"
+conservativeDnsCheck = false
+accessKeyId = "<Alibaba Cloud AccessKey ID>"
+accessKeySecret = "<Alibaba Cloud AccessKey Secret>"
+```
 
 ### `[HttpProvider]` and `[HttpProvider.S3]`
 

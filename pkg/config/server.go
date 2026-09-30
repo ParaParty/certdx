@@ -147,6 +147,11 @@ type DnsProvider struct {
 	AuthToken string `toml:"authToken" json:"auth_token,omitempty"`
 	ZoneToken string `toml:"zoneToken" json:"zone_token,omitempty"`
 
+	// Alibaba Cloud DNS
+	AccessKeyId     string `toml:"accessKeyId" json:"access_key_id,omitempty"`
+	AccessKeySecret string `toml:"accessKeySecret" json:"access_key_secret,omitempty"`
+	SecurityToken   string `toml:"securityToken" json:"security_token,omitempty"`
+
 	// tencentcloud
 	SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
 	SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
@@ -163,6 +168,10 @@ func (p *DnsProvider) Validate() error {
 		}
 	}
 	switch p.Type {
+	case DnsProviderTypeAli:
+		if p.AccessKeyId == "" || p.AccessKeySecret == "" {
+			return fmt.Errorf("DnsProvider Ali: empty AccessKeyId or AccessKeySecret")
+		}
 	case DnsProviderTypeCloudflare:
 		if (p.Email == "" || p.APIKey == "") && (p.AuthToken == "" || p.ZoneToken == "") {
 			return fmt.Errorf("DnsProvider Cloudflare: empty Email or APIKey")

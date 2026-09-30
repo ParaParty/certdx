@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-acme/lego/v4/challenge"
+	"pkg.para.party/certdx/pkg/config"
 )
 
 type timedDNSProviderStub struct{}
@@ -28,5 +29,26 @@ func TestOverridePropagationTimeout(t *testing.T) {
 	}
 	if interval != 3*time.Second {
 		t.Fatalf("polling interval: got %s want %s", interval, 3*time.Second)
+	}
+}
+
+func TestGetChallengerAli(t *testing.T) {
+	p := &config.ServerConfig{
+		ACME: config.ACMEConfig{ChallengeType: config.ChallengeTypeDns01},
+		DnsProvider: &config.DnsProvider{
+			Type:            config.DnsProviderTypeAli,
+			AccessKeyId:     "id",
+			AccessKeySecret: "secret",
+		},
+	}
+	if err := p.DnsProvider.Validate(); err != nil {
+		t.Fatalf("valid Ali DNS config: %v", err)
+	}
+	typ, provider, err := getChallenger(nil, p)
+	if err != nil {
+		t.Fatalf("get Ali DNS challenger: %v", err)
+	}
+	if typ != config.ChallengeTypeDns01 || provider == nil {
+		t.Fatalf("unexpected challenger: type=%q provider=%T", typ, provider)
 	}
 }
