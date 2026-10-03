@@ -76,7 +76,7 @@ func TestUpdatePatchesAllMatchingSecrets(t *testing.T) {
 }
 
 // A secret annotated with a subdomain is covered by the certificate's parent
-// domain. Note that a literal "*.example.com" entry only matches itself.
+// domain.
 func TestUpdateMatchesSecretsCoveredByParentDomain(t *testing.T) {
 	clientset := fake.NewClientset(
 		newTLSSecret("namespace", "covered", "foo.example.com", []byte("old"), []byte("old")),
@@ -93,6 +93,65 @@ func TestUpdateMatchesSecretsCoveredByParentDomain(t *testing.T) {
 	}
 	if got := string(secret.Data[corev1.TLSCertKey]); got != "new-cert" {
 		t.Fatalf("tls.crt = %q, want new-cert", got)
+	}
+}
+
+// A wildcard-only certificate, like the documented example, covers secrets
+// annotated with names one label below it, but neither the apex nor names
+// nested deeper.
+func TestUpdateMatchesSecretsCoveredByWildcard(t *testing.T) {
+	clientset := fake.NewClientset(
+		newTLSSecret("edge", "covered", "foo.example.com,foo.mm.example.com", []byte("old"), []byte("old")),
+		newTLSSecret("edge", "wildcard", "*.example.com", []byte("old"), []byte("old")),
+		newTLSSecret("edge", "nested", "deep.nested.example.com", []byte("old"), []byte("old")),
+		newTLSSecret("edge", "apex", "example.com", []byte("old"), []byte("old")),
+	)
+	action := &Action{kubeClient: clientset}
+
+	cert := certificate("*.example.com", "*.mm.example.com")
+	if err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), cert); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	want := map[string]string{
+		"covered":  "new-cert",
+		"wildcard": "new-cert",
+		"nested":   "old",
+		"apex":     "old",
+	}
+	for name, wantCert := range want {
+		secret, err := clientset.CoreV1().Secrets("edge").Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(secret.Data[corev1.TLSCertKey]); got != wantCert {
+			t.Errorf("secret %s tls.crt = %q, want %q", name, got, wantCert)
+		}
+	}
+}
+
+// The list is filtered by the apiserver, so a cluster full of other secret
+// types is not shipped to the client on every renewal.
+func TestUpdateListsOnlyTLSSecrets(t *testing.T) {
+	clientset := fake.NewClientset()
+	var selectors []string
+	clientset.PrependReactor("list", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		listAction, ok := action.(k8stesting.ListActionImpl)
+		if !ok {
+			t.Errorf("unexpected action type %T", action)
+			return false, nil, nil
+		}
+		selectors = append(selectors, listAction.GetListRestrictions().Fields.String())
+		return false, nil, nil
+	})
+	action := &Action{kubeClient: clientset}
+
+	if err := action.Update(context.Background(), []byte("new-cert"), []byte("new-key"), certificate("example.com")); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if len(selectors) != 1 || selectors[0] != "type=kubernetes.io/tls" {
+		t.Fatalf("list field selectors = %v, want [type=kubernetes.io/tls]", selectors)
 	}
 }
 

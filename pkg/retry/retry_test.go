@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -116,5 +117,37 @@ func TestCtxAlreadyDone(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("calls = %d, want 0 (work must not run after ctx done)", calls)
+	}
+}
+
+// TestPermanentStopsRetrying verifies a slow but final failure is not
+// replayed: without the marker it would outlive the fast-fail floor and
+// be retried.
+func TestPermanentStopsRetrying(t *testing.T) {
+	cause := errors.New("final verdict")
+
+	calls := 0
+	err := Do(context.Background(), 5, func() error {
+		calls++
+		time.Sleep(fastFailThreshold + 10*time.Millisecond)
+		return fmt.Errorf("wrapped: %w", Permanent(cause))
+	})
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1 (a permanent error must not be retried)", calls)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("expected the cause to stay reachable, got %v", err)
+	}
+	if !IsPermanent(err) {
+		t.Fatalf("expected the returned error to stay marked permanent, got %v", err)
+	}
+}
+
+func TestPermanentNil(t *testing.T) {
+	if Permanent(nil) != nil {
+		t.Fatal("expected Permanent(nil) to be nil")
+	}
+	if IsPermanent(nil) || IsPermanent(errors.New("plain")) {
+		t.Fatal("expected unmarked errors not to be permanent")
 	}
 }

@@ -98,10 +98,31 @@ stops the others or the daemon.
 #### `type = "tencentCloud"`
 
 Re-points Tencent Cloud resources at the renewed certificate. On each
-update it looks up the newest uploaded certificate whose SANs equal this
-certificate's `domains` and calls `UpdateCertificateInstance` on it. If
-the account holds no matching certificate, the action logs a warning and
-does nothing — it never uploads a certificate that is not already bound.
+update it looks up the uploaded certificates whose SANs equal this
+certificate's `domains`, picks the newest one that expires before the
+renewed certificate (by comparing `CertEndTime` with the renewed
+certificate's real expiry), and calls `UpdateCertificateInstance` on it.
+If the account holds no matching certificate, the action logs a warning
+and does nothing — it never uploads a certificate that is not already
+bound. Uploaded certificates that expire after the renewed one are never
+replaced. A certificate expiring at the same second as the renewed one is
+checked with `DescribeCertificateDetail` (grant
+`ssl:DescribeCertificateDetail`): if it holds the same certificate it is
+treated as already uploaded, otherwise (e.g. a same-domain reissue) it is
+replaced like any other.
+
+The action then polls the deploy record
+(`DescribeHostUpdateRecordDetail`) until every resource has been
+re-bound, for up to five minutes, and reports failed resources as an
+error. Grant the profile's credentials `ssl:DescribeHostUpdateRecordDetail`
+so the update is confirmed; without it the action logs a warning and
+assumes the deploy succeeded. If Tencent Cloud already stores the renewed
+certificate (an earlier delivery uploaded it but did not finish), the
+resources are re-bound to the stored copy instead.
+
+Throttling and other transient API errors are retried with backoff. A
+deploy that failed or could not be confirmed is reported once and not
+retried: replaying the upload cannot change the outcome.
 
 | Key | Type | Notes |
 | --- | --- | --- |
@@ -123,10 +144,18 @@ skipped, so consuming pods are not restarted for nothing.
 | `profile` | string | Name of a `[[Profile.Kubernetes]]` entry. |
 
 Annotation domains are comma-separated, case-insensitive and
-de-duplicated. Matching follows the same parent-domain rule as the
-server's allowlist: a certificate listing `example.com` covers a secret
-annotated `foo.example.com`, while a certificate listing only
-`*.example.com` matches the literal string `*.example.com`.
+de-duplicated. A secret is patched when every annotated domain is
+covered by one of the certificate's `domains`:
+
+- a plain entry covers itself and any subdomain, like the server's
+  allowlist: `example.com` covers `foo.example.com`;
+- a wildcard entry covers itself and names exactly one label below it:
+  `*.example.com` covers `*.example.com` and `foo.example.com`, but not
+  `foo.bar.example.com` and not the apex `example.com` — list the apex
+  explicitly if the secret needs it.
+
+Only `kubernetes.io/tls` secrets are listed (a `type=kubernetes.io/tls`
+field selector), so other secrets never leave the apiserver.
 
 The service account needs cluster-wide `list`, `get` and `update` on
 secrets:
