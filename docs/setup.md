@@ -144,6 +144,10 @@ Keep `ca.pem` only on the server host (it contains the CA private key).
 The name `ca` is reserved; `make-client` and `make-server` reject it so
 a typo cannot silently overwrite the CA.
 
+Bundles are valid until 2100 by default. Pass `--valid-for <duration>`
+(e.g. `--valid-for 17520h`) to any of the three commands to issue a
+shorter-lived certificate; schedule a re-issue before it expires.
+
 See [tools.md](tools.md) for the full flag set.
 
 ## 4. Server-side install

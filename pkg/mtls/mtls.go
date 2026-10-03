@@ -30,6 +30,7 @@ func parseBundle(path string) (tls.Certificate, *x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	rest := data
 	first := true
+	cas := 0
 	for {
 		var block *pem.Block
 		block, rest = pem.Decode(rest)
@@ -43,7 +44,22 @@ func parseBundle(path string) (tls.Certificate, *x509.CertPool, error) {
 			first = false
 			continue
 		}
-		pool.AppendCertsFromPEM(pem.EncodeToMemory(block))
+		c, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		pool.AddCert(c)
+		if c.BasicConstraintsValid && c.IsCA {
+			cas++
+		}
+	}
+
+	// A pool without a CA certificate is never useful: it rejects every
+	// peer at handshake time with an opaque error. Fail at load instead,
+	// where the message can point at the bundle.
+	if cas == 0 {
+		return tls.Certificate{}, nil, fmt.Errorf(
+			"no CA certificate in mtls bundle %s: the bundle must contain the issuing CA certificate after the entity cert and key", path)
 	}
 
 	return cert, pool, nil

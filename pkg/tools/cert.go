@@ -24,6 +24,10 @@ import (
 const (
 	permBundle  os.FileMode = 0o600
 	permCounter os.FileMode = 0o644
+
+	// firstEntitySerial is the serial handed to the first entity cert.
+	// RFC 5280 requires serials to be positive, so counting starts at 1.
+	firstEntitySerial = 1
 )
 
 // counter holds the serial number for the next certificate to be issued.
@@ -31,10 +35,78 @@ const (
 // successful signing.
 var counter big.Int
 
+// defaultNotAfter is the expiry of every certificate issued without
+// WithLifetime: effectively forever, as certdx has always done.
+var defaultNotAfter = time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+// now is the issuance clock, swapped out by tests.
+var now = time.Now
+
+// certOptions carries the tunable issuance parameters.
+type certOptions struct {
+	// lifetime, when non-zero, replaces defaultNotAfter with issuance
+	// time + lifetime.
+	lifetime time.Duration
+	err      error
+}
+
+// CertOption customizes certificate issuance. Passing none keeps the
+// documented defaults, so existing callers stay source compatible.
+type CertOption func(*certOptions)
+
+// WithLifetime makes the issued certificate expire d after issuance
+// instead of on defaultNotAfter. A non-positive d is an error.
+func WithLifetime(d time.Duration) CertOption {
+	return func(o *certOptions) {
+		if d <= 0 {
+			o.err = fmt.Errorf("certificate lifetime must be positive, got %s", d)
+			return
+		}
+		o.lifetime = d
+	}
+}
+
+func buildOptions(opts []CertOption) (certOptions, error) {
+	var o certOptions
+	for _, apply := range opts {
+		apply(&o)
+	}
+	return o, o.err
+}
+
+// validity returns the NotBefore/NotAfter pair for a certificate issued
+// at t. NotBefore is backdated to the start of the hour to tolerate clock
+// skew; NotAfter counts from t itself, so a short lifetime can never
+// produce a certificate that is already expired.
+func (o certOptions) validity(t time.Time) (notBefore, notAfter time.Time) {
+	notBefore = t.Truncate(1 * time.Hour)
+	if o.lifetime > 0 {
+		return notBefore, t.Add(o.lifetime)
+	}
+	return notBefore, defaultNotAfter
+}
+
+// newCASerial draws a random positive 128-bit serial for a self-signed
+// CA, so it can never collide with the counter-issued entity serials.
+func newCASerial() (*big.Int, error) {
+	limit := new(big.Int).Lsh(big.NewInt(1), 127)
+	n, err := rand.Int(rand.Reader, limit)
+	if err != nil {
+		return nil, err
+	}
+	// RFC 5280 requires a positive serial number.
+	return n.Add(n, big.NewInt(1)), nil
+}
+
 // MakeCA creates a self-signed CA bundle (cert + key in a single PEM file)
 // at the default mTLS path. Fails if the file already exists to avoid
 // clobbering an in-use CA.
-func MakeCA(organization, commonName string) error {
+func MakeCA(organization, commonName string, opts ...CertOption) error {
+	o, err := buildOptions(opts)
+	if err != nil {
+		return err
+	}
+
 	caPath, err := paths.MtlsCAPath()
 	if err != nil {
 		return err
@@ -53,18 +125,27 @@ func MakeCA(organization, commonName string) error {
 		return fmt.Errorf("generating CA key: %w", err)
 	}
 
+	serial, err := newCASerial()
+	if err != nil {
+		return fmt.Errorf("generating CA serial: %w", err)
+	}
+
+	notBefore, notAfter := o.validity(now())
 	ca := &x509.Certificate{
-		SerialNumber: big.NewInt(0),
+		SerialNumber: serial,
 		Subject: pkix.Name{
 			Organization: []string{organization},
 			CommonName:   commonName,
 		},
-		NotBefore:             time.Now().Truncate(1 * time.Hour),
-		NotAfter:              time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC),
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
 		IsCA:                  true,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
-		SignatureAlgorithm:    x509.ECDSAWithSHA256,
+		// This CA only ever signs entity certs; forbid intermediates.
+		MaxPathLen:         0,
+		MaxPathLenZero:     true,
+		SignatureAlgorithm: x509.ECDSAWithSHA256,
 	}
 
 	caBytes, err := x509.CreateCertificate(rand.Reader, ca, ca, &priv.PublicKey, priv)
@@ -77,15 +158,18 @@ func MakeCA(organization, commonName string) error {
 		return fmt.Errorf("marshaling CA key: %w", err)
 	}
 
+	// The counter is written first: a crash between the two writes must
+	// never leave a CA whose next serial is unknown (and reusable).
+	counter.SetInt64(firstEntitySerial)
+	if err := os.WriteFile(caCounterPath, []byte(counter.String()), permCounter); err != nil {
+		return fmt.Errorf("writing serial counter: %w", err)
+	}
+
 	if err := writeBundle(caPath,
 		pemBlock{"CERTIFICATE", caBytes},
 		pemBlock{"PRIVATE KEY", keyDER},
 	); err != nil {
 		return err
-	}
-
-	if err := os.WriteFile(caCounterPath, []byte(counter.String()), permCounter); err != nil {
-		return fmt.Errorf("writing serial counter: %w", err)
 	}
 
 	fmt.Printf("Wrote CA bundle: %s\n", caPath)
@@ -165,7 +249,12 @@ func splitIPsAndDNS(names []string) (dns []string, ips []net.IP) {
 }
 
 func makeCert(bundlePath, organization, commonName string,
-	domains []string, extKeyUsage []x509.ExtKeyUsage) error {
+	domains []string, extKeyUsage []x509.ExtKeyUsage, opts ...CertOption) error {
+
+	o, err := buildOptions(opts)
+	if err != nil {
+		return err
+	}
 
 	counterPath, err := paths.CACounterPath()
 	if err != nil {
@@ -193,16 +282,37 @@ func makeCert(bundlePath, organization, commonName string,
 		return fmt.Errorf("computing SKI: %w", err)
 	}
 
+	// Take a copy: the package-level counter is advanced below and must
+	// not alias the serial embedded in the certificate.
+	serial := new(big.Int).Set(&counter)
+	if serial.Sign() <= 0 {
+		// Counters written by pre-fix versions started at 0, which RFC
+		// 5280 forbids and which duplicates the old CA serial.
+		serial.SetInt64(firstEntitySerial)
+	}
+
+	notBefore, notAfter := o.validity(now())
+	// A leaf outliving its CA stops verifying once the CA expires. Cap
+	// the default expiry at the CA's; an explicit lifetime that
+	// overshoots is a mistake worth surfacing instead.
+	if notAfter.After(caCert.NotAfter) {
+		if o.lifetime > 0 {
+			return fmt.Errorf("certificate would expire at %s, after its CA (%s); use a shorter lifetime or re-issue the CA",
+				notAfter.UTC().Format(time.RFC3339), caCert.NotAfter.UTC().Format(time.RFC3339))
+		}
+		notAfter = caCert.NotAfter
+		fmt.Printf("Capping certificate expiry at the CA's: %s\n", notAfter.UTC().Format(time.RFC3339))
+	}
 	cert := &x509.Certificate{
-		SerialNumber: &counter,
+		SerialNumber: serial,
 		Subject: pkix.Name{
 			Organization: []string{organization},
 			CommonName:   commonName,
 		},
 		DNSNames:     dnsNames,
 		IPAddresses:  ipAddresses,
-		NotBefore:    time.Now().Truncate(1 * time.Hour),
-		NotAfter:     time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC),
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
 		ExtKeyUsage:  extKeyUsage,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		SubjectKeyId: skid,
@@ -218,6 +328,14 @@ func makeCert(bundlePath, organization, commonName string,
 		return fmt.Errorf("marshaling private key: %w", err)
 	}
 
+	// Persist the advanced counter before the bundle: a crash in
+	// between must burn a serial, never reuse one.
+	next := new(big.Int).Add(serial, big.NewInt(1))
+	if err := os.WriteFile(counterPath, []byte(next.String()), permCounter); err != nil {
+		return fmt.Errorf("writing serial counter: %w", err)
+	}
+	counter.Set(next)
+
 	// Entity bundle: entity cert + entity key + CA cert.
 	if err := writeBundle(bundlePath,
 		pemBlock{"CERTIFICATE", certBytes},
@@ -225,11 +343,6 @@ func makeCert(bundlePath, organization, commonName string,
 		pemBlock{"CERTIFICATE", caCert.Raw},
 	); err != nil {
 		return err
-	}
-
-	counter.Add(&counter, big.NewInt(1))
-	if err := os.WriteFile(counterPath, []byte(counter.String()), permCounter); err != nil {
-		return fmt.Errorf("writing serial counter: %w", err)
 	}
 
 	fmt.Printf("Wrote bundle: %s\n", bundlePath)
@@ -283,7 +396,8 @@ func writeBundle(path string, blocks ...pemBlock) error {
 }
 
 // MakeServerCert issues a named server certificate signed by the local CA.
-func MakeServerCert(name, organization, commonName string, domains []string) error {
+// The certificate is valid until 2100 unless WithLifetime says otherwise.
+func MakeServerCert(name, organization, commonName string, domains []string, opts ...CertOption) error {
 	if strings.EqualFold(strings.TrimSpace(name), "ca") {
 		return fmt.Errorf("name %q is reserved for CA material", name)
 	}
@@ -293,11 +407,12 @@ func MakeServerCert(name, organization, commonName string, domains []string) err
 		return err
 	}
 	return makeCert(bundlePath, organization, commonName, domains,
-		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, opts...)
 }
 
 // MakeClientCert issues a named client certificate signed by the local CA.
-func MakeClientCert(name, organization, commonName string, domains []string) error {
+// The certificate is valid until 2100 unless WithLifetime says otherwise.
+func MakeClientCert(name, organization, commonName string, domains []string, opts ...CertOption) error {
 	if strings.EqualFold(strings.TrimSpace(name), "ca") {
 		return fmt.Errorf("name %q is reserved for CA material", name)
 	}
@@ -307,5 +422,5 @@ func MakeClientCert(name, organization, commonName string, domains []string) err
 		return err
 	}
 	return makeCert(bundlePath, organization, commonName, domains,
-		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, opts...)
 }

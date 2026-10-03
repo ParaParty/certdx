@@ -19,6 +19,7 @@ func MakeClient(name string, args []string) error {
 		domains    = fs.StringSliceP("dns-names", "d", []string{}, "Client certificate DNS names (comma-separated)")
 		org        = fs.StringP("organization", "o", "CertDX Private", "Subject Organization")
 		commonName = fs.StringP("common-name", "c", commonNameTemplate, "Subject Common Name")
+		validFor   = registerValidForFlag(fs)
 		dataDir    = registerDataDirFlag(fs)
 		help       = fs.BoolP("help", "h", false, "Print help")
 	)
@@ -35,9 +36,14 @@ func MakeClient(name string, args []string) error {
 	}
 	cn := strings.ReplaceAll(*commonName, "{name}", *clientName)
 
+	opts, err := validForOptions(fs, *validFor)
+	if err != nil {
+		return err
+	}
+
 	applyDataDir(*dataDir)
 
-	if err := tools.MakeClientCert(*clientName, *org, cn, *domains); err != nil {
+	if err := tools.MakeClientCert(*clientName, *org, cn, *domains, opts...); err != nil {
 		return fmt.Errorf("create client cert: %w", err)
 	}
 	return nil

@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -130,7 +131,28 @@ func CACounterPath() (string, error) {
 	return filepath.Join(dir, "counter.txt"), nil
 }
 
+// checkFilenameComponent rejects values that would escape the directory
+// they are interpolated into. Anything that is not a plain filename
+// component — a path separator, "." or ".." — is an error rather than a
+// silently relocated file.
+func checkFilenameComponent(kind, v string) error {
+	if v == "" {
+		return fmt.Errorf("empty %s", kind)
+	}
+	if strings.ContainsAny(v, `/\`) || strings.ContainsRune(v, os.PathSeparator) ||
+		strings.ContainsRune(v, 0) {
+		return fmt.Errorf("invalid %s %q: must not contain a path separator", kind, v)
+	}
+	if v == "." || v == ".." || filepath.Base(v) != v {
+		return fmt.Errorf("invalid %s %q: must be a plain filename component", kind, v)
+	}
+	return nil
+}
+
 func MtlsBundlePath(name string) (string, error) {
+	if err := checkFilenameComponent("bundle name", name); err != nil {
+		return "", err
+	}
 	dir, err := MtlsDir()
 	if err != nil {
 		return "", err
@@ -139,6 +161,12 @@ func MtlsBundlePath(name string) (string, error) {
 }
 
 func ACMEPrivateKey(email, acmeProvider string) (string, error) {
+	if err := checkFilenameComponent("account email", email); err != nil {
+		return "", err
+	}
+	if err := checkFilenameComponent("acme provider", acmeProvider); err != nil {
+		return "", err
+	}
 	root, err := stateRoot()
 	if err != nil {
 		return "", err
