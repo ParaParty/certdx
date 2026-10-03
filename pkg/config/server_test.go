@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -247,6 +248,27 @@ func TestHttpServerConfigValidateSecureNoNames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no name") {
 		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+// Names feed the server's cert cache, which only holds canonical domain sets.
+func TestHttpServerConfigValidateCanonicalizesNames(t *testing.T) {
+	c := &HttpServerConfig{Enabled: true, APIPath: "/", Secure: true,
+		Names: []string{"WWW.Example.COM.", "example.com", "www.example.com"}}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	want := []string{"example.com", "www.example.com"}
+	if !slices.Equal(c.Names, want) {
+		t.Fatalf("names: got %v want %v", c.Names, want)
+	}
+}
+
+// A list of only blank names is no name at all.
+func TestHttpServerConfigValidateSecureBlankNames(t *testing.T) {
+	c := &HttpServerConfig{Enabled: true, APIPath: "/", Secure: true, Names: []string{"", "."}}
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error on secure http server with only blank names")
 	}
 }
 
