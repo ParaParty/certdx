@@ -17,6 +17,7 @@ import (
 	"pkg.para.party/certdx/pkg/acme/acmeproviders"
 	"pkg.para.party/certdx/pkg/acme/acmeproviders/google"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/paths"
 )
 
@@ -65,7 +66,7 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 			hmac = account.HmacEncoded
 		}
 
-		if err := RegisterAccount(c.ACME.Provider, c.ACME.Email, kid, hmac); err != nil {
+		if err := RegisterAccount(c.ACME.Provider, c.ACME.Email, kid, hmac, false); err != nil {
 			return nil, err
 		}
 	} else if err != nil {
@@ -101,10 +102,37 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 	return user, nil
 }
 
-func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
+// RegisterAccount registers a fresh ACME account and stores its private
+// key under the state root. The account key is the only proof of account
+// ownership certdx keeps, so an existing key is never replaced unless
+// force is set; when force is set the previous key is restored if the
+// registration fails half way through.
+func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 	keyPath, err := paths.ACMEPrivateKey(Email, ACMEProvider)
 	if err != nil {
 		return err
+	}
+
+	previousKey, err := os.ReadFile(keyPath)
+	switch {
+	case err == nil && !force:
+		return fmt.Errorf("ACME account key %s already exists, refusing to overwrite it "+
+			"(re-run with force to replace the account key)", keyPath)
+	case err != nil && !os.IsNotExist(err):
+		return fmt.Errorf("read existing ACME account key: %w", err)
+	}
+	hadPreviousKey := err == nil
+
+	// restoreKey undoes the key file write on any failure path: either put
+	// the pre-existing key back, or remove the one we just created.
+	restoreKey := func() {
+		if hadPreviousKey {
+			if err := os.WriteFile(keyPath, previousKey, 0o600); err != nil {
+				logging.Error("failed restoring previous ACME account key %s: %v", keyPath, err)
+			}
+			return
+		}
+		os.Remove(keyPath)
 	}
 
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
@@ -118,7 +146,12 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 	}
 	pemEncoded := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: x509Encoded})
 
+	if hadPreviousKey {
+		logging.Warn("overwriting existing ACME account key %s, the previous account "+
+			"will no longer be usable through certdx", keyPath)
+	}
 	if err := os.WriteFile(keyPath, pemEncoded, 0o600); err != nil {
+		restoreKey()
 		return fmt.Errorf("save ACME account key: %w", err)
 	}
 
@@ -132,7 +165,7 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 
 	client, err := lego.NewClient(config)
 	if err != nil {
-		os.Remove(keyPath)
+		restoreKey()
 		return fmt.Errorf("failed constructing acme client: %w", err)
 	}
 
@@ -150,13 +183,13 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 		myUser.Registration, err = client.Registration.Register(regOptions)
 	}
 	if err != nil {
-		os.Remove(keyPath)
+		restoreKey()
 		return fmt.Errorf("failed to register: %w", err)
 	}
 
 	reg, err := json.Marshal(myUser.Registration)
 	if err != nil {
-		os.Remove(keyPath)
+		restoreKey()
 		return fmt.Errorf("failed marshaling registration: %w", err)
 	}
 

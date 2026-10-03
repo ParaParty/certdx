@@ -15,6 +15,7 @@ func RegisterGoogleAccount(name string, args []string) error {
 		email       = fs.StringP("email", "e", "", "Email of registration")
 		keyID       = fs.StringP("kid", "k", "", "Key id of EAB")
 		hmac        = fs.StringP("hmac", "m", "", "B64HMAC of EAB")
+		force       = fs.BoolP("force", "f", false, "Overwrite an existing ACME account key")
 		help        = fs.BoolP("help", "h", false, "Print help")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -32,7 +33,7 @@ func RegisterGoogleAccount(name string, args []string) error {
 	if *testAccount {
 		provider = "googletest"
 	}
-	if err := acme.RegisterAccount(provider, *email, *keyID, *hmac); err != nil {
+	if err := acme.RegisterAccount(provider, *email, *keyID, *hmac, *force); err != nil {
 		return fmt.Errorf("register account: %w", err)
 	}
 	return nil

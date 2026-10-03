@@ -84,7 +84,14 @@ Cloud credentials).
 | `-k`, `--kid` | yes | EAB key id. |
 | `-m`, `--hmac` | yes | EAB B64 HMAC. |
 | `-t`, `--test-account` | | Register against the Google staging endpoint (`googletest`). |
+| `-f`, `--force` | | Overwrite an existing account key for this `(email, provider)` pair. |
 | `-h`, `--help` | | Print help. |
+
+Without `--force` the command refuses to run when
+`private/<email>_<provider>.key` already exists: re-registering mints a new
+account key, and the old one — the only way to manage the certificates
+already issued under it — would be gone. With `--force`, the previous key is
+put back if the new registration fails.
 
 Example:
 

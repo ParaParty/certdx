@@ -11,6 +11,7 @@ import (
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/s3"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/tencentcloud"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig) error {
@@ -20,32 +21,12 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 	}
 	switch typ {
 	case config.ChallengeTypeDns01:
-		opt := make([]dns01.ChallengeOption, 0)
-		dnsTimeout := defaultConservativeDNSTimeout
-
-		if p.DnsProvider.DisableCompletePropagationRequirement && !p.DnsProvider.ConservativeDNSCheck {
-			opt = append(opt, dns01.DisableAuthoritativeNssPropagationRequirement())
+		opt, timeout, err := dns01Options(p.DnsProvider)
+		if err != nil {
+			return err
 		}
-
-		// 添加自定义 DNS 服务器
-		if len(p.DnsProvider.Nameservers) > 0 {
-			opt = append(opt, dns01.AddRecursiveNameservers(p.DnsProvider.Nameservers))
-		}
-
-		// 添加 DNS 超时
-		if p.DnsProvider.DNSTimeout != "" {
-			timeout, err := time.ParseDuration(p.DnsProvider.DNSTimeout)
-			if err != nil {
-				return fmt.Errorf("invalid dnsTimeout %q: %w", p.DnsProvider.DNSTimeout, err)
-			}
-			dnsTimeout = timeout
+		if timeout > 0 {
 			clg = overridePropagationTimeout(clg, timeout)
-			opt = append(opt, dns01.AddDNSTimeout(timeout))
-		}
-
-		if p.DnsProvider.ConservativeDNSCheck {
-			checker := newConservativeChecker(p.DnsProvider.Nameservers, dnsTimeout)
-			opt = append(opt, dns01.WrapPreCheck(checker.Wrap))
 		}
 
 		if err := instance.Client.Challenge.SetDNS01Provider(clg, opt...); err != nil {
@@ -60,6 +41,63 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 	}
 
 	return nil
+}
+
+// dns01Options translates the [DnsProvider] config block into lego
+// challenge options. It also returns the parsed dnsTimeout (zero when
+// unset) so the caller can stretch the provider's overall propagation wait
+// to it.
+//
+// Note on nameservers: lego's default pre-check only uses the recursive
+// resolvers for zone / CNAME discovery, the TXT value itself is verified
+// against the authoritative nameservers. So once the authoritative
+// requirement is disabled, no TXT verification happens at all — the
+// configured resolvers are never asked for the record.
+// RecursiveNSsPropagationRequirement puts the verification back on them.
+// With the authoritative check still on the record is already verified, so
+// requiring it twice would only slow issuance down.
+//
+// conservativeDnsCheck replaces lego's pre-check and always checks every
+// authoritative server, so it overrides disableCompletePropagationRequirement.
+func dns01Options(p *config.DnsProvider) ([]dns01.ChallengeOption, time.Duration, error) {
+	opt := make([]dns01.ChallengeOption, 0)
+	dnsTimeout := defaultConservativeDNSTimeout
+
+	disableAuthoritative := p.DisableCompletePropagationRequirement && !p.ConservativeDNSCheck
+	if disableAuthoritative {
+		opt = append(opt, dns01.DisableAuthoritativeNssPropagationRequirement())
+		if len(p.Nameservers) == 0 {
+			logging.Warn("DnsProvider: disableCompletePropagationRequirement is set without nameservers, " +
+				"the TXT record is not verified at all before the CA is asked to validate")
+		}
+	}
+
+	// 添加自定义 DNS 服务器
+	if len(p.Nameservers) > 0 {
+		opt = append(opt, dns01.AddRecursiveNameservers(p.Nameservers))
+		if disableAuthoritative {
+			opt = append(opt, dns01.RecursiveNSsPropagationRequirement())
+		}
+	}
+
+	// 添加 DNS 超时
+	var timeout time.Duration
+	if p.DNSTimeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(p.DNSTimeout)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid dnsTimeout %q: %w", p.DNSTimeout, err)
+		}
+		dnsTimeout = timeout
+		opt = append(opt, dns01.AddDNSTimeout(timeout))
+	}
+
+	if p.ConservativeDNSCheck {
+		checker := newConservativeChecker(p.Nameservers, dnsTimeout)
+		opt = append(opt, dns01.WrapPreCheck(checker.Wrap))
+	}
+
+	return opt, timeout, nil
 }
 
 type propagationTimeoutProvider struct {
@@ -95,7 +133,7 @@ func getChallenger(legoCfg *lego.Config, p *config.ServerConfig) (string, challe
 		switch p.DnsProvider.Type {
 		case config.DnsProviderTypeCloudflare:
 			return makeCloudflareProvider(legoCfg, *p.DnsProvider)
-		case config.DnsProviderTypeTencentCloud:
+		case config.DnsProviderTypeTencentCloud, config.DnsProviderTypeTencent:
 			return makeTencentCloudProvider(legoCfg, *p.DnsProvider)
 		default:
 			return "", nil, fmt.Errorf("unknown dns provider type: %s", p.DnsProvider.Type)
