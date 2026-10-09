@@ -7,6 +7,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/paths"
 )
 
@@ -178,6 +179,7 @@ type ClientCertificate struct {
 }
 
 func (c *ClientCertificate) Validate(options *validatingConfiguration) error {
+	c.Domains = domain.Canonical(c.Domains)
 	if len(c.Domains) == 0 || c.Name == "" {
 		return fmt.Errorf("wrong certificate configuration for %s", c.Name)
 	}

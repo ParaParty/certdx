@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -60,6 +61,25 @@ func TestClientConfigValidateEmptyCertificatesAccepted(t *testing.T) {
 	err := c.Validate([]ValidatingOption{WithAcceptEmptyCertificatesList(true)})
 	if err != nil {
 		t.Fatalf("expected empty certificates to be accepted with option: %v", err)
+	}
+}
+
+func TestClientCertificateValidateCanonicalizesDomains(t *testing.T) {
+	c := &ClientCertificate{Name: "x", Domains: []string{"WWW.Example.COM.", "example.com", "www.example.com"}}
+	if err := c.Validate(&validatingConfiguration{acceptEmptyUpdateActions: true}); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if want := []string{"example.com", "www.example.com"}; !slices.Equal(c.Domains, want) {
+		t.Fatalf("domains: got %q want %q", c.Domains, want)
+	}
+}
+
+func TestClientCertificateValidateRejectsNoDomains(t *testing.T) {
+	for _, domains := range [][]string{nil, {"", "."}} {
+		c := &ClientCertificate{Name: "x", Domains: domains}
+		if err := c.Validate(&validatingConfiguration{acceptEmptyUpdateActions: true}); err == nil {
+			t.Fatalf("domains %q: expected error", domains)
+		}
 	}
 }
 
