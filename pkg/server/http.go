@@ -88,7 +88,10 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 		goto ERR
 	}
 
-	cachedCert = s.certCache.get(req.Domains)
+	cachedCert, err = s.certCache.get(req.Domains)
+	if err != nil {
+		goto ERR
+	}
 	if !s.isSubscribing(cachedCert) {
 		_, err = s.renew(r.Context(), cachedCert, false)
 		if err != nil {
@@ -116,6 +119,11 @@ ERR:
 		logging.Warn("Requested domains not allowed: %v", req.Domains)
 		(*w).Header().Set("Content-Type", "application/json")
 		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
+		return
+	}
+	if errors.Is(err, ErrNoDomains) {
+		logging.Warn("Http cert request from %s carries no domains", r.RemoteAddr)
+		http.Error(*w, "", http.StatusBadRequest)
 		return
 	}
 	logging.Error("Handle http cert request failed: %s", err)
@@ -147,7 +155,10 @@ func runHTTPServer(ctx context.Context, server *http.Server, listen func() error
 // iteration sub-ctx fires on either rootCtx or a fresh cert; runHTTPServer
 // drives the listener and the graceful shutdown for that iteration.
 func (s *CertDXServer) serveHttps(handler http.Handler) error {
-	entry := s.certCache.get(s.Config.HttpServer.Names)
+	entry, err := s.certCache.get(s.Config.HttpServer.Names)
+	if err != nil {
+		return fmt.Errorf("HTTPS listener certificate: %w", err)
+	}
 	s.subscribe(entry)
 	defer s.release(entry)
 

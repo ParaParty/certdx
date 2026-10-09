@@ -176,7 +176,11 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 			for name, domains := range packRequests {
 				logging.Info("Handling pack %s with domains %v in response to %s", name, domains, peer)
 
-				entry := sds.cdxsrv.certCache.get(domains)
+				entry, err := sds.cdxsrv.certCache.get(domains)
+				if err != nil {
+					sendStreamErr(ctx, errChan, fmt.Errorf("cert pack %s: %w", name, err))
+					return
+				}
 
 				reqChan := make(chan *discoveryv3.DiscoveryRequest)
 				dispatch[name] = reqChan
