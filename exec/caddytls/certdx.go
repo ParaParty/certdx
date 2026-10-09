@@ -107,6 +107,12 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	m.certDXDaemon.Config.Common.ReconnectDuration = d
 
 	for certID, domains := range m.CertificateDefs {
+		domains = domain.Canonical(domains)
+		if len(domains) == 0 {
+			return fmt.Errorf("certificate %q has no domains", certID)
+		}
+		// CertDXTls derives its lookup key from the stored domains.
+		m.CertificateDefs[certID] = domains
 		if err := m.certDXDaemon.AddCertToWatch(certID, domains); err != nil {
 			return fmt.Errorf("watch certificate %q: %w", certID, err)
 		}
