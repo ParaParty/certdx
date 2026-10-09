@@ -17,15 +17,13 @@ import (
 // distinguish allow-list rejection from other failures.
 var ErrNotAllowed = errors.New("domain not allowed")
 
-// Key is a stable, order-insensitive hash of a set of domain names. Two slices
-// containing the same domains in any order produce the same Key, so it is safe
-// to use as a map key for cert-cache lookups.
+// Key is a stable hash of a list of domain names, usable as a map key. Hash
+// Canonical output when case, order and duplicates must not matter.
 type Key uint64
 
-// AsKey hashes a slice of domain names into a Key. The input is canonicalized
-// before hashing, so case, trailing root dots, duplicates, and input order do
-// not affect the result.
-func AsKey(domains []string) Key {
+// Canonical returns domains lower-cased, without trailing root dots, blank
+// names and duplicates, sorted. The input slice is not modified.
+func Canonical(domains []string) []string {
 	canon := make([]string, 0, len(domains))
 	seen := make(map[string]struct{}, len(domains))
 	for _, d := range domains {
@@ -40,9 +38,13 @@ func AsKey(domains []string) Key {
 		canon = append(canon, d)
 	}
 	sort.Strings(canon)
+	return canon
+}
 
+// AsKey hashes domains as given; it does not canonicalize them.
+func AsKey(domains []string) Key {
 	h := fnv.New64a()
-	h.Write([]byte(strings.Join(canon, "\x00")))
+	h.Write([]byte(strings.Join(domains, "\x00")))
 	return Key(h.Sum64())
 }
 
