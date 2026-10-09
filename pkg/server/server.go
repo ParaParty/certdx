@@ -85,7 +85,11 @@ func (s *CertDXServer) loadCertStore() error {
 
 	s.certCache.mutex.Lock()
 	for _, cache := range s.certStore.entries {
-		entry := s.certCache.getNoLock(cache.Domains)
+		entry, err := s.certCache.getNoLock(cache.Domains)
+		if err != nil {
+			logging.Warn("Skipping cached cert for domains %v: %s", cache.Domains, err)
+			continue
+		}
 		entry.stateMu.Lock()
 		entry.cert = cache.Cert
 		entry.stateMu.Unlock()

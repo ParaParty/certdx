@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -199,18 +201,53 @@ func TestWaitForUpdateRespectsContextCancel(t *testing.T) {
 	}
 }
 
+func mustGet(t *testing.T, cc *certCache, domains []string) *certEntry {
+	t.Helper()
+	entry, err := cc.get(domains)
+	if err != nil {
+		t.Fatalf("get(%v): %v", domains, err)
+	}
+	return entry
+}
+
 func TestCertCacheGetCreatesAndDeduplicates(t *testing.T) {
 	cc := makeCertCache()
 
-	e1 := cc.get([]string{"a.com"})
-	e2 := cc.get([]string{"a.com"})
+	e1 := mustGet(t, &cc, []string{"a.com"})
+	e2 := mustGet(t, &cc, []string{"a.com"})
 	if e1 != e2 {
 		t.Fatal("get returned different entries for the same domains")
 	}
 
-	e3 := cc.get([]string{"b.com"})
+	e3 := mustGet(t, &cc, []string{"b.com"})
 	if e1 == e3 {
 		t.Fatal("get returned the same entry for different domains")
+	}
+}
+
+func TestCertCacheGetRejectsEmptyDomains(t *testing.T) {
+	cc := makeCertCache()
+
+	for _, domains := range [][]string{nil, {}, {"", "."}} {
+		if _, err := cc.get(domains); !errors.Is(err, ErrNoDomains) {
+			t.Fatalf("get(%q): err = %v, want ErrNoDomains", domains, err)
+		}
+	}
+	if len(cc.entries) != 0 {
+		t.Fatalf("cache size = %d, want 0", len(cc.entries))
+	}
+}
+
+func TestCertCacheGetCanonicalizesDomains(t *testing.T) {
+	cc := makeCertCache()
+
+	e1 := mustGet(t, &cc, []string{"WWW.Example.COM.", "example.com", "www.example.com"})
+	e2 := mustGet(t, &cc, []string{"www.example.com", "example.com"})
+	if e1 != e2 {
+		t.Fatal("equivalent domain sets got different entries")
+	}
+	if want := []string{"example.com", "www.example.com"}; !slices.Equal(e1.domains, want) {
+		t.Fatalf("entry domains: got %q want %q", e1.domains, want)
 	}
 }
 

@@ -58,10 +58,14 @@ func (s *CertStore) Load() error {
 	}
 
 	for _, entry := range raw {
+		if entry == nil {
+			continue
+		}
 		if !entry.Cert.IsValid() {
 			logging.Info("Discarding expired cert for domains: %v", entry.Domains)
 			continue
 		}
+		entry.Domains = domain.Canonical(entry.Domains)
 		s.entries[domain.AsKey(entry.Domains)] = entry
 	}
 

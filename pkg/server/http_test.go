@@ -128,7 +128,7 @@ func TestHandleCertReqValidDomainsCachedCert(t *testing.T) {
 	s := makeTestServer("", "/", []string{"example.com"})
 
 	// Pre-populate the cert cache with a valid cert.
-	entry := s.certCache.get([]string{"example.com"})
+	entry := mustGet(t, &s.certCache, []string{"example.com"})
 	entry.stateMu.Lock()
 	entry.cert = CertT{
 		FullChain:   []byte("PEM-chain"),
@@ -157,6 +157,51 @@ func TestHandleCertReqValidDomainsCachedCert(t *testing.T) {
 	}
 	if string(resp.Key) != "PEM-key" {
 		t.Errorf("key: got %q want %q", resp.Key, "PEM-key")
+	}
+}
+
+func TestHandleCertReqCanonicalizesDomains(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+
+	entry := mustGet(t, &s.certCache, []string{"example.com", "www.example.com"})
+	entry.stateMu.Lock()
+	entry.cert = CertT{
+		FullChain:   []byte("PEM-chain"),
+		Key:         []byte("PEM-key"),
+		ValidBefore: time.Now().Add(time.Hour),
+	}
+	entry.subscribing = 1
+	entry.stateMu.Unlock()
+
+	body, _ := json.Marshal(api.HttpCertReq{Domains: []string{"WWW.Example.COM.", "example.com", "www.example.com"}})
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusOK)
+	}
+	if n := len(s.certCache.entries); n != 1 {
+		t.Fatalf("cache entries = %d, want 1", n)
+	}
+}
+
+func TestHandleCertReqEmptyDomains(t *testing.T) {
+	for _, domains := range [][]string{nil, {}} {
+		s := makeTestServer("", "/", []string{"example.com"})
+		body, _ := json.Marshal(api.HttpCertReq{Domains: domains})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		var rw http.ResponseWriter = w
+		s.handleCertReq(&rw, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("domains %q: got status %d want %d", domains, w.Code, http.StatusBadRequest)
+		}
+		if n := len(s.certCache.entries); n != 0 {
+			t.Fatalf("domains %q created %d cache entries", domains, n)
+		}
 	}
 }
 

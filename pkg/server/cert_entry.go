@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"pkg.para.party/certdx/pkg/domain"
 )
+
+// ErrNoDomains is returned when a cert is requested for an empty domain set.
+var ErrNoDomains = errors.New("no domains requested")
 
 // certEntry holds one domain bundle's cached cert, the "renewed" broadcast
 // channel, and the renewal-goroutine lifecycle.
@@ -22,7 +26,7 @@ import (
 //     transitions 0->1 spawn the renewal goroutine; release transitions 1->0
 //     cancel it via cancelRenew.
 type certEntry struct {
-	domains []string
+	domains []string // canonical, see domain.Canonical
 
 	renewMu sync.Mutex // serializes Renew (held during ACME)
 
@@ -53,19 +57,26 @@ func newCertEntry(domains []string) *certEntry {
 	}
 }
 
-func (c *certCache) getNoLock(domains []string) *certEntry {
+// getNoLock returns the entry for domains, creating it if absent. The caller
+// must hold c.mutex.
+func (c *certCache) getNoLock(domains []string) (*certEntry, error) {
+	domains = domain.Canonical(domains)
+	if len(domains) == 0 {
+		return nil, ErrNoDomains
+	}
+
 	entryKey := domain.AsKey(domains)
 	entry, ok := c.entries[entryKey]
 	if ok {
-		return entry
+		return entry, nil
 	}
 
 	entry = newCertEntry(domains)
 	c.entries[entryKey] = entry
-	return entry
+	return entry, nil
 }
 
-func (c *certCache) get(domains []string) *certEntry {
+func (c *certCache) get(domains []string) (*certEntry, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.getNoLock(domains)

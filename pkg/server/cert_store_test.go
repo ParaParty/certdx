@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -73,6 +74,58 @@ func TestCertStoreLoadValid(t *testing.T) {
 	}
 	if string(loaded.Cert.FullChain) != "chain" {
 		t.Fatalf("fullchain: got %q", loaded.Cert.FullChain)
+	}
+}
+
+func TestCertStoreLoadSkipsNullEntries(t *testing.T) {
+	cs := makeTempCertStore(t)
+
+	valid := CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)}
+	raw := map[string]*certStoreEntry{
+		"1": {Domains: []string{"example.com"}, Cert: valid},
+		"2": nil,
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(cs.path, b, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := cs.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cs.entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(cs.entries))
+	}
+}
+
+func TestCertStoreLoadCanonicalizesLegacyEntries(t *testing.T) {
+	cs := makeTempCertStore(t)
+
+	valid := CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)}
+	raw := map[string]*certStoreEntry{
+		"1": {Domains: []string{"www.example.com", "Example.com."}, Cert: valid},
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(cs.path, b, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := cs.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"example.com", "www.example.com"}
+	loaded, ok := cs.entries[domain.AsKey(want)]
+	if !ok {
+		t.Fatal("legacy entry not keyed by its canonical domain set")
+	}
+	if !slices.Equal(loaded.Domains, want) {
+		t.Fatalf("domains: got %q want %q", loaded.Domains, want)
 	}
 }
 
