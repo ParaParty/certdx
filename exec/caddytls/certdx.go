@@ -14,6 +14,7 @@ import (
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/mtls"
 )
 
 func init() {
@@ -140,6 +141,11 @@ func (m *CertDXCaddyDaemon) validateServers() error {
 			if err := s.Validate(); err != nil {
 				return err
 			}
+			if s.AuthMethod == config.HTTP_AUTH_MTLS {
+				if _, err := mtls.LoadClient(s.PEM); err != nil {
+					return fmt.Errorf("http server %s: %w", s.Url, err)
+				}
+			}
 		}
 	case config.CLIENT_MODE_GRPC:
 		servers := []*config.ClientGRPCServer{&m.GRPC.MainServer}
@@ -148,6 +154,9 @@ func (m *CertDXCaddyDaemon) validateServers() error {
 		}
 		for _, s := range servers {
 			if err := s.Validate(); err != nil {
+				return fmt.Errorf("grpc server %s: %w", s.Server, err)
+			}
+			if _, err := mtls.LoadClient(s.PEM); err != nil {
 				return fmt.Errorf("grpc server %s: %w", s.Server, err)
 			}
 		}
@@ -163,14 +172,18 @@ func (m *CertDXCaddyDaemon) Start() error {
 			return fmt.Errorf("http main_server url is required")
 		}
 		m.wg.Go(func() {
-			m.certDXDaemon.HttpMain()
+			if err := m.certDXDaemon.HttpMain(); err != nil {
+				m.logger.Error("certdx http client stopped", zap.Error(err))
+			}
 		})
 	case config.CLIENT_MODE_GRPC:
 		if m.certDXDaemon.Config.GRPC.MainServer.Server == "" {
 			return fmt.Errorf("grpc main_server is required")
 		}
 		m.wg.Go(func() {
-			m.certDXDaemon.GRPCMain()
+			if err := m.certDXDaemon.GRPCMain(); err != nil {
+				m.logger.Error("certdx grpc client stopped", zap.Error(err))
+			}
 		})
 	default:
 		return fmt.Errorf("unsupported mode %q", mode)
