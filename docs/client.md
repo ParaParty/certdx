@@ -93,7 +93,7 @@ stops the others or the daemon.
 | Key | Type | Notes |
 | --- | --- | --- |
 | `savePath` | path | Output directory. The certificate is written to `<savePath>/<name>.pem` and the private key to `<savePath>/<name>.key`. |
-| `reloadCommand` | string | Shell command executed after a successful write. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
+| `reloadCommand` | string | Shell command executed after a successful write. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. It is killed if it runs longer than 5 minutes. |
 
 #### `type = "tencentCloud"`
 
