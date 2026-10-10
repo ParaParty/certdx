@@ -29,6 +29,20 @@ const httpCertWaitTimeout = 30 * time.Second
 
 var errCertNotReady = errors.New("certificate not issued yet")
 
+// newAPIServer builds an HTTP API server. There is no WriteTimeout: a request
+// may wait on a synchronous ACME issuance.
+func (s *CertDXServer) newAPIServer(handler http.Handler, tlsConfig *tls.Config) *http.Server {
+	return &http.Server{
+		Addr:              s.Config.HttpServer.Listen,
+		Handler:           handler,
+		TLSConfig:         tlsConfig,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ErrorLog:          logging.ErrorLogger(),
+	}
+}
+
 func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == s.Config.HttpServer.APIPath {
 		switch r.Method {
@@ -203,15 +217,10 @@ func (s *CertDXServer) serveHttps(handler http.Handler) error {
 			return fmt.Errorf("load HTTPS certificate: %w", err)
 		}
 
-		server := &http.Server{
-			Addr:    s.Config.HttpServer.Listen,
-			Handler: handler,
-			TLSConfig: &tls.Config{
-				MinVersion:   tls.VersionTLS12,
-				Certificates: []tls.Certificate{certificate},
-			},
-			ErrorLog: logging.ErrorLogger(),
-		}
+		server := s.newAPIServer(handler, &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{certificate},
+		})
 
 		// iterCtx fires on either rootCtx or a fresh cert. WaitForUpdate
 		// runs in a goroutine that calls cancel() on update; cancel is
@@ -240,11 +249,7 @@ func (s *CertDXServer) serveHttps(handler http.Handler) error {
 // serveHttp runs the plain (unencrypted) token-auth HTTP API. Used only
 // when token auth is enabled and Secure is false.
 func (s *CertDXServer) serveHttp(handler http.Handler) error {
-	server := &http.Server{
-		Addr:     s.Config.HttpServer.Listen,
-		Handler:  handler,
-		ErrorLog: logging.ErrorLogger(),
-	}
+	server := s.newAPIServer(handler, nil)
 	logging.Info("Http server started")
 	defer logging.Info("Http server stopped")
 	return runHTTPServer(s.rootCtx, server, server.ListenAndServe)
@@ -257,12 +262,7 @@ func (s *CertDXServer) serveHttpMtls(handler http.Handler) error {
 		return err
 	}
 
-	server := &http.Server{
-		Addr:      s.Config.HttpServer.Listen,
-		Handler:   handler,
-		TLSConfig: mtlsConfig,
-		ErrorLog:  logging.ErrorLogger(),
-	}
+	server := s.newAPIServer(handler, mtlsConfig)
 	logging.Info("Http mtls server started")
 	defer logging.Info("Http mtls server stopped")
 	return runHTTPServer(s.rootCtx, server, func() error {
