@@ -28,6 +28,10 @@ const httpShutdownTimeout = 30 * time.Second
 const httpCertWaitTimeout = 30 * time.Second
 
 var errCertNotReady = errors.New("certificate not issued yet")
+var errBadRequest = errors.New("bad request")
+
+// maxCertReqBodySize bounds the JSON body of a cert request.
+const maxCertReqBodySize = 64 << 10
 
 // newAPIServer builds an HTTP API server. There is no WriteTimeout: a request
 // may wait on a synchronous ACME issuance.
@@ -94,11 +98,13 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	var cert CertT
 	var seen uint64
 
+	r.Body = http.MaxBytesReader(*w, r.Body, maxCertReqBodySize)
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		if err == io.EOF {
 			err = fmt.Errorf("no body")
 		}
+		err = fmt.Errorf("%w: %w", errBadRequest, err)
 		goto ERR
 	}
 
@@ -156,8 +162,8 @@ ERR:
 		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
 		return
 	}
-	if errors.Is(err, ErrNoDomains) {
-		logging.Warn("Http cert request from %s carries no domains", r.RemoteAddr)
+	if errors.Is(err, ErrNoDomains) || errors.Is(err, errBadRequest) {
+		logging.Warn("Bad http cert request from %s: %s", r.RemoteAddr, err)
 		http.Error(*w, "", http.StatusBadRequest)
 		return
 	}
