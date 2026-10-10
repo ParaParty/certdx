@@ -127,7 +127,7 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 		return false, nil
 	}
 
-	newValidBefore := time.Now().Truncate(1 * time.Hour).Add(s.Config.ACME.CertLifeTimeDuration)
+	newValidBefore := targetValidBefore(time.Now(), s.Config.ACME.CertLifeTimeDuration)
 
 	var fullchain, key []byte
 	var err error
@@ -138,6 +138,13 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	}
 	if err != nil {
 		return false, err
+	}
+
+	if notAfter, err := leafNotAfter(fullchain); err != nil {
+		logging.Warn("Could not read NotAfter of issued cert %v: %s", c.domains, err)
+	} else if clamped := clampValidBefore(time.Now(), newValidBefore, notAfter, s.Config.ACME.RenewTimeLeftDuration); !clamped.Equal(newValidBefore) {
+		logging.Info("Issued cert %v expires at %s, renewing it from %s", c.domains, notAfter, clamped)
+		newValidBefore = clamped
 	}
 
 	newCert := CertT{
