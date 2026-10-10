@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
@@ -14,6 +15,9 @@ import (
 	"github.com/go-acme/lego/v4/challenge/http01"
 	"pkg.para.party/certdx/pkg/config"
 )
+
+// requestTimeout bounds each S3 call; lego's challenge callbacks take no context.
+const requestTimeout = 30 * time.Second
 
 // HTTPProvider implements ChallengeProvider for `http-01` challenge.
 type HTTPProvider struct {
@@ -63,7 +67,8 @@ func NewHTTPProvider(cfg config.S3Client) (*HTTPProvider, error) {
 
 // Present makes the token available at `HTTP01ChallengePath(token)` by creating a file in the given s3 bucket.
 func (s *HTTPProvider) Present(domain, token, keyAuth string) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
 
 	params := &s3.PutObjectInput{
 		ACL:    "public-read",
@@ -81,7 +86,8 @@ func (s *HTTPProvider) Present(domain, token, keyAuth string) error {
 
 // CleanUp removes the file created for the challenge.
 func (s *HTTPProvider) CleanUp(domain, token, keyAuth string) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
 
 	params := &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
