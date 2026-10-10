@@ -13,8 +13,28 @@ import (
 	"pkg.para.party/certdx/pkg/config"
 )
 
+func mustMakeClient(t *testing.T, opts ...CertDXHttpClientOption) *CertDXHttpClient {
+	t.Helper()
+	c, err := MakeCertDXHttpClient(opts...)
+	if err != nil {
+		t.Fatalf("MakeCertDXHttpClient: %v", err)
+	}
+	return c
+}
+
+func TestMakeCertDXHttpClientBadMtlsBundle(t *testing.T) {
+	_, err := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+		Url:              "https://example.com",
+		AuthMethod:       config.HTTP_AUTH_MTLS,
+		ClientMtlsConfig: config.ClientMtlsConfig{PEM: "/nonexistent/client.pem"},
+	}))
+	if err == nil {
+		t.Fatal("expected error for a missing mtls bundle")
+	}
+}
+
 func TestMakeCertDXHttpClientDefaults(t *testing.T) {
-	c := MakeCertDXHttpClient()
+	c := mustMakeClient(t)
 	if c.HttpClient == nil {
 		t.Fatal("HttpClient is nil")
 	}
@@ -27,13 +47,16 @@ func TestMakeCertDXHttpClientDefaults(t *testing.T) {
 }
 
 func TestWithCertDXInsecure(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXInsecure())
+	c := mustMakeClient(t, WithCertDXInsecure())
 	tr, ok := c.HttpClient.Transport.(*http.Transport)
 	if !ok {
 		t.Fatal("transport is not *http.Transport")
 	}
 	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("InsecureSkipVerify not set")
+	}
+	if tr.IdleConnTimeout != idleConnTimeout {
+		t.Fatalf("IdleConnTimeout: got %v want %v", tr.IdleConnTimeout, idleConnTimeout)
 	}
 }
 
@@ -43,14 +66,14 @@ func TestWithCertDXServerInfo(t *testing.T) {
 		AuthMethod: config.HTTP_AUTH_TOKEN,
 		Token:      "tok",
 	}
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(srv))
+	c := mustMakeClient(t, WithCertDXServerInfo(srv))
 	if c.Server != srv {
 		t.Fatal("Server not set by option")
 	}
 }
 
 func TestMakeGetCertRequestMethod(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: "https://example.com/api",
 	}))
 
@@ -67,7 +90,7 @@ func TestMakeGetCertRequestMethod(t *testing.T) {
 }
 
 func TestMakeGetCertRequestTokenHeader(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url:        "https://example.com",
 		AuthMethod: config.HTTP_AUTH_TOKEN,
 		Token:      "secret",
@@ -84,7 +107,7 @@ func TestMakeGetCertRequestTokenHeader(t *testing.T) {
 }
 
 func TestMakeGetCertRequestNoTokenHeader(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url:        "https://example.com",
 		AuthMethod: config.HTTP_AUTH_TOKEN,
 		Token:      "",
@@ -100,7 +123,7 @@ func TestMakeGetCertRequestNoTokenHeader(t *testing.T) {
 }
 
 func TestMakeGetCertRequestBody(t *testing.T) {
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: "https://example.com",
 	}))
 
@@ -136,7 +159,7 @@ func TestGetCertCtxSuccess(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 
@@ -161,7 +184,7 @@ func TestGetCertCtxNon200(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 
@@ -178,7 +201,7 @@ func TestGetCertCtxBadJSON(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 
@@ -200,7 +223,7 @@ func TestGetCertDelegatesToGetCertCtx(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := MakeCertDXHttpClient(WithCertDXServerInfo(&config.ClientHttpServer{
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
 		Url: ts.URL,
 	}))
 

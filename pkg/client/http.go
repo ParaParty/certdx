@@ -12,7 +12,6 @@ import (
 
 	"pkg.para.party/certdx/pkg/api"
 	"pkg.para.party/certdx/pkg/config"
-	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/mtls"
 )
 
@@ -21,35 +20,43 @@ type CertDXHttpClient struct {
 	Server     *config.ClientHttpServer
 }
 
-type CertDXHttpClientOption func(client *CertDXHttpClient)
+type CertDXHttpClientOption func(client *CertDXHttpClient) error
+
+// idleConnTimeout matches http.DefaultTransport and stays below the server's
+// IdleTimeout, so the client closes idle connections first.
+const idleConnTimeout = 90 * time.Second
 
 func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOption {
-	return func(client *CertDXHttpClient) {
+	return func(client *CertDXHttpClient) error {
 		client.Server = server
 
 		if server.AuthMethod == config.HTTP_AUTH_MTLS {
 			cfg, err := mtls.LoadClient(server.PEM)
 			if err != nil {
-				logging.Fatal("load mtls bundle: %s", err)
+				return fmt.Errorf("load mtls bundle: %w", err)
 			}
 			client.HttpClient.Transport = &http.Transport{
 				TLSClientConfig: cfg,
+				IdleConnTimeout: idleConnTimeout,
 			}
 		}
+		return nil
 	}
 }
 
 func WithCertDXInsecure() CertDXHttpClientOption {
-	return func(client *CertDXHttpClient) {
+	return func(client *CertDXHttpClient) error {
 		client.HttpClient.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
 			},
+			IdleConnTimeout: idleConnTimeout,
 		}
+		return nil
 	}
 }
 
-func MakeCertDXHttpClient(s ...CertDXHttpClientOption) *CertDXHttpClient {
+func MakeCertDXHttpClient(s ...CertDXHttpClientOption) (*CertDXHttpClient, error) {
 	ret := &CertDXHttpClient{
 		HttpClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -57,10 +64,12 @@ func MakeCertDXHttpClient(s ...CertDXHttpClientOption) *CertDXHttpClient {
 	}
 
 	for _, item := range s {
-		item(ret)
+		if err := item(ret); err != nil {
+			return nil, err
+		}
 	}
 
-	return ret
+	return ret, nil
 }
 
 func (c *CertDXHttpClient) makeGetCertRequest(ctx context.Context, domains []string) (*http.Request, error) {
