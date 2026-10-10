@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,87 @@ func TestMakeCertDXHttpClientBadMtlsBundle(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected error for a missing mtls bundle")
+	}
+}
+
+func TestPollInterval(t *testing.T) {
+	cases := []struct {
+		renewTimeLeft, want time.Duration
+	}{
+		{24 * time.Hour, 6 * time.Hour},
+		{16 * time.Second, 4 * time.Second},
+		{2 * time.Second, time.Second},
+		{0, time.Minute},
+		{-time.Hour, time.Minute},
+	}
+	for _, tc := range cases {
+		if got := pollInterval(tc.renewTimeLeft); got != tc.want {
+			t.Errorf("pollInterval(%s) = %s, want %s", tc.renewTimeLeft, got, tc.want)
+		}
+	}
+}
+
+func TestHttpPollerFailover(t *testing.T) {
+	serve := func(fullchain string, down *atomic.Bool) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if down.Load() {
+				http.Error(w, "", http.StatusServiceUnavailable)
+				return
+			}
+			json.NewEncoder(w).Encode(api.HttpCertResp{FullChain: []byte(fullchain), RenewTimeLeft: 24 * time.Hour})
+		}))
+	}
+	var mainDown, standbyDown atomic.Bool
+	mainDown.Store(true)
+	mainSrv := serve("main", &mainDown)
+	defer mainSrv.Close()
+	standbySrv := serve("standby", &standbyDown)
+	defer standbySrv.Close()
+
+	d := MakeCertDXClientDaemon()
+	defer d.Stop()
+	d.Config.Common.RetryCount = 2
+	main := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{Url: mainSrv.URL}))
+	standby := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{Url: standbySrv.URL}))
+	cert := &watchingCert{
+		Config:     config.ClientCertificate{Name: "x", Domains: []string{"example.com"}},
+		UpdateChan: make(chan certData, 1),
+	}
+	p := d.newHttpPoller(cert, main, standby)
+
+	expectWait := func(step string, want time.Duration) {
+		t.Helper()
+		if got := p.poll(); got != want {
+			t.Fatalf("%s: wait %s, want %s", step, got, want)
+		}
+	}
+	expectCert := func(want string) {
+		t.Helper()
+		if got := <-cert.UpdateChan; string(got.Fullchain) != want {
+			t.Fatalf("delivered %q, want %q", got.Fullchain, want)
+		}
+	}
+
+	// Main gets retryCount attempts on a backoff, then the standby takes over.
+	expectWait("main 1/2", pollRetryMin)
+	expectWait("main 2/2", 0)
+	expectWait("standby", 6*time.Hour)
+	expectCert("standby")
+
+	// The next round starts over from the main server.
+	mainDown.Store(false)
+	expectWait("main back", 6*time.Hour)
+	expectCert("main")
+
+	// Both down: each server uses up its retries, then the poller idles.
+	mainDown.Store(true)
+	standbyDown.Store(true)
+	expectWait("main 1/2", pollRetryMin)
+	expectWait("main 2/2", 0)
+	expectWait("standby 1/2", pollRetryMin)
+	expectWait("standby 2/2", pollIdleWait)
+	if p.current != 0 {
+		t.Fatal("poller did not go back to the main server")
 	}
 }
 

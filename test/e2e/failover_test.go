@@ -84,7 +84,7 @@ func TestHTTPMainToStandbyFailover(t *testing.T) {
 	mainSrv.Stop(2 * time.Second)
 	t.Log("main server stopped")
 
-	second := harness.WaitForCertChange(t, certPath, first, 30*time.Second)
+	second := harness.WaitForCertChange(t, certPath, first, 60*time.Second)
 	t.Logf("post-failover cert delivered (serial %s)", second.SerialNumber)
 }
 
@@ -141,7 +141,7 @@ func TestHTTPFailoverThenFallback(t *testing.T) {
 		t.Fatalf("main port did not free: %s", err)
 	}
 	t.Log("phase 2: main stopped")
-	second := harness.WaitForCertChange(t, certPath, first, 30*time.Second)
+	second := harness.WaitForCertChange(t, certPath, first, 60*time.Second)
 	t.Logf("phase 2: standby delivered cert (serial %s)", second.SerialNumber)
 
 	// Phase 3: bring main back; client must fall back to it.
