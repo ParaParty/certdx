@@ -205,9 +205,36 @@ func TestHttpProviderValidateS3Nil(t *testing.T) {
 }
 
 func TestHttpProviderValidateS3Valid(t *testing.T) {
-	p := &HttpProvider{Type: HttpProviderTypeS3, S3: &S3Client{}}
+	p := &HttpProvider{Type: HttpProviderTypeS3, S3: &S3Client{
+		Bucket: "b", URL: "https://s3.example.com", AccessKeyId: "id", AccessKeySecret: "secret",
+	}}
 	if err := p.Validate(); err != nil {
 		t.Fatalf("valid s3 provider: %v", err)
+	}
+}
+
+func TestHttpProviderValidateS3MissingFields(t *testing.T) {
+	p := &HttpProvider{Type: HttpProviderTypeS3, S3: &S3Client{Bucket: "b"}}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected error on incomplete S3 config")
+	}
+}
+
+func TestDnsProviderValidateNameservers(t *testing.T) {
+	base := DnsProvider{Type: DnsProviderTypeCloudflare, Email: "a@b.com", APIKey: "key"}
+	for _, ns := range []string{"8.8.8.8", "8.8.8.8:53", "dns.example.com:5353", "2001:db8::1", "[2001:db8::1]:53"} {
+		p := base
+		p.Nameservers = []string{ns}
+		if err := p.Validate(); err != nil {
+			t.Errorf("%q: %v", ns, err)
+		}
+	}
+	for _, ns := range []string{"", "udp://8.8.8.8", "8.8.8.8:0", "8.8.8.8:dns", "dns example.com"} {
+		p := base
+		p.Nameservers = []string{ns}
+		if err := p.Validate(); err == nil {
+			t.Errorf("%q: expected error", ns)
+		}
 	}
 }
 
@@ -296,6 +323,35 @@ func TestServerConfigParseDurationInvalidRenewTimeLeft(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "RenewTimeLeft") {
 		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func TestServerConfigParseDurationRejectsNonPositive(t *testing.T) {
+	for _, tc := range []struct{ life, left string }{{"0s", "24h"}, {"168h", "-1h"}} {
+		c := &ServerConfig{}
+		c.SetDefault()
+		c.ACME.CertLifeTime, c.ACME.RenewTimeLeft = tc.life, tc.left
+		if err := c.parseDuration(); err == nil || !strings.Contains(err.Error(), "must be positive") {
+			t.Fatalf("%s/%s: err = %v", tc.life, tc.left, err)
+		}
+	}
+}
+
+func TestServerConfigParseDurationGoogleLifetimeCap(t *testing.T) {
+	c := &ServerConfig{}
+	c.SetDefault()
+	c.ACME.Provider = "google"
+	c.ACME.CertLifeTime, c.ACME.RenewTimeLeft = "1440h", "720h" // 60d + 30d
+	if err := c.parseDuration(); err != nil {
+		t.Fatalf("90 days should be accepted: %v", err)
+	}
+	c.ACME.CertLifeTime = "1441h"
+	if err := c.parseDuration(); err == nil {
+		t.Fatal("expected error over 90 days")
+	}
+	c.ACME.Provider = "r3"
+	if err := c.parseDuration(); err != nil {
+		t.Fatalf("non-Google providers are not capped: %v", err)
 	}
 }
 
