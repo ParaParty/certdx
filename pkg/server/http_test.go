@@ -115,8 +115,20 @@ func TestHandleCertReqEmptyBody(t *testing.T) {
 	w := httptest.NewRecorder()
 	var rw http.ResponseWriter = w
 	s.handleCertReq(&rw, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("empty body: got %d want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("empty body: got %d want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleCertReqBodyTooLarge(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	body := `{"domains":["` + strings.Repeat("a", maxCertReqBodySize) + `"]}`
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("oversized body: got %d want %d", w.Code, http.StatusBadRequest)
 	}
 }
 
@@ -309,7 +321,7 @@ func TestHandleCertReqInvalidJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	var rw http.ResponseWriter = w
 	s.handleCertReq(&rw, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("invalid json: got %d want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid json: got %d want %d", w.Code, http.StatusBadRequest)
 	}
 }
