@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"pkg.para.party/certdx/pkg/api"
@@ -112,6 +113,10 @@ func (r *CertDXClientDaemon) HttpMain() error {
 }
 
 func (r *CertDXClientDaemon) makeHttpClient(server *config.ClientHttpServer) (*CertDXHttpClient, error) {
+	if server.AuthMethod == config.HTTP_AUTH_TOKEN && server.Token != "" &&
+		strings.HasPrefix(strings.ToLower(server.Url), "http://") {
+		logging.Warn("HTTP API token is sent unencrypted to %s", server.Url)
+	}
 	opts := append(slices.Clone(r.ClientOpt), WithCertDXServerInfo(server))
 	return MakeCertDXHttpClient(opts...)
 }
