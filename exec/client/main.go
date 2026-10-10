@@ -61,6 +61,7 @@ func init() {
 
 	certDXDaemon = client.MakeCertDXClientDaemon()
 	if *test {
+		logging.Warn("INSECURE: --test skips HTTP server certificate verification")
 		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
 	}
 
