@@ -205,6 +205,15 @@ func TestClientConfigValidateHttpTokenNoMtlsCheck(t *testing.T) {
 	}
 }
 
+func TestClientHttpServerValidateAuthMethod(t *testing.T) {
+	for _, method := range []string{"", "mTLS", "none"} {
+		s := &ClientHttpServer{Url: "https://example.com", AuthMethod: method}
+		if err := s.Validate(); err == nil {
+			t.Fatalf("authMethod %q: expected error", method)
+		}
+	}
+}
+
 func TestClientConfigSetDefault(t *testing.T) {
 	c := &ClientConfig{}
 	c.SetDefault()

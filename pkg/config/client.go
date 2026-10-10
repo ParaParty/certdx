@@ -152,11 +152,14 @@ type ClientHttpServer struct {
 }
 
 func (c *ClientHttpServer) Validate() error {
-	if c.AuthMethod == HTTP_AUTH_MTLS {
+	switch c.AuthMethod {
+	case HTTP_AUTH_TOKEN:
+		return nil
+	case HTTP_AUTH_MTLS:
 		return c.ClientMtlsConfig.Validate()
+	default:
+		return fmt.Errorf("http server %s: authMethod must be %q or %q, got %q", c.Url, HTTP_AUTH_TOKEN, HTTP_AUTH_MTLS, c.AuthMethod)
 	}
-
-	return nil
 }
 
 type ClientGRPCServer struct {
