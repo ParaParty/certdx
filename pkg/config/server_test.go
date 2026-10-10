@@ -230,7 +230,7 @@ func TestHttpServerConfigValidateDisabled(t *testing.T) {
 }
 
 func TestHttpServerConfigValidateAPIPathAutoPrefix(t *testing.T) {
-	c := &HttpServerConfig{Enabled: true, APIPath: "api/cert"}
+	c := &HttpServerConfig{Enabled: true, APIPath: "api/cert", AuthMethod: HTTP_AUTH_TOKEN}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,6 +247,21 @@ func TestHttpServerConfigValidateSecureNoNames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no name") {
 		t.Fatalf("error wording drifted: %v", err)
+	}
+}
+
+func TestHttpServerConfigValidateAuthMethod(t *testing.T) {
+	for _, method := range []string{"", "mTLS", "none"} {
+		c := &HttpServerConfig{Enabled: true, APIPath: "/", AuthMethod: method}
+		if err := c.Validate(); err == nil {
+			t.Fatalf("authMethod %q: expected error", method)
+		}
+	}
+	for _, method := range []string{HTTP_AUTH_TOKEN, HTTP_AUTH_MTLS} {
+		c := &HttpServerConfig{Enabled: true, APIPath: "/", AuthMethod: method}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("authMethod %q: %v", method, err)
+		}
 	}
 }
 
@@ -314,6 +329,9 @@ func TestServerConfigSetDefault(t *testing.T) {
 	}
 	if c.HttpServer.Listen != ":10001" {
 		t.Errorf("default http listen: got %s want :10001", c.HttpServer.Listen)
+	}
+	if c.HttpServer.AuthMethod != HTTP_AUTH_TOKEN {
+		t.Errorf("default http authMethod: got %s want %s", c.HttpServer.AuthMethod, HTTP_AUTH_TOKEN)
 	}
 	if c.GRPCSDSServer.Listen != ":10002" {
 		t.Errorf("default grpc listen: got %s want :10002", c.GRPCSDSServer.Listen)

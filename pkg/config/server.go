@@ -233,6 +233,10 @@ func (c *HttpServerConfig) Validate() error {
 		return fmt.Errorf("secure http server with no name")
 	}
 
+	if c.AuthMethod != HTTP_AUTH_TOKEN && c.AuthMethod != HTTP_AUTH_MTLS {
+		return fmt.Errorf("HttpServer: authMethod must be %q or %q, got %q", HTTP_AUTH_TOKEN, HTTP_AUTH_MTLS, c.AuthMethod)
+	}
+
 	return nil
 }
 
@@ -284,10 +288,11 @@ func (c *ServerConfig) SetDefault() {
 	}
 
 	c.HttpServer = HttpServerConfig{
-		Enabled: false,
-		Listen:  ":10001",
-		APIPath: "/",
-		Secure:  false,
+		Enabled:    false,
+		Listen:     ":10001",
+		APIPath:    "/",
+		AuthMethod: HTTP_AUTH_TOKEN,
+		Secure:     false,
 	}
 
 	c.GRPCSDSServer = GRPCServerConfig{
