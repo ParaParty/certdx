@@ -22,6 +22,12 @@ import (
 // waits for in-flight requests to drain before forcing a close.
 const httpShutdownTimeout = 30 * time.Second
 
+// httpCertWaitTimeout caps how long a request waits for another subscriber's
+// in-flight issuance before answering 503.
+const httpCertWaitTimeout = 30 * time.Second
+
+var errCertNotReady = errors.New("certificate not issued yet")
+
 func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == s.Config.HttpServer.APIPath {
 		switch r.Method {
@@ -71,6 +77,7 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	var resp []byte
 	var cachedCert *certEntry
 	var cert CertT
+	var seen uint64
 
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
@@ -92,14 +99,27 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		goto ERR
 	}
-	if !s.isSubscribing(cachedCert) {
-		_, err = s.renew(r.Context(), cachedCert, false)
-		if err != nil {
+
+	cert, seen = cachedCert.Snapshot()
+	if !cert.IsValid() {
+		if s.isSubscribing(cachedCert) {
+			// The owning renewer is already obtaining; don't race it with a second order.
+			waitCtx, cancel := context.WithTimeout(r.Context(), httpCertWaitTimeout)
+			cachedCert.WaitForUpdate(waitCtx, seen)
+			cancel()
+		} else if _, err = s.renew(r.Context(), cachedCert, false); err != nil {
 			goto ERR
 		}
+		cert = cachedCert.Cert()
 	}
 
-	cert = cachedCert.Cert()
+	// An expired-but-present cert is still served; empty material would
+	// overwrite the client's working cert.
+	if len(cert.FullChain) == 0 || len(cert.Key) == 0 {
+		err = errCertNotReady
+		goto ERR
+	}
+
 	resp, err = json.Marshal(&api.HttpCertResp{
 		RenewTimeLeft: s.Config.ACME.RenewTimeLeftDuration,
 		FullChain:     cert.FullChain,
@@ -124,6 +144,11 @@ ERR:
 	if errors.Is(err, ErrNoDomains) {
 		logging.Warn("Http cert request from %s carries no domains", r.RemoteAddr)
 		http.Error(*w, "", http.StatusBadRequest)
+		return
+	}
+	if errors.Is(err, errCertNotReady) {
+		logging.Warn("No cert for %v available yet, asked by %s", cachedCert.domains, r.RemoteAddr)
+		http.Error(*w, "", http.StatusServiceUnavailable)
 		return
 	}
 	logging.Error("Handle http cert request failed: %s", err)

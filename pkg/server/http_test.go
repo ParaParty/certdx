@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -202,6 +203,92 @@ func TestHandleCertReqEmptyDomains(t *testing.T) {
 		if n := len(s.certCache.entries); n != 0 {
 			t.Fatalf("domains %q created %d cache entries", domains, n)
 		}
+	}
+}
+
+// publishCert installs cert on entry the way renew does.
+func publishCert(entry *certEntry, cert CertT) {
+	entry.stateMu.Lock()
+	entry.cert = cert
+	entry.version++
+	close(entry.updated)
+	entry.updated = make(chan struct{})
+	entry.stateMu.Unlock()
+}
+
+func subscribedEntry(t *testing.T, s *CertDXServer, cert CertT) {
+	t.Helper()
+	entry := mustGet(t, &s.certCache, []string{"example.com"})
+	entry.stateMu.Lock()
+	entry.cert = cert
+	entry.subscribing = 1
+	entry.stateMu.Unlock()
+}
+
+func postCertReq(ctx context.Context, s *CertDXServer) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(api.HttpCertReq{Domains: []string{"example.com"}})
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+	return w
+}
+
+func TestHandleCertReqSubscribedButNotIssued(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	subscribedEntry(t, s, CertT{})
+
+	// Cancelled so the wait for the in-flight issuance returns at once.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := postCertReq(ctx, s)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleCertReqWaitsForInFlightIssuance(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	subscribedEntry(t, s, CertT{})
+	entry := mustGet(t, &s.certCache, []string{"example.com"})
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		publishCert(entry, CertT{
+			FullChain:   []byte("PEM-chain"),
+			Key:         []byte("PEM-key"),
+			ValidBefore: time.Now().Add(time.Hour),
+		})
+	}()
+	w := postCertReq(context.Background(), s)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusOK)
+	}
+	var resp api.HttpCertResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if string(resp.FullChain) != "PEM-chain" || string(resp.Key) != "PEM-key" {
+		t.Fatalf("served %q / %q", resp.FullChain, resp.Key)
+	}
+}
+
+func TestHandleCertReqServesHeldCertPastRenewDeadline(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	subscribedEntry(t, s, CertT{
+		FullChain:   []byte("PEM-chain"),
+		Key:         []byte("PEM-key"),
+		ValidBefore: time.Now().Add(-time.Hour),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := postCertReq(ctx, s)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusOK)
 	}
 }
 
