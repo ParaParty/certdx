@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
 	"time"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -52,6 +53,15 @@ func sendStreamErr(ctx context.Context, errChan chan<- error, err error) {
 	}
 }
 
+// recoverStream turns a panic in a per-stream goroutine into a stream error
+// instead of crashing the whole server.
+func recoverStream(ctx context.Context, errChan chan<- error, peer string) {
+	if r := recover(); r != nil {
+		logging.Error("Panic in SDS stream from %s: %v\n%s", peer, r, debug.Stack())
+		sendStreamErr(ctx, errChan, fmt.Errorf("internal error serving %s", peer))
+	}
+}
+
 func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSecretsServer) error {
 	// Merge the stream's ctx with the server's rootCtx so a server-wide
 	// shutdown also tears the stream down deterministically without
@@ -78,6 +88,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 	resp := make(chan *discoveryv3.DiscoveryResponse)
 	go func() {
 		// goroutine for sending
+		defer recoverStream(ctx, errChan, peer)
 		for {
 			select {
 			case r := <-resp:
@@ -97,6 +108,7 @@ func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSec
 
 	go func() {
 		// goroutine for receiving
+		defer recoverStream(ctx, errChan, peer)
 		for {
 			select {
 			case <-ctx.Done():
@@ -211,6 +223,7 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 	req chan *discoveryv3.DiscoveryRequest, resp chan *discoveryv3.DiscoveryResponse,
 	errChan chan<- error, peer string) {
 
+	defer recoverStream(ctx, errChan, peer)
 	sds.cdxsrv.subscribe(entry)
 	defer sds.cdxsrv.release(entry)
 
@@ -265,11 +278,12 @@ func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
 		case ack := <-req:
 			if ack.VersionInfo == version {
 				logging.Info("Cert pack %s version %s deployed at %s", name, version, peer)
-			} else {
-				err := ack.ErrorDetail
+			} else if detail := ack.GetErrorDetail(); detail != nil {
 				logging.Warn("Cert version %s rejected by %s at %s: %d(%s)",
-					version, name, peer,
-					err.Code, err.Message)
+					version, name, peer, detail.GetCode(), detail.GetMessage())
+			} else {
+				logging.Warn("Cert version %s of %s not acknowledged at %s, client reports %q",
+					version, name, peer, ack.VersionInfo)
 			}
 		case <-ctx.Done():
 			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
