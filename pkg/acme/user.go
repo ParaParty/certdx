@@ -65,7 +65,7 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 			hmac = account.HmacEncoded
 		}
 
-		if err := RegisterAccount(c.ACME.Provider, c.ACME.Email, kid, hmac); err != nil {
+		if err := RegisterAccount(c.ACME.Provider, c.ACME.Email, kid, hmac, false); err != nil {
 			return nil, err
 		}
 	} else if err != nil {
@@ -101,10 +101,15 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 	return user, nil
 }
 
-func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
+// RegisterAccount creates a new account key, registers it with the ACME
+// provider and saves it. An existing key is only replaced when force is set.
+func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 	keyPath, err := paths.ACMEPrivateKey(Email, ACMEProvider)
 	if err != nil {
 		return err
+	}
+	if !force && paths.FileExists(keyPath) {
+		return fmt.Errorf("ACME account key %s already exists; use --force to replace it", keyPath)
 	}
 
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
@@ -118,10 +123,6 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 	}
 	pemEncoded := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: x509Encoded})
 
-	if err := os.WriteFile(keyPath, pemEncoded, 0o600); err != nil {
-		return fmt.Errorf("save ACME account key: %w", err)
-	}
-
 	myUser := ACMEUser{
 		Email: Email,
 		Key:   privateKey,
@@ -132,7 +133,6 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 
 	client, err := lego.NewClient(config)
 	if err != nil {
-		os.Remove(keyPath)
 		return fmt.Errorf("failed constructing acme client: %w", err)
 	}
 
@@ -150,16 +150,36 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string) error {
 		myUser.Registration, err = client.Registration.Register(regOptions)
 	}
 	if err != nil {
-		os.Remove(keyPath)
 		return fmt.Errorf("failed to register: %w", err)
+	}
+
+	if err := writeAccountKey(keyPath, pemEncoded, force); err != nil {
+		return fmt.Errorf("save ACME account key: %w", err)
 	}
 
 	reg, err := json.Marshal(myUser.Registration)
 	if err != nil {
-		os.Remove(keyPath)
 		return fmt.Errorf("failed marshaling registration: %w", err)
 	}
 
 	fmt.Println(string(reg))
 	return nil
+}
+
+// writeAccountKey saves key with mode 0600. Without force it fails if path
+// already exists, closing the race with a concurrent registration.
+func writeAccountKey(path string, key []byte, force bool) error {
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if !force {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	}
+	f, err := os.OpenFile(path, flags, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(key); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
