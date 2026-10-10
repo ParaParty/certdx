@@ -93,6 +93,10 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger(m)
 	logging.SetLogger(zap.NewStdLog(m.logger))
 
+	if err := m.validateServers(); err != nil {
+		return err
+	}
+
 	m.certDXDaemon = client.MakeCertDXClientDaemon()
 	m.certDXDaemon.Config.Common = m.ClientCommonConfig
 	m.certDXDaemon.Config.Http.MainServer = m.Http.MainServer
@@ -115,6 +119,37 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 		m.CertificateDefs[certID] = domains
 		if err := m.certDXDaemon.AddCertToWatch(certID, domains); err != nil {
 			return fmt.Errorf("watch certificate %q: %w", certID, err)
+		}
+	}
+	return nil
+}
+
+// validateServers checks the server entries the configured mode will use.
+func (m *CertDXCaddyDaemon) validateServers() error {
+	switch m.Mode {
+	case config.CLIENT_MODE_HTTP:
+		servers := []*config.ClientHttpServer{&m.Http.MainServer}
+		if m.Http.StandbyServer.Url != "" {
+			servers = append(servers, &m.Http.StandbyServer)
+		}
+		for _, s := range servers {
+			// Native JSON configs skip the Caddyfile adapter's defaults.
+			if s.AuthMethod == "" {
+				s.AuthMethod = config.HTTP_AUTH_TOKEN
+			}
+			if err := s.Validate(); err != nil {
+				return err
+			}
+		}
+	case config.CLIENT_MODE_GRPC:
+		servers := []*config.ClientGRPCServer{&m.GRPC.MainServer}
+		if m.GRPC.StandbyServer.Server != "" {
+			servers = append(servers, &m.GRPC.StandbyServer)
+		}
+		for _, s := range servers {
+			if err := s.Validate(); err != nil {
+				return fmt.Errorf("grpc server %s: %w", s.Server, err)
+			}
 		}
 	}
 	return nil
