@@ -97,6 +97,10 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 			return
 		case newCert := <-c.UpdateChan:
 			logging.Info("Received cert %v", newCert.Domains)
+			if _, err := tls.X509KeyPair(newCert.Fullchain, newCert.Key); err != nil {
+				logging.Error("Dropping invalid cert %v: %s", newCert.Domains, err)
+				continue
+			}
 			currentCert := c.Data.Load()
 			if !bytes.Equal(currentCert.Fullchain, newCert.Fullchain) || !bytes.Equal(currentCert.Key, newCert.Key) {
 				logging.Notice("Notify cert %v changed", newCert.Domains)
