@@ -24,10 +24,10 @@ type CertDXServer struct {
 
 	acme      acme.Obtainer
 	certCache certCache
-	certStore CertStore
+	certStore *CertStore
 
 	// rootCtx is the lifecycle parent for every server subgoroutine
-	// (HttpSrv, SDSSrv, the cache-file writer, every per-entry renewer).
+	// (HttpSrv, SDSSrv, every per-entry renewer).
 	// Stop cancels it exactly once via stopOnce. There is no separate
 	// stop chan — context cancellation is the single signal.
 	rootCtx    context.Context
@@ -68,7 +68,6 @@ func (s *CertDXServer) Init() error {
 		// It's okay that previous saved cert can not be loaded, just log and continue to run
 		logging.Warn("Load cache file failed: %s", err)
 	}
-	go s.certStore.listenUpdate(s.rootCtx)
 
 	return nil
 }
@@ -159,17 +158,9 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	c.updated = make(chan struct{})
 	c.stateMu.Unlock()
 
-	// Hand off the persisted cert to the cache-file writer. If the writer
-	// has already exited (e.g. Stop fired and drained the buffer), we
-	// honor ctx instead of blocking forever on a buffered send that no
-	// one will receive.
-	select {
-	case s.certStore.update <- &certStoreEntry{
-		Domains: c.domains,
-		Cert:    newCert,
-	}:
-	case <-ctx.Done():
-		return true, nil
+	// Persisted regardless of ctx: the cert is already issued and broadcast.
+	if err := s.certStore.saveEntry(&certStoreEntry{Domains: c.domains, Cert: newCert}); err != nil {
+		logging.Warn("Update domains cache to file failed: %s", err)
 	}
 
 	logging.Info("Obtained new cert: %v", c.domains)
