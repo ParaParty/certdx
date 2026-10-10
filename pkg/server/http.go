@@ -277,6 +277,11 @@ func (s *CertDXServer) HttpSrv() error {
 	mux := http.NewServeMux()
 	switch s.Config.HttpServer.AuthMethod {
 	case config.HTTP_AUTH_TOKEN:
+		if s.Config.HttpServer.Token == "" {
+			logging.Warn("INSECURE: HTTP API token is empty, anyone who can reach %s can fetch certificates and private keys", s.Config.HttpServer.Listen)
+		} else if !s.Config.HttpServer.Secure {
+			logging.Warn("HTTP API token is sent over plain HTTP; enable secure or put the API behind TLS")
+		}
 		mux.HandleFunc("/", s.apiWithTokenHandler)
 		if s.Config.HttpServer.Secure {
 			return s.serveHttps(mux)
