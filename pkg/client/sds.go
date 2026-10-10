@@ -229,17 +229,17 @@ func (c *CertDXgRPCClient) handleCert(ctx context.Context, cert *watchingCert,
 	for {
 		select {
 		case _respData := <-resp:
-			respCert, ok := _respData.Secret.Type.(*tlsv3.Secret_TlsCertificate)
-			if !ok {
-				sendStreamErr(ctx, errChan, fmt.Errorf("unexpected resp type"))
+			tlsCert := _respData.Secret.GetTlsCertificate()
+			if tlsCert == nil {
+				sendStreamErr(ctx, errChan, fmt.Errorf("SDS response for %s carries no TLS certificate", cert.Config.Name))
 				return
 			}
 
 			select {
 			case cert.UpdateChan <- certData{
 				Domains:   cert.Config.Domains,
-				Fullchain: respCert.TlsCertificate.CertificateChain.GetInlineBytes(),
-				Key:       respCert.TlsCertificate.PrivateKey.GetInlineBytes(),
+				Fullchain: tlsCert.GetCertificateChain().GetInlineBytes(),
+				Key:       tlsCert.GetPrivateKey().GetInlineBytes(),
 			}:
 			case <-ctx.Done():
 				return
