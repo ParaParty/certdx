@@ -36,6 +36,10 @@ func TestWatchUpdateDropsInvalidCert(t *testing.T) {
 		t.Fatalf("mock obtain: %v", err)
 	}
 
+	if _, err := daemon.GetCertificate(context.Background(), domain.AsKey(domains)); err == nil {
+		t.Fatal("GetCertificate succeeded before any cert arrived")
+	}
+
 	cert.UpdateChan <- certData{Domains: domains}
 	cert.UpdateChan <- certData{Domains: domains, Fullchain: []byte("garbage"), Key: []byte("garbage")}
 	cert.UpdateChan <- certData{Domains: domains, Fullchain: fullchain, Key: key}
@@ -47,6 +51,17 @@ func TestWatchUpdateDropsInvalidCert(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("valid cert was not delivered")
+	}
+
+	first, err := daemon.GetCertificate(context.Background(), domain.AsKey(domains))
+	if err != nil {
+		t.Fatalf("GetCertificate: %v", err)
+	}
+	if first.Leaf == nil || first.Leaf.DNSNames[0] != "example.com" {
+		t.Fatalf("unexpected leaf: %+v", first.Leaf)
+	}
+	if second, _ := daemon.GetCertificate(context.Background(), domain.AsKey(domains)); second != first {
+		t.Fatal("GetCertificate parsed the cert again")
 	}
 }
 
