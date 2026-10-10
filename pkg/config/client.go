@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -60,6 +61,7 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 			}
 		}
 	}
+	ret = append(ret, c.validateCollisions()...)
 
 	switch c.Common.Mode {
 	case CLIENT_MODE_HTTP:
@@ -77,6 +79,52 @@ func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 	}
 
 	return errors.Join(ret...)
+}
+
+// validateCollisions rejects certificates that would overwrite each other at
+// runtime. Domains must already be canonical.
+func (c *ClientConfig) validateCollisions() []error {
+	var ret []error
+	byDomains := map[domain.Key]string{}
+	byName := map[string]bool{}
+	byFile := map[string]string{}
+
+	for i := range c.Certificates {
+		cert := &c.Certificates[i]
+
+		key := domain.AsKey(cert.Domains)
+		if prev, ok := byDomains[key]; ok && len(cert.Domains) > 0 {
+			ret = append(ret, fmt.Errorf("certificate %s duplicates the domain set of certificate %s", cert.Name, prev))
+		} else {
+			byDomains[key] = cert.Name
+		}
+
+		// gRPC streams route certificates by name.
+		if c.Common.Mode == CLIENT_MODE_GRPC {
+			if byName[cert.Name] {
+				ret = append(ret, fmt.Errorf("duplicate certificate name: %s", cert.Name))
+			}
+			byName[cert.Name] = true
+		}
+
+		for _, action := range cert.Actions {
+			fa, ok := action.(*FileAction)
+			if !ok {
+				continue
+			}
+			p, _, err := fa.GetFullChainAndKeyPath(cert.Name)
+			if err != nil {
+				continue
+			}
+			p = filepath.Clean(p)
+			if prev, ok := byFile[p]; ok {
+				ret = append(ret, fmt.Errorf("certificate %s: file update action writes %s, which certificate %s also writes", cert.Name, p, prev))
+			} else {
+				byFile[p] = cert.Name
+			}
+		}
+	}
+	return ret
 }
 
 func (c *ClientConfig) parseDuration() error {
