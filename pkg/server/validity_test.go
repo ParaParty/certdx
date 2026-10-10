@@ -47,6 +47,33 @@ func TestClampValidBefore(t *testing.T) {
 	}
 }
 
+func TestRenewCheckInterval(t *testing.T) {
+	s := makeTestServer("", "/", nil)
+	s.Config.ACME.RenewTimeLeftDuration = 24 * time.Hour
+	now := time.Now()
+
+	cases := []struct {
+		name        string
+		validBefore time.Time
+		want        time.Duration
+	}{
+		{"long-lived cert", now.Add(30 * 24 * time.Hour), 6 * time.Hour},
+		{"short-lived cert", now.Add(5 * time.Minute), 5 * time.Minute},
+		{"about to lapse", now.Add(time.Second), renewCheckMin},
+		{"already lapsed", now.Add(-time.Minute), renewCheckMin},
+	}
+	for _, tc := range cases {
+		if got := s.renewCheckInterval(now, tc.validBefore); got != tc.want {
+			t.Errorf("%s: got %s want %s", tc.name, got, tc.want)
+		}
+	}
+
+	s.Config.ACME.RenewTimeLeftDuration = 0
+	if got := s.renewCheckInterval(now, now.Add(time.Hour)); got != renewCheckMin {
+		t.Errorf("zero RenewTimeLeft: got %s want %s", got, renewCheckMin)
+	}
+}
+
 func TestLeafNotAfterRejectsGarbage(t *testing.T) {
 	if _, err := leafNotAfter([]byte("not pem")); err == nil {
 		t.Fatal("expected error")

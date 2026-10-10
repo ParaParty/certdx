@@ -12,6 +12,15 @@ import (
 	"pkg.para.party/certdx/pkg/logging"
 )
 
+const (
+	// Retry backoff while an entry holds no valid cert.
+	renewRetryMin = 30 * time.Second
+	renewRetryMax = 5 * time.Minute
+	// Floor for the healthy re-check so a cert at the edge of its validity
+	// can't spin the renewer.
+	renewCheckMin = 5 * time.Second
+)
+
 type CertT struct {
 	FullChain   []byte    `json:"fullChain"`
 	Key         []byte    `json:"key"`
@@ -178,6 +187,7 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 	logging.Info("Start subscribing cert: %v", c.domains)
 	defer logging.Info("Stopped subscribing cert: %v", c.domains)
 
+	backoff := renewRetryMin
 	for {
 		_, err := s.renew(ctx, c, true)
 		if err != nil {
@@ -187,7 +197,17 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 			logging.Error("Failed to renew cert %s: %s", c.domains, err)
 		}
 
-		t := time.NewTimer(s.Config.ACME.RenewTimeLeftDuration / 4)
+		var wait time.Duration
+		if cert := c.Cert(); cert.IsValid() {
+			wait = s.renewCheckInterval(time.Now(), cert.ValidBefore)
+			backoff = renewRetryMin
+		} else {
+			wait = backoff
+			backoff = min(backoff*2, renewRetryMax)
+			logging.Warn("No valid cert for %v, retrying in %s", c.domains, wait)
+		}
+
+		t := time.NewTimer(wait)
 		select {
 		case <-t.C:
 			// Do next check
@@ -196,6 +216,13 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 			return
 		}
 	}
+}
+
+// renewCheckInterval is how long a renewer holding a valid cert sleeps:
+// RenewTimeLeft/4, but never past validBefore and never below renewCheckMin.
+func (s *CertDXServer) renewCheckInterval(now, validBefore time.Time) time.Duration {
+	interval := min(s.Config.ACME.RenewTimeLeftDuration/4, validBefore.Sub(now))
+	return max(interval, renewCheckMin)
 }
 
 // Subscribe registers a consumer for the entry's renewal stream. The first
