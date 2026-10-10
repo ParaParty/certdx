@@ -10,6 +10,7 @@ import (
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/paths"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 type certStoreEntry struct {
@@ -78,7 +79,7 @@ func (s *CertStore) save() error {
 		return fmt.Errorf("marshal cert store: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, jsonBytes, 0o600); err != nil {
+	if err := utils.WriteFileAtomic(s.path, jsonBytes, 0o600); err != nil {
 		return fmt.Errorf("write cert store: %w", err)
 	}
 
