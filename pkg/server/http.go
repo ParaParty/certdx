@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -62,7 +63,7 @@ func (s *CertDXServer) checkAuthorizationToken(r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if auth != "" && strings.HasPrefix(auth, "Token ") {
 		token := strings.TrimPrefix(auth, "Token ")
-		if token == s.Config.HttpServer.Token {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.Config.HttpServer.Token)) == 1 {
 			return true
 		}
 	}
