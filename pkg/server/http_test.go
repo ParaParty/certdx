@@ -50,6 +50,17 @@ func TestCheckAuthorizationTokenInvalid(t *testing.T) {
 	}
 }
 
+func TestCheckAuthorizationTokenLengthMismatch(t *testing.T) {
+	s := makeTestServer("secret123", "/", nil)
+	for _, token := range []string{"secret12", "secret1234", ""} {
+		req := httptest.NewRequest("POST", "/", nil)
+		req.Header.Set("Authorization", "Token "+token)
+		if s.checkAuthorizationToken(req) {
+			t.Fatalf("token %q should not authorize", token)
+		}
+	}
+}
+
 func TestCheckAuthorizationTokenMissingHeader(t *testing.T) {
 	s := makeTestServer("secret123", "/", nil)
 	req := httptest.NewRequest("POST", "/", nil)
