@@ -6,7 +6,12 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"pkg.para.party/certdx/pkg/paths"
 )
 
 // TestParsePEMRoundTrip generates an ECDSA P-384 key (the same curve
@@ -35,6 +40,47 @@ func TestParsePEMRoundTrip(t *testing.T) {
 	}
 	if parsed.D.Cmp(priv.D) != 0 {
 		t.Fatalf("scalar mismatch after round-trip")
+	}
+}
+
+func TestRegisterAccountRefusesExistingKey(t *testing.T) {
+	paths.SetDataDir(t.TempDir())
+	t.Cleanup(func() { paths.SetDataDir("") })
+
+	keyPath, err := paths.ACMEPrivateKey("me@example.com", "googletest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RegisterAccount("googletest", "me@example.com", "kid", "hmac", false)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected refusal, got %v", err)
+	}
+	if got, _ := os.ReadFile(keyPath); string(got) != "old" {
+		t.Fatalf("existing key was modified: %q", got)
+	}
+}
+
+func TestWriteAccountKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "account.key")
+
+	if err := writeAccountKey(path, []byte("first"), false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := writeAccountKey(path, []byte("second"), false); err == nil {
+		t.Fatal("expected an error overwriting without force")
+	}
+	if err := writeAccountKey(path, []byte("third"), true); err != nil {
+		t.Fatalf("forced overwrite: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "third" {
+		t.Fatalf("content = %q, want %q", got, "third")
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, err = %v", info.Mode().Perm(), err)
 	}
 }
 

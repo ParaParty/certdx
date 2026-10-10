@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,14 +83,27 @@ func (c *ServerConfig) parseDuration() error {
 	if err != nil {
 		return fmt.Errorf("can not parse CertLifeTime: %w", err)
 	}
+	if c.ACME.CertLifeTimeDuration <= 0 {
+		return fmt.Errorf("CertLifeTime must be positive, got %q", c.ACME.CertLifeTime)
+	}
 
 	c.ACME.RenewTimeLeftDuration, err = time.ParseDuration(c.ACME.RenewTimeLeft)
 	if err != nil {
 		return fmt.Errorf("can not parse RenewTimeLeft: %w", err)
 	}
+	if c.ACME.RenewTimeLeftDuration <= 0 {
+		return fmt.Errorf("RenewTimeLeft must be positive, got %q", c.ACME.RenewTimeLeft)
+	}
+
+	// The requested NotAfter is certLifeTime + renewTimeLeft from now.
+	if total := c.ACME.CertLifeTimeDuration + c.ACME.RenewTimeLeftDuration; acmeproviders.IsGoogle(c.ACME.Provider) && total > googleMaxLifetime {
+		return fmt.Errorf("CertLifeTime + RenewTimeLeft (%s) exceeds the Google CA maximum of %s", total, googleMaxLifetime)
+	}
 
 	return nil
 }
+
+const googleMaxLifetime = 90 * 24 * time.Hour
 
 type ACMEConfig struct {
 	ChallengeType  string   `toml:"challengeType" json:"challenge_type,omitempty"`
@@ -162,6 +177,11 @@ func (p *DnsProvider) Validate() error {
 			return fmt.Errorf("DnsProvider: dnsTimeout must be positive, got %q", p.DNSTimeout)
 		}
 	}
+	for _, ns := range p.Nameservers {
+		if err := validateNameserver(ns); err != nil {
+			return fmt.Errorf("DnsProvider: nameserver %q: %w", ns, err)
+		}
+	}
 	switch p.Type {
 	case DnsProviderTypeCloudflare:
 		if (p.Email == "" || p.APIKey == "") && (p.AuthToken == "" || p.ZoneToken == "") {
@@ -173,6 +193,24 @@ func (p *DnsProvider) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unknown DnsProvider: %s", p.Type)
+	}
+	return nil
+}
+
+// validateNameserver accepts host or host:port, the forms lego understands;
+// a bare IPv6 address counts as a host.
+func validateNameserver(ns string) error {
+	host, port, err := net.SplitHostPort(ns)
+	if err != nil {
+		host, port = ns, ""
+	}
+	if host == "" || strings.ContainsAny(host, " \t/") {
+		return fmt.Errorf("must be host or host:port")
+	}
+	if port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("invalid port %q", port)
+		}
 	}
 	return nil
 }
@@ -199,6 +237,9 @@ func (p *HttpProvider) Validate() error {
 	case HttpProviderTypeS3:
 		if p.S3 == nil {
 			return fmt.Errorf("HttpProvider S3: empty S3")
+		}
+		if p.S3.Bucket == "" || p.S3.URL == "" || p.S3.AccessKeyId == "" || p.S3.AccessKeySecret == "" {
+			return fmt.Errorf("HttpProvider S3: bucket, url, accessKeyId and accessKeySecret are required")
 		}
 	// case HttpProviderTypeLocal:
 	// 	if p.Local == nil {
@@ -231,6 +272,10 @@ func (c *HttpServerConfig) Validate() error {
 
 	if c.Secure && len(c.Names) == 0 {
 		return fmt.Errorf("secure http server with no name")
+	}
+
+	if c.AuthMethod != HTTP_AUTH_TOKEN && c.AuthMethod != HTTP_AUTH_MTLS {
+		return fmt.Errorf("HttpServer: authMethod must be %q or %q, got %q", HTTP_AUTH_TOKEN, HTTP_AUTH_MTLS, c.AuthMethod)
 	}
 
 	return nil
@@ -284,10 +329,11 @@ func (c *ServerConfig) SetDefault() {
 	}
 
 	c.HttpServer = HttpServerConfig{
-		Enabled: false,
-		Listen:  ":10001",
-		APIPath: "/",
-		Secure:  false,
+		Enabled:    false,
+		Listen:     ":10001",
+		APIPath:    "/",
+		AuthMethod: HTTP_AUTH_TOKEN,
+		Secure:     false,
 	}
 
 	c.GRPCSDSServer = GRPCServerConfig{

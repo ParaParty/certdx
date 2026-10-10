@@ -5,8 +5,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"pkg.para.party/certdx/pkg/config"
 )
@@ -182,6 +184,21 @@ func TestUpdateWhitespaceReloadCommand(t *testing.T) {
 	}()
 	if err := update(t, root, "   \t  ", c); err != nil {
 		t.Fatalf("Update: %v", err)
+	}
+}
+
+func TestRunReloadCommandStopsWithContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sleep")
+	}
+	a := New(&config.FileAction{SavePath: t.TempDir(), ReloadCommand: "sleep 30"})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	a.runReloadCommand(ctx)
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("reload command ran for %s after its context ended", d)
 	}
 }
 

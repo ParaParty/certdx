@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"go.uber.org/zap"
@@ -14,6 +13,7 @@ import (
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/mtls"
 )
 
 func init() {
@@ -85,7 +85,7 @@ func MakeCertDXCaddyDaemon() *CertDXCaddyDaemon {
 func (*CertDXCaddyDaemon) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID:  "certdx",
-		New: func() caddy.Module { return new(CertDXCaddyDaemon) },
+		New: func() caddy.Module { return MakeCertDXCaddyDaemon() },
 	}
 }
 
@@ -94,19 +94,28 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	logging.SetLogger(zap.NewStdLog(m.logger))
 
 	m.certDXDaemon = client.MakeCertDXClientDaemon()
-	m.certDXDaemon.Config.Common = m.ClientCommonConfig
-	m.certDXDaemon.Config.Http.MainServer = m.Http.MainServer
-	m.certDXDaemon.Config.Http.StandbyServer = m.Http.StandbyServer
-	m.certDXDaemon.Config.GRPC.MainServer = m.GRPC.MainServer
-	m.certDXDaemon.Config.GRPC.StandbyServer = m.GRPC.StandbyServer
+	cfg := m.certDXDaemon.Config
+	cfg.Common = m.ClientCommonConfig
+	cfg.Http.MainServer = m.Http.MainServer
+	cfg.Http.StandbyServer = m.Http.StandbyServer
+	cfg.GRPC.MainServer = m.GRPC.MainServer
+	cfg.GRPC.StandbyServer = m.GRPC.StandbyServer
 
-	d, err := time.ParseDuration(m.ReconnectInterval)
-	if err != nil {
-		return fmt.Errorf("parse reconnect_interval %q: %w", m.ReconnectInterval, err)
+	// Certificates are registered below via AddCertToWatch, not cfg.Certificates.
+	if err := cfg.Validate([]config.ValidatingOption{config.WithAcceptEmptyCertificatesList(true)}); err != nil {
+		return err
 	}
-	m.certDXDaemon.Config.Common.ReconnectDuration = d
+	if err := loadMtlsBundles(cfg); err != nil {
+		return err
+	}
 
 	for certID, domains := range m.CertificateDefs {
+		domains = domain.Canonical(domains)
+		if len(domains) == 0 {
+			return fmt.Errorf("certificate %q has no domains", certID)
+		}
+		// CertDXTls derives its lookup key from the stored domains.
+		m.CertificateDefs[certID] = domains
 		if err := m.certDXDaemon.AddCertToWatch(certID, domains); err != nil {
 			return fmt.Errorf("watch certificate %q: %w", certID, err)
 		}
@@ -114,26 +123,42 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	return nil
 }
 
-func (m *CertDXCaddyDaemon) Start() error {
-	mode := m.certDXDaemon.Config.Common.Mode
-	switch mode {
+// loadMtlsBundles fails provisioning on an unloadable bundle instead of
+// leaving the client to fail after Caddy has started.
+func loadMtlsBundles(c *config.ClientConfig) error {
+	switch c.Common.Mode {
 	case config.CLIENT_MODE_HTTP:
-		if m.certDXDaemon.Config.Http.MainServer.Url == "" {
-			return fmt.Errorf("http main_server url is required")
+		for _, s := range []config.ClientHttpServer{c.Http.MainServer, c.Http.StandbyServer} {
+			if s.Url == "" || s.AuthMethod != config.HTTP_AUTH_MTLS {
+				continue
+			}
+			if _, err := mtls.LoadClient(s.PEM); err != nil {
+				return fmt.Errorf("http server %s: %w", s.Url, err)
+			}
 		}
-		m.wg.Go(func() {
-			m.certDXDaemon.HttpMain()
-		})
 	case config.CLIENT_MODE_GRPC:
-		if m.certDXDaemon.Config.GRPC.MainServer.Server == "" {
-			return fmt.Errorf("grpc main_server is required")
+		for _, s := range []config.ClientGRPCServer{c.GRPC.MainServer, c.GRPC.StandbyServer} {
+			if s.Server == "" {
+				continue
+			}
+			if _, err := mtls.LoadClient(s.PEM); err != nil {
+				return fmt.Errorf("grpc server %s: %w", s.Server, err)
+			}
 		}
-		m.wg.Go(func() {
-			m.certDXDaemon.GRPCMain()
-		})
-	default:
-		return fmt.Errorf("unsupported mode %q", mode)
 	}
+	return nil
+}
+
+func (m *CertDXCaddyDaemon) Start() error {
+	run := m.certDXDaemon.HttpMain
+	if m.certDXDaemon.Config.Common.Mode == config.CLIENT_MODE_GRPC {
+		run = m.certDXDaemon.GRPCMain
+	}
+	m.wg.Go(func() {
+		if err := run(); err != nil {
+			m.logger.Error("certdx client stopped", zap.Error(err))
+		}
+	})
 	return nil
 }
 

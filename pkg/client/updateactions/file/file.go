@@ -6,14 +6,18 @@ package file
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 // File permissions for written material.
@@ -22,6 +26,9 @@ const (
 	permCertFile os.FileMode = 0o644
 	permKeyFile  os.FileMode = 0o600
 )
+
+// reloadCommandTimeout kills a reload command that hangs.
+const reloadCommandTimeout = 5 * time.Minute
 
 type Action struct {
 	cfg *config.FileAction
@@ -73,6 +80,12 @@ func prepareTempFile(dir, base string, data []byte, mode os.FileMode) (string, e
 		os.Remove(name)
 		return "", fmt.Errorf("chmod temp file: %w", err)
 	}
+	// Some mounts don't support fsync; the file is still usable without it.
+	if err := tmp.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOSYS) {
+		tmp.Close()
+		os.Remove(name)
+		return "", fmt.Errorf("sync temp file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(name)
 		return "", fmt.Errorf("close temp file: %w", err)
@@ -106,6 +119,10 @@ func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, k
 	if err := os.Rename(keyTmp, keyPath); err != nil {
 		return fmt.Errorf("rename key: %w", err)
 	}
+	utils.SyncDir(filepath.Dir(certPath))
+	if filepath.Dir(keyPath) != filepath.Dir(certPath) {
+		utils.SyncDir(filepath.Dir(keyPath))
+	}
 	return nil
 }
 
@@ -119,7 +136,7 @@ func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, k
 // unlikely to be running yet. A failing reload command is logged but not
 // returned: the certificate is already on disk, so retrying the whole
 // action would rewrite identical bytes.
-func (a *Action) Update(_ context.Context, fullchain, key []byte, c *config.ClientCertificate) error {
+func (a *Action) Update(ctx context.Context, fullchain, key []byte, c *config.ClientCertificate) error {
 	certPath, keyPath, err := a.cfg.GetFullChainAndKeyPath(c.Name)
 	if err != nil {
 		return fmt.Errorf("get cert save path: %w", err)
@@ -141,13 +158,13 @@ func (a *Action) Update(_ context.Context, fullchain, key []byte, c *config.Clie
 	logging.Info("Saved cert %v", c.Domains)
 
 	if certExists && keyExists {
-		a.runReloadCommand()
+		a.runReloadCommand(ctx)
 	}
 
 	return nil
 }
 
-func (a *Action) runReloadCommand() {
+func (a *Action) runReloadCommand(ctx context.Context) {
 	// strings.Fields collapses whitespace and skips empty inputs, so
 	// a whitespace-only ReloadCommand returns an empty slice — guard
 	// against args[0] panicking instead of just !=  "".
@@ -157,7 +174,9 @@ func (a *Action) runReloadCommand() {
 	}
 
 	logging.Debug("Executing reload command: %s", a.cfg.ReloadCommand)
-	if err := exec.Command(args[0], args[1:]...).Run(); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, reloadCommandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, args[0], args[1:]...).Run(); err != nil {
 		logging.Error("Failed executing reload command %s: %s", a.cfg.ReloadCommand, err)
 	}
 }

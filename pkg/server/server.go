@@ -12,6 +12,15 @@ import (
 	"pkg.para.party/certdx/pkg/logging"
 )
 
+const (
+	// Retry backoff while an entry holds no valid cert.
+	renewRetryMin = 30 * time.Second
+	renewRetryMax = 5 * time.Minute
+	// Floor for the healthy re-check so a cert at the edge of its validity
+	// can't spin the renewer.
+	renewCheckMin = 5 * time.Second
+)
+
 type CertT struct {
 	FullChain   []byte    `json:"fullChain"`
 	Key         []byte    `json:"key"`
@@ -24,10 +33,10 @@ type CertDXServer struct {
 
 	acme      acme.Obtainer
 	certCache certCache
-	certStore CertStore
+	certStore *CertStore
 
 	// rootCtx is the lifecycle parent for every server subgoroutine
-	// (HttpSrv, SDSSrv, the cache-file writer, every per-entry renewer).
+	// (HttpSrv, SDSSrv, every per-entry renewer).
 	// Stop cancels it exactly once via stopOnce. There is no separate
 	// stop chan — context cancellation is the single signal.
 	rootCtx    context.Context
@@ -68,7 +77,6 @@ func (s *CertDXServer) Init() error {
 		// It's okay that previous saved cert can not be loaded, just log and continue to run
 		logging.Warn("Load cache file failed: %s", err)
 	}
-	go s.certStore.listenUpdate(s.rootCtx)
 
 	return nil
 }
@@ -85,7 +93,11 @@ func (s *CertDXServer) loadCertStore() error {
 
 	s.certCache.mutex.Lock()
 	for _, cache := range s.certStore.entries {
-		entry := s.certCache.getNoLock(cache.Domains)
+		entry, err := s.certCache.getNoLock(cache.Domains)
+		if err != nil {
+			logging.Warn("Skipping cached cert for domains %v: %s", cache.Domains, err)
+			continue
+		}
 		entry.stateMu.Lock()
 		entry.cert = cache.Cert
 		entry.stateMu.Unlock()
@@ -124,7 +136,7 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 		return false, nil
 	}
 
-	newValidBefore := time.Now().Truncate(1 * time.Hour).Add(s.Config.ACME.CertLifeTimeDuration)
+	newValidBefore := targetValidBefore(time.Now(), s.Config.ACME.CertLifeTimeDuration)
 
 	var fullchain, key []byte
 	var err error
@@ -135,6 +147,13 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	}
 	if err != nil {
 		return false, err
+	}
+
+	if notAfter, err := leafNotAfter(fullchain); err != nil {
+		logging.Warn("Could not read NotAfter of issued cert %v: %s", c.domains, err)
+	} else if clamped := clampValidBefore(time.Now(), newValidBefore, notAfter, s.Config.ACME.RenewTimeLeftDuration); !clamped.Equal(newValidBefore) {
+		logging.Info("Issued cert %v expires at %s, renewing it from %s", c.domains, notAfter, clamped)
+		newValidBefore = clamped
 	}
 
 	newCert := CertT{
@@ -155,17 +174,9 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	c.updated = make(chan struct{})
 	c.stateMu.Unlock()
 
-	// Hand off the persisted cert to the cache-file writer. If the writer
-	// has already exited (e.g. Stop fired and drained the buffer), we
-	// honor ctx instead of blocking forever on a buffered send that no
-	// one will receive.
-	select {
-	case s.certStore.update <- &certStoreEntry{
-		Domains: c.domains,
-		Cert:    newCert,
-	}:
-	case <-ctx.Done():
-		return true, nil
+	// Persisted regardless of ctx: the cert is already issued and broadcast.
+	if err := s.certStore.saveEntry(&certStoreEntry{Domains: c.domains, Cert: newCert}); err != nil {
+		logging.Warn("Update domains cache to file failed: %s", err)
 	}
 
 	logging.Info("Obtained new cert: %v", c.domains)
@@ -176,6 +187,7 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 	logging.Info("Start subscribing cert: %v", c.domains)
 	defer logging.Info("Stopped subscribing cert: %v", c.domains)
 
+	backoff := renewRetryMin
 	for {
 		_, err := s.renew(ctx, c, true)
 		if err != nil {
@@ -185,7 +197,17 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 			logging.Error("Failed to renew cert %s: %s", c.domains, err)
 		}
 
-		t := time.NewTimer(s.Config.ACME.RenewTimeLeftDuration / 4)
+		var wait time.Duration
+		if cert := c.Cert(); cert.IsValid() {
+			wait = s.renewCheckInterval(time.Now(), cert.ValidBefore)
+			backoff = renewRetryMin
+		} else {
+			wait = backoff
+			backoff = min(backoff*2, renewRetryMax)
+			logging.Warn("No valid cert for %v, retrying in %s", c.domains, wait)
+		}
+
+		t := time.NewTimer(wait)
 		select {
 		case <-t.C:
 			// Do next check
@@ -194,6 +216,13 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 			return
 		}
 	}
+}
+
+// renewCheckInterval is how long a renewer holding a valid cert sleeps:
+// RenewTimeLeft/4, but never past validBefore and never below renewCheckMin.
+func (s *CertDXServer) renewCheckInterval(now, validBefore time.Time) time.Duration {
+	interval := min(s.Config.ACME.RenewTimeLeftDuration/4, validBefore.Sub(now))
+	return max(interval, renewCheckMin)
 }
 
 // Subscribe registers a consumer for the entry's renewal stream. The first

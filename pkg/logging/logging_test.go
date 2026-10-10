@@ -2,20 +2,22 @@ package logging
 
 import (
 	"bytes"
+	"io"
 	"log"
 	"strings"
+	"sync"
 	"testing"
 )
 
 func captureLogger(t *testing.T) (*bytes.Buffer, func()) {
 	t.Helper()
-	prev := logger
-	prevDebug := debugEnabled
+	prev := logger.Load()
+	prevDebug := debugEnabled.Load()
 	buf := &bytes.Buffer{}
-	logger = log.New(buf, "", 0)
+	logger.Store(log.New(buf, "", 0))
 	return buf, func() {
-		logger = prev
-		debugEnabled = prevDebug
+		logger.Store(prev)
+		debugEnabled.Store(prevDebug)
 	}
 }
 
@@ -23,7 +25,7 @@ func TestDebugSuppressedByDefault(t *testing.T) {
 	buf, restore := captureLogger(t)
 	defer restore()
 
-	debugEnabled = false
+	debugEnabled.Store(false)
 	Debug("should not appear")
 
 	if buf.Len() != 0 {
@@ -35,7 +37,7 @@ func TestDebugEnabledOutput(t *testing.T) {
 	buf, restore := captureLogger(t)
 	defer restore()
 
-	debugEnabled = true
+	debugEnabled.Store(true)
 	Debug("test %d", 42)
 
 	got := buf.String()
@@ -66,8 +68,8 @@ func TestSetDebugToggles(t *testing.T) {
 }
 
 func TestSetLoggerSwaps(t *testing.T) {
-	prev := logger
-	defer func() { logger = prev }()
+	prev := logger.Load()
+	defer logger.Store(prev)
 
 	buf := &bytes.Buffer{}
 	SetLogger(log.New(buf, "", 0))
@@ -76,6 +78,32 @@ func TestSetLoggerSwaps(t *testing.T) {
 	if !strings.Contains(buf.String(), "routed") {
 		t.Fatal("SetLogger did not swap output")
 	}
+
+	SetLogger(nil)
+	Info("still routed")
+	if !strings.Contains(buf.String(), "still routed") {
+		t.Fatal("SetLogger(nil) replaced the logger")
+	}
+}
+
+func TestSetLoggerConcurrentWithLogging(t *testing.T) {
+	prev := logger.Load()
+	defer logger.Store(prev)
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 100 {
+				Info("concurrent")
+				Debug("concurrent")
+			}
+		})
+	}
+	for range 100 {
+		SetLogger(log.New(io.Discard, "", 0))
+		SetDebug(true)
+	}
+	wg.Wait()
 }
 
 func TestInfoPrefix(t *testing.T) {

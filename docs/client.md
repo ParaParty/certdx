@@ -36,7 +36,7 @@ Top-level sections:
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `retryCount` | int | `5` | Per-request retry count. |
+| `retryCount` | int | `5` | Retries of a failing update action, and attempts on each server before switching to the next (HTTP: requests; gRPC: reconnects). |
 | `mode` | string | `"http"` | `http` or `grpc`. |
 | `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. |
 
@@ -93,7 +93,7 @@ stops the others or the daemon.
 | Key | Type | Notes |
 | --- | --- | --- |
 | `savePath` | path | Output directory. The certificate is written to `<savePath>/<name>.pem` and the private key to `<savePath>/<name>.key`. |
-| `reloadCommand` | string | Shell command executed after a successful write. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
+| `reloadCommand` | string | Shell command executed after a successful write. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. It is killed if it runs longer than 5 minutes. |
 
 #### `type = "tencentCloud"`
 
@@ -211,6 +211,14 @@ profile = "cluster-a"
 The client polls the server on the same cadence as the server's renewal
 check (`ACME.renewTimeLeft / 4`). When the server returns a newer
 certificate, every update action configured for it runs.
+
+In HTTP mode the client always starts with the main server. If a request
+fails (unreachable, or the server is still issuing), it retries the same
+server up to `retryCount` times, waiting 30 seconds and backing off to 90
+seconds. Only then does it try the standby server the same way, so a main and
+a standby server issuing from different CAs don't alternate. If the standby
+fails too, the client waits an hour and starts over from the main server.
+After any successful request the next round starts with the main server.
 
 The file action's writes are atomic via a temp-file-and-rename, so a
 downstream service reading the cert mid-update never observes a torn or

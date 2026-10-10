@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,30 @@ import (
 // httpShutdownTimeout caps how long graceful shutdown of the HTTP API
 // waits for in-flight requests to drain before forcing a close.
 const httpShutdownTimeout = 30 * time.Second
+
+// httpCertWaitTimeout caps how long a request waits for another subscriber's
+// in-flight issuance before answering 503.
+const httpCertWaitTimeout = 30 * time.Second
+
+var errCertNotReady = errors.New("certificate not issued yet")
+var errBadRequest = errors.New("bad request")
+
+// maxCertReqBodySize bounds the JSON body of a cert request.
+const maxCertReqBodySize = 64 << 10
+
+// newAPIServer builds an HTTP API server. There is no WriteTimeout: a request
+// may wait on a synchronous ACME issuance.
+func (s *CertDXServer) newAPIServer(handler http.Handler, tlsConfig *tls.Config) *http.Server {
+	return &http.Server{
+		Addr:              s.Config.HttpServer.Listen,
+		Handler:           handler,
+		TLSConfig:         tlsConfig,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ErrorLog:          logging.ErrorLogger(),
+	}
+}
 
 func (s *CertDXServer) apiHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == s.Config.HttpServer.APIPath {
@@ -56,7 +81,7 @@ func (s *CertDXServer) checkAuthorizationToken(r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	if auth != "" && strings.HasPrefix(auth, "Token ") {
 		token := strings.TrimPrefix(auth, "Token ")
-		if token == s.Config.HttpServer.Token {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.Config.HttpServer.Token)) == 1 {
 			return true
 		}
 	}
@@ -71,12 +96,15 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	var resp []byte
 	var cachedCert *certEntry
 	var cert CertT
+	var seen uint64
 
+	r.Body = http.MaxBytesReader(*w, r.Body, maxCertReqBodySize)
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		if err == io.EOF {
 			err = fmt.Errorf("no body")
 		}
+		err = fmt.Errorf("%w: %w", errBadRequest, err)
 		goto ERR
 	}
 
@@ -88,15 +116,31 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 		goto ERR
 	}
 
-	cachedCert = s.certCache.get(req.Domains)
-	if !s.isSubscribing(cachedCert) {
-		_, err = s.renew(r.Context(), cachedCert, false)
-		if err != nil {
-			goto ERR
-		}
+	cachedCert, err = s.certCache.get(req.Domains)
+	if err != nil {
+		goto ERR
 	}
 
-	cert = cachedCert.Cert()
+	cert, seen = cachedCert.Snapshot()
+	if !cert.IsValid() {
+		if s.isSubscribing(cachedCert) {
+			// The owning renewer is already obtaining; don't race it with a second order.
+			waitCtx, cancel := context.WithTimeout(r.Context(), httpCertWaitTimeout)
+			cachedCert.WaitForUpdate(waitCtx, seen)
+			cancel()
+		} else if _, err = s.renew(r.Context(), cachedCert, false); err != nil {
+			goto ERR
+		}
+		cert = cachedCert.Cert()
+	}
+
+	// An expired-but-present cert is still served; empty material would
+	// overwrite the client's working cert.
+	if len(cert.FullChain) == 0 || len(cert.Key) == 0 {
+		err = errCertNotReady
+		goto ERR
+	}
+
 	resp, err = json.Marshal(&api.HttpCertResp{
 		RenewTimeLeft: s.Config.ACME.RenewTimeLeftDuration,
 		FullChain:     cert.FullChain,
@@ -116,6 +160,16 @@ ERR:
 		logging.Warn("Requested domains not allowed: %v", req.Domains)
 		(*w).Header().Set("Content-Type", "application/json")
 		(*w).Write([]byte(`{ "err": "Domains not allowed" }`))
+		return
+	}
+	if errors.Is(err, ErrNoDomains) || errors.Is(err, errBadRequest) {
+		logging.Warn("Bad http cert request from %s: %s", r.RemoteAddr, err)
+		http.Error(*w, "", http.StatusBadRequest)
+		return
+	}
+	if errors.Is(err, errCertNotReady) {
+		logging.Warn("No cert for %v available yet, asked by %s", cachedCert.domains, r.RemoteAddr)
+		http.Error(*w, "", http.StatusServiceUnavailable)
 		return
 	}
 	logging.Error("Handle http cert request failed: %s", err)
@@ -147,7 +201,10 @@ func runHTTPServer(ctx context.Context, server *http.Server, listen func() error
 // iteration sub-ctx fires on either rootCtx or a fresh cert; runHTTPServer
 // drives the listener and the graceful shutdown for that iteration.
 func (s *CertDXServer) serveHttps(handler http.Handler) error {
-	entry := s.certCache.get(s.Config.HttpServer.Names)
+	entry, err := s.certCache.get(s.Config.HttpServer.Names)
+	if err != nil {
+		return fmt.Errorf("HTTPS listener certificate: %w", err)
+	}
 	s.subscribe(entry)
 	defer s.release(entry)
 
@@ -166,15 +223,10 @@ func (s *CertDXServer) serveHttps(handler http.Handler) error {
 			return fmt.Errorf("load HTTPS certificate: %w", err)
 		}
 
-		server := &http.Server{
-			Addr:    s.Config.HttpServer.Listen,
-			Handler: handler,
-			TLSConfig: &tls.Config{
-				MinVersion:   tls.VersionTLS12,
-				Certificates: []tls.Certificate{certificate},
-			},
-			ErrorLog: logging.ErrorLogger(),
-		}
+		server := s.newAPIServer(handler, &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{certificate},
+		})
 
 		// iterCtx fires on either rootCtx or a fresh cert. WaitForUpdate
 		// runs in a goroutine that calls cancel() on update; cancel is
@@ -203,11 +255,7 @@ func (s *CertDXServer) serveHttps(handler http.Handler) error {
 // serveHttp runs the plain (unencrypted) token-auth HTTP API. Used only
 // when token auth is enabled and Secure is false.
 func (s *CertDXServer) serveHttp(handler http.Handler) error {
-	server := &http.Server{
-		Addr:     s.Config.HttpServer.Listen,
-		Handler:  handler,
-		ErrorLog: logging.ErrorLogger(),
-	}
+	server := s.newAPIServer(handler, nil)
 	logging.Info("Http server started")
 	defer logging.Info("Http server stopped")
 	return runHTTPServer(s.rootCtx, server, server.ListenAndServe)
@@ -220,12 +268,7 @@ func (s *CertDXServer) serveHttpMtls(handler http.Handler) error {
 		return err
 	}
 
-	server := &http.Server{
-		Addr:      s.Config.HttpServer.Listen,
-		Handler:   handler,
-		TLSConfig: mtlsConfig,
-		ErrorLog:  logging.ErrorLogger(),
-	}
+	server := s.newAPIServer(handler, mtlsConfig)
 	logging.Info("Http mtls server started")
 	defer logging.Info("Http mtls server stopped")
 	return runHTTPServer(s.rootCtx, server, func() error {
@@ -241,6 +284,11 @@ func (s *CertDXServer) HttpSrv() error {
 	mux := http.NewServeMux()
 	switch s.Config.HttpServer.AuthMethod {
 	case config.HTTP_AUTH_TOKEN:
+		if s.Config.HttpServer.Token == "" {
+			logging.Warn("INSECURE: HTTP API token is empty, anyone who can reach %s can fetch certificates and private keys", s.Config.HttpServer.Listen)
+		} else if !s.Config.HttpServer.Secure {
+			logging.Warn("HTTP API token is sent over plain HTTP; enable secure or put the API behind TLS")
+		}
 		mux.HandleFunc("/", s.apiWithTokenHandler)
 		if s.Config.HttpServer.Secure {
 			return s.serveHttps(mux)

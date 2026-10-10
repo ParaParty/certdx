@@ -1,15 +1,16 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"pkg.para.party/certdx/pkg/domain"
 	"pkg.para.party/certdx/pkg/logging"
 	"pkg.para.party/certdx/pkg/paths"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 type certStoreEntry struct {
@@ -20,21 +21,21 @@ type certStoreEntry struct {
 // CertStore handles persistent storage of obtained certificates as the
 // server's cache.json file.
 type CertStore struct {
-	path    string
+	path string
+
+	mu      sync.Mutex // serializes saveEntry
 	entries map[domain.Key]*certStoreEntry
-	update  chan *certStoreEntry
 }
 
 // NewCertStore constructs a CertStore backed by the default cache.json path.
-func NewCertStore() (CertStore, error) {
+func NewCertStore() (*CertStore, error) {
 	path, err := paths.ServerCachePath()
 	if err != nil {
-		return CertStore{}, fmt.Errorf("resolve cert store path: %w", err)
+		return nil, fmt.Errorf("resolve cert store path: %w", err)
 	}
-	return CertStore{
+	return &CertStore{
 		path:    path,
 		entries: make(map[domain.Key]*certStoreEntry),
-		update:  make(chan *certStoreEntry, 10),
 	}, nil
 }
 
@@ -58,10 +59,14 @@ func (s *CertStore) Load() error {
 	}
 
 	for _, entry := range raw {
+		if entry == nil {
+			continue
+		}
 		if !entry.Cert.IsValid() {
 			logging.Info("Discarding expired cert for domains: %v", entry.Domains)
 			continue
 		}
+		entry.Domains = domain.Canonical(entry.Domains)
 		s.entries[domain.AsKey(entry.Domains)] = entry
 	}
 
@@ -74,14 +79,17 @@ func (s *CertStore) save() error {
 		return fmt.Errorf("marshal cert store: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, jsonBytes, 0o600); err != nil {
+	if err := utils.WriteFileAtomic(s.path, jsonBytes, 0o600); err != nil {
 		return fmt.Errorf("write cert store: %w", err)
 	}
 
 	return nil
 }
 
+// saveEntry records fe and rewrites cache.json. Safe for concurrent use.
 func (s *CertStore) saveEntry(fe *certStoreEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.entries[domain.AsKey(fe.Domains)] = fe
 	return s.save()
 }
@@ -96,35 +104,5 @@ func (s *CertStore) PrintCertInfo() {
 
 	for _, cert := range s.entries {
 		fmt.Printf("\nDomains:     %s\nRenewAt:     %s\nValidBefore: %s\n", strings.Join(cert.Domains, ", "), cert.Cert.RenewAt, cert.Cert.ValidBefore)
-	}
-}
-
-// listenUpdate drains the cert-store update queue, persisting each renewed cert
-// to disk. When ctx fires, it drains any updates already in the buffered
-// channel before exiting so a renewal that landed right at shutdown is
-// not silently dropped.
-func (s *CertStore) listenUpdate(ctx context.Context) {
-	persist := func(fe *certStoreEntry) {
-		logging.Info("Update domains cache to file")
-		if err := s.saveEntry(fe); err != nil {
-			logging.Warn("Update domains cache to file failed: %s", err)
-		}
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Drain whatever's already queued before exiting.
-			for {
-				select {
-				case fe := <-s.update:
-					persist(fe)
-				default:
-					return
-				}
-			}
-		case fe := <-s.update:
-			persist(fe)
-		}
 	}
 }

@@ -61,6 +61,7 @@ func init() {
 
 	certDXDaemon = client.MakeCertDXClientDaemon()
 	if *test {
+		logging.Warn("INSECURE: --test skips HTTP server certificate verification")
 		certDXDaemon.ClientOpt = append(certDXDaemon.ClientOpt, client.WithCertDXInsecure())
 	}
 
@@ -79,9 +80,13 @@ func main() {
 
 	switch certDXDaemon.Config.Common.Mode {
 	case config.CLIENT_MODE_HTTP:
-		certDXDaemon.HttpMain()
+		if err := certDXDaemon.HttpMain(); err != nil {
+			logging.Fatal("%s", err)
+		}
 	case config.CLIENT_MODE_GRPC:
-		certDXDaemon.GRPCMain()
+		if err := certDXDaemon.GRPCMain(); err != nil {
+			logging.Fatal("%s", err)
+		}
 	default:
 		logging.Fatal("Mode: \"%s\" is not supported", certDXDaemon.Config.Common.Mode)
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -60,6 +61,25 @@ func TestClientConfigValidateEmptyCertificatesAccepted(t *testing.T) {
 	err := c.Validate([]ValidatingOption{WithAcceptEmptyCertificatesList(true)})
 	if err != nil {
 		t.Fatalf("expected empty certificates to be accepted with option: %v", err)
+	}
+}
+
+func TestClientCertificateValidateCanonicalizesDomains(t *testing.T) {
+	c := &ClientCertificate{Name: "x", Domains: []string{"WWW.Example.COM.", "example.com", "www.example.com"}}
+	if err := c.Validate(&validatingConfiguration{acceptEmptyUpdateActions: true}); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if want := []string{"example.com", "www.example.com"}; !slices.Equal(c.Domains, want) {
+		t.Fatalf("domains: got %q want %q", c.Domains, want)
+	}
+}
+
+func TestClientCertificateValidateRejectsNoDomains(t *testing.T) {
+	for _, domains := range [][]string{nil, {"", "."}} {
+		c := &ClientCertificate{Name: "x", Domains: domains}
+		if err := c.Validate(&validatingConfiguration{acceptEmptyUpdateActions: true}); err == nil {
+			t.Fatalf("domains %q: expected error", domains)
+		}
 	}
 }
 
@@ -182,6 +202,74 @@ func TestClientConfigValidateHttpTokenNoMtlsCheck(t *testing.T) {
 	err := c.Validate(nil)
 	if err != nil {
 		t.Fatalf("token auth should not require mtls files: %v", err)
+	}
+}
+
+func TestClientHttpServerValidateAuthMethod(t *testing.T) {
+	for _, method := range []string{"", "mTLS", "none"} {
+		s := &ClientHttpServer{Url: "https://example.com", AuthMethod: method}
+		if err := s.Validate(); err == nil {
+			t.Fatalf("authMethod %q: expected error", method)
+		}
+	}
+}
+
+func collisionConfig(mode string, certs ...ClientCertificate) *ClientConfig {
+	c := &ClientConfig{}
+	c.SetDefault()
+	c.Common.Mode = mode
+	c.Http.MainServer.Url = "https://example.com"
+	c.Certificates = certs
+	return c
+}
+
+func fileCert(name, savePath string, domains ...string) ClientCertificate {
+	return ClientCertificate{Name: name, Domains: domains, Actions: []UpdateActionConfig{&FileAction{SavePath: savePath}}}
+}
+
+func TestClientConfigValidateCollisions(t *testing.T) {
+	cases := []struct {
+		name  string
+		mode  string
+		certs []ClientCertificate
+		want  string
+	}{
+		{"same domain set", CLIENT_MODE_HTTP, []ClientCertificate{
+			fileCert("a", "/tmp/a", "example.com", "www.example.com"),
+			fileCert("b", "/tmp/b", "WWW.example.com.", "example.com"),
+		}, "duplicates the domain set"},
+		{"same file path", CLIENT_MODE_HTTP, []ClientCertificate{
+			fileCert("x", "/tmp/certs", "a.example.com"),
+			fileCert("x", "/tmp/certs/", "b.example.com"),
+		}, "also writes"},
+		{"same file path in one certificate", CLIENT_MODE_HTTP, []ClientCertificate{
+			{Name: "x", Domains: []string{"a.example.com"}, Actions: []UpdateActionConfig{
+				&FileAction{SavePath: "/tmp/certs"}, &FileAction{SavePath: "/tmp/certs"},
+			}},
+		}, "also writes"},
+	}
+	for _, tc := range cases {
+		err := collisionConfig(tc.mode, tc.certs...).Validate(nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestClientConfigValidateDuplicateNames(t *testing.T) {
+	certs := []ClientCertificate{
+		fileCert("x", "/tmp/a", "a.example.com"),
+		fileCert("x", "/tmp/b", "b.example.com"),
+	}
+	if err := collisionConfig(CLIENT_MODE_HTTP, certs...).Validate(nil); err != nil {
+		t.Fatalf("http mode allows repeated names: %v", err)
+	}
+
+	c := collisionConfig(CLIENT_MODE_GRPC, certs...)
+	c.GRPC.MainServer.Server = "localhost:10002"
+	err := c.Validate(nil)
+	if err == nil || !strings.Contains(err.Error(), "duplicate certificate name") {
+		t.Fatalf("grpc mode: err = %v", err)
 	}
 }
 

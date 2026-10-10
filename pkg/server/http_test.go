@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,17 @@ func TestCheckAuthorizationTokenInvalid(t *testing.T) {
 	req.Header.Set("Authorization", "Token wrong")
 	if s.checkAuthorizationToken(req) {
 		t.Fatal("invalid token should not authorize")
+	}
+}
+
+func TestCheckAuthorizationTokenLengthMismatch(t *testing.T) {
+	s := makeTestServer("secret123", "/", nil)
+	for _, token := range []string{"secret12", "secret1234", ""} {
+		req := httptest.NewRequest("POST", "/", nil)
+		req.Header.Set("Authorization", "Token "+token)
+		if s.checkAuthorizationToken(req) {
+			t.Fatalf("token %q should not authorize", token)
+		}
 	}
 }
 
@@ -103,8 +115,20 @@ func TestHandleCertReqEmptyBody(t *testing.T) {
 	w := httptest.NewRecorder()
 	var rw http.ResponseWriter = w
 	s.handleCertReq(&rw, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("empty body: got %d want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("empty body: got %d want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleCertReqBodyTooLarge(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	body := `{"domains":["` + strings.Repeat("a", maxCertReqBodySize) + `"]}`
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("oversized body: got %d want %d", w.Code, http.StatusBadRequest)
 	}
 }
 
@@ -128,7 +152,7 @@ func TestHandleCertReqValidDomainsCachedCert(t *testing.T) {
 	s := makeTestServer("", "/", []string{"example.com"})
 
 	// Pre-populate the cert cache with a valid cert.
-	entry := s.certCache.get([]string{"example.com"})
+	entry := mustGet(t, &s.certCache, []string{"example.com"})
 	entry.stateMu.Lock()
 	entry.cert = CertT{
 		FullChain:   []byte("PEM-chain"),
@@ -160,13 +184,144 @@ func TestHandleCertReqValidDomainsCachedCert(t *testing.T) {
 	}
 }
 
+func TestHandleCertReqCanonicalizesDomains(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+
+	entry := mustGet(t, &s.certCache, []string{"example.com", "www.example.com"})
+	entry.stateMu.Lock()
+	entry.cert = CertT{
+		FullChain:   []byte("PEM-chain"),
+		Key:         []byte("PEM-key"),
+		ValidBefore: time.Now().Add(time.Hour),
+	}
+	entry.subscribing = 1
+	entry.stateMu.Unlock()
+
+	body, _ := json.Marshal(api.HttpCertReq{Domains: []string{"WWW.Example.COM.", "example.com", "www.example.com"}})
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusOK)
+	}
+	if n := len(s.certCache.entries); n != 1 {
+		t.Fatalf("cache entries = %d, want 1", n)
+	}
+}
+
+func TestHandleCertReqEmptyDomains(t *testing.T) {
+	for _, domains := range [][]string{nil, {}} {
+		s := makeTestServer("", "/", []string{"example.com"})
+		body, _ := json.Marshal(api.HttpCertReq{Domains: domains})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		var rw http.ResponseWriter = w
+		s.handleCertReq(&rw, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("domains %q: got status %d want %d", domains, w.Code, http.StatusBadRequest)
+		}
+		if n := len(s.certCache.entries); n != 0 {
+			t.Fatalf("domains %q created %d cache entries", domains, n)
+		}
+	}
+}
+
+// publishCert installs cert on entry the way renew does.
+func publishCert(entry *certEntry, cert CertT) {
+	entry.stateMu.Lock()
+	entry.cert = cert
+	entry.version++
+	close(entry.updated)
+	entry.updated = make(chan struct{})
+	entry.stateMu.Unlock()
+}
+
+func subscribedEntry(t *testing.T, s *CertDXServer, cert CertT) {
+	t.Helper()
+	entry := mustGet(t, &s.certCache, []string{"example.com"})
+	entry.stateMu.Lock()
+	entry.cert = cert
+	entry.subscribing = 1
+	entry.stateMu.Unlock()
+}
+
+func postCertReq(ctx context.Context, s *CertDXServer) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(api.HttpCertReq{Domains: []string{"example.com"}})
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	var rw http.ResponseWriter = w
+	s.handleCertReq(&rw, req)
+	return w
+}
+
+func TestHandleCertReqSubscribedButNotIssued(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	subscribedEntry(t, s, CertT{})
+
+	// Cancelled so the wait for the in-flight issuance returns at once.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := postCertReq(ctx, s)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleCertReqWaitsForInFlightIssuance(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	subscribedEntry(t, s, CertT{})
+	entry := mustGet(t, &s.certCache, []string{"example.com"})
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		publishCert(entry, CertT{
+			FullChain:   []byte("PEM-chain"),
+			Key:         []byte("PEM-key"),
+			ValidBefore: time.Now().Add(time.Hour),
+		})
+	}()
+	w := postCertReq(context.Background(), s)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusOK)
+	}
+	var resp api.HttpCertResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if string(resp.FullChain) != "PEM-chain" || string(resp.Key) != "PEM-key" {
+		t.Fatalf("served %q / %q", resp.FullChain, resp.Key)
+	}
+}
+
+func TestHandleCertReqServesHeldCertPastRenewDeadline(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	subscribedEntry(t, s, CertT{
+		FullChain:   []byte("PEM-chain"),
+		Key:         []byte("PEM-key"),
+		ValidBefore: time.Now().Add(-time.Hour),
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := postCertReq(ctx, s)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusOK)
+	}
+}
+
 func TestHandleCertReqInvalidJSON(t *testing.T) {
 	s := makeTestServer("", "/", []string{"example.com"})
 	req := httptest.NewRequest("POST", "/", strings.NewReader("{invalid"))
 	w := httptest.NewRecorder()
 	var rw http.ResponseWriter = w
 	s.handleCertReq(&rw, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("invalid json: got %d want %d", w.Code, http.StatusInternalServerError)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid json: got %d want %d", w.Code, http.StatusBadRequest)
 	}
 }

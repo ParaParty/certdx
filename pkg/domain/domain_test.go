@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestIsSubdomainNormalizesCaseAndRootDot(t *testing.T) {
 	allowed := []string{"Example.COM."}
@@ -40,9 +43,32 @@ func TestAllAllowedUsesNormalizedSubdomainRules(t *testing.T) {
 	}
 }
 
-func TestAsKeyCanonicalizesDomainSets(t *testing.T) {
-	first := AsKey([]string{"API.Example.COM.", "example.com", "api.example.com"})
-	second := AsKey([]string{"example.com.", "api.example.com"})
+func TestCanonical(t *testing.T) {
+	in := []string{"b.Example.COM.", "", "a.example.com", "B.example.com", "."}
+	orig := slices.Clone(in)
+
+	got := Canonical(in)
+	want := []string{"a.example.com", "b.example.com"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Canonical(%q) = %q, want %q", in, got, want)
+	}
+	if !slices.Equal(in, orig) {
+		t.Fatalf("Canonical modified its input: %q", in)
+	}
+	if again := Canonical(got); !slices.Equal(again, got) {
+		t.Fatalf("Canonical is not idempotent: %q -> %q", got, again)
+	}
+
+	for _, empty := range [][]string{nil, {}, {"", "."}} {
+		if got := Canonical(empty); len(got) != 0 {
+			t.Fatalf("Canonical(%q) = %q, want empty", empty, got)
+		}
+	}
+}
+
+func TestAsKeyOfCanonicalDomainSets(t *testing.T) {
+	first := AsKey(Canonical([]string{"API.Example.COM.", "example.com", "api.example.com"}))
+	second := AsKey(Canonical([]string{"example.com.", "api.example.com"}))
 
 	if first != second {
 		t.Fatalf("expected equivalent domain sets to hash to the same key: %d != %d", first, second)

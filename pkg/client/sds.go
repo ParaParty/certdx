@@ -49,20 +49,20 @@ type CertDXgRPCClient struct {
 	Received atomic.Pointer[chan struct{}]
 }
 
-func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]*watchingCert) *CertDXgRPCClient {
+func MakeCertDXgRPCClient(server *config.ClientGRPCServer, certs map[domain.Key]*watchingCert) (*CertDXgRPCClient, error) {
+	cfg, err := mtls.LoadClient(server.PEM)
+	if err != nil {
+		return nil, fmt.Errorf("load mtls bundle: %w", err)
+	}
 	c := &CertDXgRPCClient{
-		server: server,
-		certs:  certs,
+		tlsCred: credentials.NewTLS(cfg),
+		server:  server,
+		certs:   certs,
 	}
 	received := make(chan struct{})
 	c.Received.Store(&received)
 	c.Running.Store(false)
-	cfg, err := mtls.LoadClient(server.PEM)
-	if err != nil {
-		logging.Fatal("load mtls bundle: %s", err)
-	}
-	c.tlsCred = credentials.NewTLS(cfg)
-	return c
+	return c, nil
 }
 
 func sendStreamErr(ctx context.Context, errChan chan<- error, err error) {
@@ -229,17 +229,17 @@ func (c *CertDXgRPCClient) handleCert(ctx context.Context, cert *watchingCert,
 	for {
 		select {
 		case _respData := <-resp:
-			respCert, ok := _respData.Secret.Type.(*tlsv3.Secret_TlsCertificate)
-			if !ok {
-				sendStreamErr(ctx, errChan, fmt.Errorf("unexpected resp type"))
+			tlsCert := _respData.Secret.GetTlsCertificate()
+			if tlsCert == nil {
+				sendStreamErr(ctx, errChan, fmt.Errorf("SDS response for %s carries no TLS certificate", cert.Config.Name))
 				return
 			}
 
 			select {
 			case cert.UpdateChan <- certData{
 				Domains:   cert.Config.Domains,
-				Fullchain: respCert.TlsCertificate.CertificateChain.GetInlineBytes(),
-				Key:       respCert.TlsCertificate.PrivateKey.GetInlineBytes(),
+				Fullchain: tlsCert.GetCertificateChain().GetInlineBytes(),
+				Key:       tlsCert.GetPrivateKey().GetInlineBytes(),
 			}:
 			case <-ctx.Done():
 				return

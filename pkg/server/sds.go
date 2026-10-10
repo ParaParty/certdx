@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
 	"time"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -30,9 +31,7 @@ type MySDS struct {
 }
 
 // peerAddr returns a printable peer address from the stream's context,
-// or "unknown" if no peer info is available. The Envoy side is meant to
-// always populate it; the nil guards exist to avoid a panic from a
-// malformed first frame.
+// or "unknown" if no peer info is available.
 func peerAddr(ctx context.Context) string {
 	p, ok := peer.FromContext(ctx)
 	if !ok || p == nil || p.Addr == nil {
@@ -41,264 +40,249 @@ func peerAddr(ctx context.Context) string {
 	return p.Addr.String()
 }
 
-// sendStreamErr publishes err on errChan but bails out if ctx fires
-// first, so a goroutine that wants to report a failure can never block
-// the stream's teardown when the consumer of errChan has already
-// stopped reading.
-func sendStreamErr(ctx context.Context, errChan chan<- error, err error) {
-	select {
-	case errChan <- err:
-	case <-ctx.Done():
-	}
+// sdsPack is one cert pack served on a stream.
+type sdsPack struct {
+	name  string
+	entry *certEntry
+
+	offered     bool
+	sentSeq     uint64 // entry version of the last offer
+	sentVersion string // VersionInfo of the last offer
 }
 
-func (sds *MySDS) StreamSecrets(server secretv3.SecretDiscoveryService_StreamSecretsServer) error {
-	// Merge the stream's ctx with the server's rootCtx so a server-wide
-	// shutdown also tears the stream down deterministically without
-	// needing a separate kill channel.
-	streamCtx, cancel := context.WithCancel(server.Context())
+// sdsStream holds the state of one StreamSecrets call. Only the event loop in
+// StreamSecrets touches it, so it needs no locking.
+type sdsStream struct {
+	sds    *MySDS
+	stream secretv3.SecretDiscoveryService_StreamSecretsServer
+	ctx    context.Context
+	peer   string
+
+	domainSets map[string]any
+	packs      map[string]*sdsPack
+	updates    chan *sdsPack
+}
+
+// StreamSecrets serves one SDS stream. A receive goroutine and one watcher
+// goroutine per pack feed a single loop, which is the only caller of Send.
+// Packs are offered when first requested and on every renewal; ACKs and NACKs
+// are only logged, never answered with a re-send.
+func (sds *MySDS) StreamSecrets(stream secretv3.SecretDiscoveryService_StreamSecretsServer) (err error) {
+	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
-	go func() {
-		select {
-		case <-sds.cdxsrv.rootCtx.Done():
-			cancel()
-		case <-streamCtx.Done():
+	defer context.AfterFunc(sds.cdxsrv.rootCtx, cancel)()
+
+	s := &sdsStream{
+		sds:     sds,
+		stream:  stream,
+		ctx:     ctx,
+		peer:    peerAddr(ctx),
+		packs:   map[string]*sdsPack{},
+		updates: make(chan *sdsPack),
+	}
+	logging.Info("New gRPC connection from: %s", s.peer)
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Error("Panic in SDS stream from %s: %v\n%s", s.peer, r, debug.Stack())
+			err = fmt.Errorf("internal error serving %s", s.peer)
 		}
+		for _, p := range s.packs {
+			sds.cdxsrv.release(p.entry)
+		}
+		logging.Info("gRPC connection from %s closed: %v", s.peer, err)
 	}()
 
-	ctx := streamCtx
-	peer := peerAddr(ctx)
-	logging.Info("New gRPC connection from: %s", peer)
-
-	dispatch := map[string]chan *discoveryv3.DiscoveryRequest{}
-	// Buffered so a goroutine that reports a failure right at teardown
-	// doesn't block the receive path.
-	errChan := make(chan error, 1)
-
-	resp := make(chan *discoveryv3.DiscoveryResponse)
+	reqs := make(chan *discoveryv3.DiscoveryRequest)
+	recvErr := make(chan error, 1)
 	go func() {
-		// goroutine for sending
 		for {
-			select {
-			case r := <-resp:
-				if err := server.Send(r); err != nil {
-					// a failed in sending should make the context fail as well.
-					sendStreamErr(ctx, errChan, fmt.Errorf("failed sending message: %w", err))
-					return
-				}
-			case <-ctx.Done():
-				logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
-				return
-			}
-		}
-	}()
-
-	var domainSets map[string]interface{}
-
-	go func() {
-		// goroutine for receiving
-		for {
-			select {
-			case <-ctx.Done():
-				logging.Debug("Message dispatcher stopped due to ctx done: %s", ctx.Err())
-				return
-			default:
-			}
-
-			req, err := server.Recv()
+			req, err := stream.Recv()
 			if err != nil {
-				sendStreamErr(ctx, errChan, fmt.Errorf("failed receiving request from %s: %w", peer, err))
+				recvErr <- err
 				return
 			}
-
-			if req.TypeUrl != typeUrl {
-				sendStreamErr(ctx, errChan, fmt.Errorf("unexpected resource type: expect %q but requested %q", typeUrl, req.TypeUrl))
+			select {
+			case reqs <- req:
+			case <-ctx.Done():
 				return
-			}
-
-			if domainSets == nil {
-				if req.Node == nil || req.Node.Metadata == nil {
-					sendStreamErr(ctx, errChan, fmt.Errorf("bad metadata: missing node metadata"))
-					return
-				}
-				_domainSets, exist := req.Node.Metadata.Fields[domainKey]
-				if !exist {
-					sendStreamErr(ctx, errChan, fmt.Errorf("bad metadata: no %q key", domainKey))
-					return
-				}
-				m, ok := _domainSets.AsInterface().(map[string]interface{})
-				if !ok {
-					sendStreamErr(ctx, errChan, fmt.Errorf("bad metadata: domains should be a map"))
-					return
-				}
-				domainSets = m
-			}
-
-			packRequests := map[string][]string{}
-			for _, name := range req.ResourceNames {
-				// this is an ack
-				if reqChan, ok := dispatch[name]; ok {
-					select {
-					case reqChan <- req:
-					case <-ctx.Done():
-						return
-					}
-					continue
-				}
-
-				pack, exist := domainSets[name]
-				if !exist {
-					sendStreamErr(ctx, errChan, fmt.Errorf("bad metadata: missing domain names for pack %s", name))
-					return
-				}
-
-				items, ok := pack.([]any)
-				if !ok {
-					sendStreamErr(ctx, errChan, fmt.Errorf("bad metadata: domain pack should be an array"))
-					return
-				}
-				var domains []string
-				for _, v := range items {
-					vs, ok := v.(string)
-					if !ok {
-						sendStreamErr(ctx, errChan, fmt.Errorf("bad metadata: domain should be string"))
-						return
-					}
-					domains = append(domains, vs)
-				}
-				if !domain.AllAllowed(sds.cdxsrv.Config.ACME.AllowedDomains, domains) {
-					sendStreamErr(ctx, errChan, fmt.Errorf("domains %v: %w", domains, domain.ErrNotAllowed))
-					return
-				}
-				packRequests[name] = domains
-			}
-
-			for name, domains := range packRequests {
-				logging.Info("Handling pack %s with domains %v in response to %s", name, domains, peer)
-
-				entry := sds.cdxsrv.certCache.get(domains)
-
-				reqChan := make(chan *discoveryv3.DiscoveryRequest)
-				dispatch[name] = reqChan
-				go sds.handleCert(ctx, name, entry, reqChan, resp, errChan, peer)
 			}
 		}
 	}()
-
-	var err error
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-		logging.Debug("Stream end due to ctx Done: %s", err)
-	case err = <-errChan:
-		logging.Error("Stream end due to errored: %s", err)
-	}
-
-	logging.Info("gRPC connection from %s closed", peer)
-	return err
-}
-
-// handleCert serves one cert pack on a single SDS stream. On any failure
-// (response marshal, send timeout) it propagates the error via errChan
-// so StreamSecrets returns from its outer select and gRPC closes the
-// connection — the previous "log and return from this goroutine"
-// behavior left the stream alive serving a stale or absent cert pack.
-func (sds *MySDS) handleCert(ctx context.Context, name string, entry *certEntry,
-	req chan *discoveryv3.DiscoveryRequest, resp chan *discoveryv3.DiscoveryResponse,
-	errChan chan<- error, peer string) {
-
-	sds.cdxsrv.subscribe(entry)
-	defer sds.cdxsrv.release(entry)
-
-	cert, seen := entry.Snapshot()
-	if !cert.IsValid() {
-		seen = entry.WaitForUpdate(ctx, seen)
-		if ctx.Err() != nil {
-			return
-		}
-		cert, seen = entry.Snapshot()
-	}
 
 	for {
-		secret, err := anypb.New(&tlsv3.Secret{
-			Name: name,
-			Type: &tlsv3.Secret_TlsCertificate{
-				TlsCertificate: &tlsv3.TlsCertificate{
-					CertificateChain: &corev3.DataSource{
-						Specifier: &corev3.DataSource_InlineBytes{
-							InlineBytes: cert.FullChain,
-						},
-					},
-					PrivateKey: &corev3.DataSource{
-						Specifier: &corev3.DataSource_InlineBytes{
-							InlineBytes: cert.Key,
-						},
-					},
-				},
-			},
-		})
-		if err != nil {
-			sendStreamErr(ctx, errChan, fmt.Errorf("construct SDS response for %v: %w", entry.domains, err))
-			return
-		}
-
-		version := cert.RenewAt.Format(time.RFC3339)
-
 		select {
-		case resp <- &discoveryv3.DiscoveryResponse{
-			VersionInfo: version,
-			TypeUrl:     typeUrl,
-			Resources:   []*anypb.Any{secret},
-		}:
 		case <-ctx.Done():
-			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
-			return
-		}
-
-		logging.Info("Offered cert %v version %s to %s", entry.domains, version, peer)
-
-		select {
-		case ack := <-req:
-			if ack.VersionInfo == version {
-				logging.Info("Cert pack %s version %s deployed at %s", name, version, peer)
-			} else {
-				err := ack.ErrorDetail
-				logging.Warn("Cert version %s rejected by %s at %s: %d(%s)",
-					version, name, peer,
-					err.Code, err.Message)
+			return ctx.Err()
+		case err := <-recvErr:
+			return fmt.Errorf("receive from %s: %w", s.peer, err)
+		case req := <-reqs:
+			if err := s.handleRequest(req); err != nil {
+				return err
 			}
-		case <-ctx.Done():
-			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
-			return
+		case p := <-s.updates:
+			if err := s.offer(p); err != nil {
+				return err
+			}
 		}
-
-		seen = entry.WaitForUpdate(ctx, seen)
-		if ctx.Err() != nil {
-			logging.Debug("Message sender stopped due to ctx done: %s", ctx.Err())
-			return
-		}
-		cert, seen = entry.Snapshot()
 	}
 }
 
-func clientTLSLog(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-	if p, ok := peer.FromContext(ctx); ok {
+func (s *sdsStream) handleRequest(req *discoveryv3.DiscoveryRequest) error {
+	if req.TypeUrl != typeUrl {
+		return fmt.Errorf("unexpected resource type: expect %q but requested %q", typeUrl, req.TypeUrl)
+	}
+
+	for _, name := range req.ResourceNames {
+		if p, ok := s.packs[name]; ok {
+			s.logResponse(p, req)
+			continue
+		}
+
+		domains, err := s.packDomains(req, name)
+		if err != nil {
+			return err
+		}
+		if !domain.AllAllowed(s.sds.cdxsrv.Config.ACME.AllowedDomains, domains) {
+			return fmt.Errorf("domains %v: %w", domains, domain.ErrNotAllowed)
+		}
+		entry, err := s.sds.cdxsrv.certCache.get(domains)
+		if err != nil {
+			return fmt.Errorf("cert pack %s: %w", name, err)
+		}
+
+		logging.Info("Handling pack %s with domains %v for %s", name, entry.domains, s.peer)
+		p := &sdsPack{name: name, entry: entry}
+		s.packs[name] = p
+		s.sds.cdxsrv.subscribe(entry)
+		_, seen := entry.Snapshot()
+		go s.watch(p, seen)
+
+		if err := s.offer(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// logResponse reports a client's response to the last offer of p.
+func (s *sdsStream) logResponse(p *sdsPack, req *discoveryv3.DiscoveryRequest) {
+	switch detail := req.GetErrorDetail(); {
+	case detail != nil:
+		logging.Warn("Cert pack %s rejected by %s: %d(%s)", p.name, s.peer, detail.GetCode(), detail.GetMessage())
+	case p.offered && req.VersionInfo == p.sentVersion:
+		logging.Info("Cert pack %s version %s deployed at %s", p.name, p.sentVersion, s.peer)
+	default:
+		// Stream-level version for another pack, or a stale ack.
+		logging.Debug("Cert pack %s: %s reports version %q, last offered %q", p.name, s.peer, req.VersionInfo, p.sentVersion)
+	}
+}
+
+// packDomains reads the domain list of pack name from the node metadata,
+// which the client sends with its first request.
+func (s *sdsStream) packDomains(req *discoveryv3.DiscoveryRequest, name string) ([]string, error) {
+	if s.domainSets == nil {
+		fields := req.GetNode().GetMetadata().GetFields()
+		raw, ok := fields[domainKey]
+		if !ok {
+			return nil, fmt.Errorf("bad metadata: no %q key", domainKey)
+		}
+		m, ok := raw.AsInterface().(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("bad metadata: domains should be a map")
+		}
+		s.domainSets = m
+	}
+
+	items, ok := s.domainSets[name].([]any)
+	if !ok {
+		return nil, fmt.Errorf("bad metadata: domains of pack %s should be an array", name)
+	}
+	domains := make([]string, 0, len(items))
+	for _, v := range items {
+		d, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("bad metadata: domain should be string")
+		}
+		domains = append(domains, d)
+	}
+	return domains, nil
+}
+
+// watch signals the event loop whenever p's entry moves past version seen.
+func (s *sdsStream) watch(p *sdsPack, seen uint64) {
+	for {
+		seen = p.entry.WaitForUpdate(s.ctx, seen)
+		if s.ctx.Err() != nil {
+			return
+		}
+		select {
+		case s.updates <- p:
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+// offer sends p's current cert unless it has none yet or it was already sent.
+func (s *sdsStream) offer(p *sdsPack) error {
+	cert, seq := p.entry.Snapshot()
+	if len(cert.FullChain) == 0 || len(cert.Key) == 0 {
+		return nil
+	}
+	if p.offered && seq == p.sentSeq {
+		return nil
+	}
+
+	secret, err := anypb.New(&tlsv3.Secret{
+		Name: p.name,
+		Type: &tlsv3.Secret_TlsCertificate{
+			TlsCertificate: &tlsv3.TlsCertificate{
+				CertificateChain: &corev3.DataSource{
+					Specifier: &corev3.DataSource_InlineBytes{InlineBytes: cert.FullChain},
+				},
+				PrivateKey: &corev3.DataSource{
+					Specifier: &corev3.DataSource_InlineBytes{InlineBytes: cert.Key},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("construct SDS response for %v: %w", p.entry.domains, err)
+	}
+
+	version := cert.RenewAt.Format(time.RFC3339)
+	if err := s.stream.Send(&discoveryv3.DiscoveryResponse{
+		VersionInfo: version,
+		TypeUrl:     typeUrl,
+		Resources:   []*anypb.Any{secret},
+	}); err != nil {
+		return fmt.Errorf("send to %s: %w", s.peer, err)
+	}
+
+	p.offered, p.sentSeq, p.sentVersion = true, seq, version
+	logging.Info("Offered cert %v version %s to %s", p.entry.domains, version, s.peer)
+	return nil
+}
+
+// clientTLSLog logs the client certificates presented on each stream.
+func clientTLSLog(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if p, ok := peer.FromContext(ss.Context()); ok {
 		if mtls, ok := p.AuthInfo.(credentials.TLSInfo); ok {
+			addr := peerAddr(ss.Context())
 			if len(mtls.State.PeerCertificates) > 1 {
-				logging.Error("Client %s providing multiple client certificate.", p.Addr.String())
+				logging.Error("Client %s providing multiple client certificate.", addr)
 			}
 			for _, item := range mtls.State.PeerCertificates {
-				logging.Info("Client `%s` from %s.", item.Subject.CommonName, p.Addr.String())
+				logging.Info("Client `%s` from %s.", item.Subject.CommonName, addr)
 			}
 		}
 	}
-	return handler(ctx, req)
+	return handler(srv, ss)
 }
 
 // SDSSrv runs the gRPC SDS endpoint until Stop is called. A goroutine
 // watches the server's rootCtx and triggers grpcServer.Stop on shutdown,
-// which closes every active stream — StreamSecrets goroutines then exit
-// via their merged ctx without needing a kill channel.
+// which closes every active stream.
 func (s *CertDXServer) SDSSrv() error {
 	logging.Info("Start listening GRPC at %s", s.Config.GRPCSDSServer.Listen)
 
@@ -309,7 +293,7 @@ func (s *CertDXServer) SDSSrv() error {
 
 	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(mtlsConfig)),
-		grpc.UnaryInterceptor(clientTLSLog),
+		grpc.StreamInterceptor(clientTLSLog),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             time.Second,
 			PermitWithoutStream: true,

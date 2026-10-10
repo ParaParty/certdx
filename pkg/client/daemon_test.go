@@ -1,11 +1,69 @@
 package client
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
 )
+
+func TestWatchUpdateDropsInvalidCert(t *testing.T) {
+	daemon := MakeCertDXClientDaemon()
+	domains := []string{"example.com"}
+
+	got := make(chan []byte, 2)
+	if err := daemon.AddCertToWatchOpt("example", domains, []WatchingCertsOption{
+		WithCertificateHandlerOption(func(fullchain, _ []byte, _ *config.ClientCertificate) {
+			got <- fullchain
+		}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cert := daemon.certs[domain.AsKey(domains)]
+
+	daemon.wg.Add(1)
+	go daemon.watchUpdate(cert)
+	defer func() {
+		daemon.Stop()
+		daemon.wg.Wait()
+	}()
+
+	fullchain, key, err := acme.NewMockACME(time.Hour).Obtain(context.Background(), domains, time.Time{})
+	if err != nil {
+		t.Fatalf("mock obtain: %v", err)
+	}
+
+	if _, err := daemon.GetCertificate(context.Background(), domain.AsKey(domains)); err == nil {
+		t.Fatal("GetCertificate succeeded before any cert arrived")
+	}
+
+	cert.UpdateChan <- certData{Domains: domains}
+	cert.UpdateChan <- certData{Domains: domains, Fullchain: []byte("garbage"), Key: []byte("garbage")}
+	cert.UpdateChan <- certData{Domains: domains, Fullchain: fullchain, Key: key}
+
+	select {
+	case delivered := <-got:
+		if string(delivered) != string(fullchain) {
+			t.Fatalf("invalid cert reached the handler: %q", delivered)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("valid cert was not delivered")
+	}
+
+	first, err := daemon.GetCertificate(context.Background(), domain.AsKey(domains))
+	if err != nil {
+		t.Fatalf("GetCertificate: %v", err)
+	}
+	if first.Leaf == nil || first.Leaf.DNSNames[0] != "example.com" {
+		t.Fatalf("unexpected leaf: %+v", first.Leaf)
+	}
+	if second, _ := daemon.GetCertificate(context.Background(), domain.AsKey(domains)); second != first {
+		t.Fatal("GetCertificate parsed the cert again")
+	}
+}
 
 func TestAddCertToWatchOptKeepsHandlersForDuplicateDomains(t *testing.T) {
 	daemon := MakeCertDXClientDaemon()

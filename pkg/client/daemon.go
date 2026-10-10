@@ -54,6 +54,7 @@ type CertDXClientDaemon struct {
 type certData struct {
 	Domains        []string
 	Fullchain, Key []byte
+	parsed         *tls.Certificate // nil until a valid pair is stored
 }
 
 // watchingCert holds the per-certificate state that survives across
@@ -97,6 +98,12 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 			return
 		case newCert := <-c.UpdateChan:
 			logging.Info("Received cert %v", newCert.Domains)
+			parsed, err := tls.X509KeyPair(newCert.Fullchain, newCert.Key)
+			if err != nil {
+				logging.Error("Dropping invalid cert %v: %s", newCert.Domains, err)
+				continue
+			}
+			newCert.parsed = &parsed
 			currentCert := c.Data.Load()
 			if !bytes.Equal(currentCert.Fullchain, newCert.Fullchain) || !bytes.Equal(currentCert.Key, newCert.Key) {
 				logging.Notice("Notify cert %v changed", newCert.Domains)
@@ -182,6 +189,9 @@ func (r *CertDXClientDaemon) ClientInit() error {
 		}
 		if fullchan, key, err := r.loadSavedCert(&cert.Config); err == nil {
 			cd.Fullchain, cd.Key = fullchan, key
+			if parsed, err := tls.X509KeyPair(fullchan, key); err == nil {
+				cd.parsed = &parsed
+			}
 		}
 		cert.Data.Store(&cd)
 
@@ -276,12 +286,9 @@ func (r *CertDXClientDaemon) Stop() {
 // GetCertificate returns the cached TLS cert for the given domain key.
 // Used by the Caddy plugin's get_certificate hook.
 func (r *CertDXClientDaemon) GetCertificate(ctx context.Context, certHash domain.Key) (*tls.Certificate, error) {
-	cert, exists := r.certs[certHash]
-	if exists {
-		certData := cert.Data.Load()
-		tlsCert, err := tls.X509KeyPair(certData.Fullchain, certData.Key)
-		if err == nil {
-			return &tlsCert, nil
+	if cert, exists := r.certs[certHash]; exists {
+		if parsed := cert.Data.Load().parsed; parsed != nil {
+			return parsed, nil
 		}
 	}
 	return nil, fmt.Errorf("no certificate found")

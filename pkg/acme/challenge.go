@@ -11,6 +11,7 @@ import (
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/s3"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/tencentcloud"
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/logging"
 )
 
 func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig) error {
@@ -20,35 +21,15 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 	}
 	switch typ {
 	case config.ChallengeTypeDns01:
-		opt := make([]dns01.ChallengeOption, 0)
-		dnsTimeout := defaultConservativeDNSTimeout
-
-		if p.DnsProvider.DisableCompletePropagationRequirement && !p.DnsProvider.ConservativeDNSCheck {
-			opt = append(opt, dns01.DisableAuthoritativeNssPropagationRequirement())
+		opts, dnsTimeout, err := dns01Options(p.DnsProvider)
+		if err != nil {
+			return err
 		}
-
-		// 添加自定义 DNS 服务器
-		if len(p.DnsProvider.Nameservers) > 0 {
-			opt = append(opt, dns01.AddRecursiveNameservers(p.DnsProvider.Nameservers))
-		}
-
-		// 添加 DNS 超时
 		if p.DnsProvider.DNSTimeout != "" {
-			timeout, err := time.ParseDuration(p.DnsProvider.DNSTimeout)
-			if err != nil {
-				return fmt.Errorf("invalid dnsTimeout %q: %w", p.DnsProvider.DNSTimeout, err)
-			}
-			dnsTimeout = timeout
-			clg = overridePropagationTimeout(clg, timeout)
-			opt = append(opt, dns01.AddDNSTimeout(timeout))
+			clg = overridePropagationTimeout(clg, dnsTimeout)
 		}
 
-		if p.DnsProvider.ConservativeDNSCheck {
-			checker := newConservativeChecker(p.DnsProvider.Nameservers, dnsTimeout)
-			opt = append(opt, dns01.WrapPreCheck(checker.Wrap))
-		}
-
-		if err := instance.Client.Challenge.SetDNS01Provider(clg, opt...); err != nil {
+		if err := instance.Client.Challenge.SetDNS01Provider(clg, opts...); err != nil {
 			return fmt.Errorf("unexpected error setting up dns challenge: %w", err)
 		}
 	case config.ChallengeTypeHttp01:
@@ -60,6 +41,39 @@ func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig)
 	}
 
 	return nil
+}
+
+// dns01Options builds the lego DNS-01 options for p and returns the DNS
+// timeout in effect.
+func dns01Options(p *config.DnsProvider) ([]dns01.ChallengeOption, time.Duration, error) {
+	var opts []dns01.ChallengeOption
+	dnsTimeout := defaultConservativeDNSTimeout
+
+	if len(p.Nameservers) > 0 {
+		opts = append(opts, dns01.AddRecursiveNameservers(p.Nameservers))
+	}
+
+	if p.DNSTimeout != "" {
+		timeout, err := time.ParseDuration(p.DNSTimeout)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid dnsTimeout %q: %w", p.DNSTimeout, err)
+		}
+		dnsTimeout = timeout
+		opts = append(opts, dns01.AddDNSTimeout(timeout))
+	}
+
+	if p.ConservativeDNSCheck {
+		if p.DisableCompletePropagationRequirement {
+			logging.Warn("DnsProvider: disableCompletePropagationRequirement is ignored because conservativeDnsCheck is enabled")
+		}
+		checker := newConservativeChecker(p.Nameservers, dnsTimeout)
+		opts = append(opts, dns01.WrapPreCheck(checker.Wrap))
+	} else if p.DisableCompletePropagationRequirement {
+		opts = append(opts, dns01.DisableAuthoritativeNssPropagationRequirement())
+		logging.Warn("!!! DnsProvider: disableCompletePropagationRequirement is set: the DNS-01 TXT record is NOT verified before the CA validates it. Issuance may fail if the record has not propagated yet !!!")
+	}
+
+	return opts, dnsTimeout, nil
 }
 
 type propagationTimeoutProvider struct {

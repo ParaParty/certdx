@@ -3,22 +3,34 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
+	"pkg.para.party/certdx/pkg/acme"
 	"pkg.para.party/certdx/pkg/domain"
 )
 
-func makeTempCertStore(t *testing.T) CertStore {
+func makeTempCertStore(t *testing.T) *CertStore {
 	t.Helper()
-	dir := t.TempDir()
-	return CertStore{
-		path:    filepath.Join(dir, "cache.json"),
+	return &CertStore{
+		path:    filepath.Join(t.TempDir(), "cache.json"),
 		entries: make(map[domain.Key]*certStoreEntry),
-		update:  make(chan *certStoreEntry, 10),
 	}
+}
+
+// reloadCertStore reads back what is on disk at cs.path.
+func reloadCertStore(t *testing.T, cs *CertStore) *CertStore {
+	t.Helper()
+	cs2 := &CertStore{path: cs.path, entries: make(map[domain.Key]*certStoreEntry)}
+	if err := cs2.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return cs2
 }
 
 func TestCertStoreLoadMissingFile(t *testing.T) {
@@ -76,6 +88,58 @@ func TestCertStoreLoadValid(t *testing.T) {
 	}
 }
 
+func TestCertStoreLoadSkipsNullEntries(t *testing.T) {
+	cs := makeTempCertStore(t)
+
+	valid := CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)}
+	raw := map[string]*certStoreEntry{
+		"1": {Domains: []string{"example.com"}, Cert: valid},
+		"2": nil,
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(cs.path, b, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := cs.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cs.entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(cs.entries))
+	}
+}
+
+func TestCertStoreLoadCanonicalizesLegacyEntries(t *testing.T) {
+	cs := makeTempCertStore(t)
+
+	valid := CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)}
+	raw := map[string]*certStoreEntry{
+		"1": {Domains: []string{"www.example.com", "Example.com."}, Cert: valid},
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(cs.path, b, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := cs.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"example.com", "www.example.com"}
+	loaded, ok := cs.entries[domain.AsKey(want)]
+	if !ok {
+		t.Fatal("legacy entry not keyed by its canonical domain set")
+	}
+	if !slices.Equal(loaded.Domains, want) {
+		t.Fatalf("domains: got %q want %q", loaded.Domains, want)
+	}
+}
+
 func TestCertStoreSaveAndLoad(t *testing.T) {
 	cs := makeTempCertStore(t)
 
@@ -102,14 +166,7 @@ func TestCertStoreSaveAndLoad(t *testing.T) {
 	}
 
 	// Reload into a fresh store.
-	cs2 := CertStore{
-		path:    cs.path,
-		entries: make(map[domain.Key]*certStoreEntry),
-		update:  make(chan *certStoreEntry, 10),
-	}
-	if err := cs2.Load(); err != nil {
-		t.Fatalf("Load after save: %v", err)
-	}
+	cs2 := reloadCertStore(t, cs)
 	key := domain.AsKey([]string{"a.com", "b.com"})
 	loaded, ok := cs2.entries[key]
 	if !ok {
@@ -120,67 +177,39 @@ func TestCertStoreSaveAndLoad(t *testing.T) {
 	}
 }
 
-func TestCertStoreListenUpdatePersists(t *testing.T) {
+func TestCertStoreConcurrentSaves(t *testing.T) {
 	cs := makeTempCertStore(t)
-	ctx, cancel := context.WithCancel(context.Background())
 
-	go cs.listenUpdate(ctx)
-
-	cs.update <- &certStoreEntry{
-		Domains: []string{"test.com"},
-		Cert: CertT{
-			FullChain:   []byte("lfc"),
-			Key:         []byte("lk"),
-			ValidBefore: time.Now().Add(time.Hour),
-		},
+	var wg sync.WaitGroup
+	for i := range 10 {
+		wg.Go(func() {
+			err := cs.saveEntry(&certStoreEntry{
+				Domains: []string{fmt.Sprintf("d%d.example.com", i)},
+				Cert:    CertT{FullChain: []byte("fc"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)},
+			})
+			if err != nil {
+				t.Errorf("saveEntry: %v", err)
+			}
+		})
 	}
+	wg.Wait()
 
-	// Give the goroutine time to persist.
-	time.Sleep(100 * time.Millisecond)
-	cancel()
-	// Give it time to drain and exit.
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify persisted.
-	cs2 := CertStore{
-		path:    cs.path,
-		entries: make(map[domain.Key]*certStoreEntry),
-		update:  make(chan *certStoreEntry, 10),
-	}
-	if err := cs2.Load(); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	key := domain.AsKey([]string{"test.com"})
-	if _, ok := cs2.entries[key]; !ok {
-		t.Fatal("entry not persisted by listenUpdate")
+	if n := len(reloadCertStore(t, cs).entries); n != 10 {
+		t.Fatalf("persisted %d entries, want 10", n)
 	}
 }
 
-func TestCertStoreListenUpdateDrainsOnCancel(t *testing.T) {
-	cs := makeTempCertStore(t)
-	ctx, cancel := context.WithCancel(context.Background())
+func TestRenewPersistsCert(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	s.certStore = makeTempCertStore(t)
+	s.acme = acme.NewMockACME(48 * time.Hour)
 
-	// Buffer entries before starting the listener.
-	cs.update <- &certStoreEntry{
-		Domains: []string{"drain.com"},
-		Cert:    CertT{FullChain: []byte("d"), Key: []byte("k"), ValidBefore: time.Now().Add(time.Hour)},
+	entry := newCertEntry([]string{"example.com"})
+	if obtained, err := s.renew(context.Background(), entry, false); err != nil || !obtained {
+		t.Fatalf("renew: obtained=%v err=%v", obtained, err)
 	}
 
-	// Cancel immediately, then start listenUpdate — it should drain
-	// the buffered entry before returning.
-	cancel()
-	cs.listenUpdate(ctx)
-
-	cs2 := CertStore{
-		path:    cs.path,
-		entries: make(map[domain.Key]*certStoreEntry),
-		update:  make(chan *certStoreEntry, 10),
-	}
-	if err := cs2.Load(); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	key := domain.AsKey([]string{"drain.com"})
-	if _, ok := cs2.entries[key]; !ok {
-		t.Fatal("buffered entry not drained on cancel")
+	if _, ok := reloadCertStore(t, s.certStore).entries[domain.AsKey([]string{"example.com"})]; !ok {
+		t.Fatal("obtained cert was not persisted")
 	}
 }
