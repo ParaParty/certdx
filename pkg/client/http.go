@@ -26,6 +26,9 @@ type CertDXHttpClientOption func(client *CertDXHttpClient) error
 // IdleTimeout, so the client closes idle connections first.
 const idleConnTimeout = 90 * time.Second
 
+// maxCertRespBodySize bounds a cert response; a real one is a few KiB.
+const maxCertRespBodySize = 1 << 20
+
 func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOption {
 	return func(client *CertDXHttpClient) error {
 		client.Server = server
@@ -104,14 +107,15 @@ func (c *CertDXHttpClient) GetCertCtx(ctx context.Context, domains []string) (*a
 		return nil, err
 	}
 	defer resp.Body.Close()
+	body := io.LimitReader(resp.Body, maxCertRespBodySize)
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, body)
 		return nil, fmt.Errorf("POST '%s' status: %s", c.Server.Url, resp.Status)
 	}
 
 	var certResp = new(api.HttpCertResp)
-	err = json.NewDecoder(resp.Body).Decode(certResp)
+	err = json.NewDecoder(body).Decode(certResp)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,6 +209,22 @@ func TestGetCertCtxBadJSON(t *testing.T) {
 	_, err := c.GetCertCtx(context.Background(), []string{"example.com"})
 	if err == nil {
 		t.Fatal("expected error on bad JSON response")
+	}
+}
+
+func TestGetCertCtxBodyTooLarge(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"key":"` + strings.Repeat("A", maxCertRespBodySize) + `"}`))
+	}))
+	defer ts.Close()
+
+	c := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{
+		Url: ts.URL,
+	}))
+
+	if _, err := c.GetCertCtx(context.Background(), []string{"example.com"}); err == nil {
+		t.Fatal("expected error on an oversized response")
 	}
 }
 
