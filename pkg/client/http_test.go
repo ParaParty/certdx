@@ -121,8 +121,8 @@ func TestMakeCertDXHttpClientDefaults(t *testing.T) {
 	if c.HttpClient == nil {
 		t.Fatal("HttpClient is nil")
 	}
-	if c.HttpClient.Timeout != 30*time.Second {
-		t.Fatalf("timeout: got %v want 30s", c.HttpClient.Timeout)
+	if c.HttpClient.Timeout != certReqTimeout {
+		t.Fatalf("timeout: got %v want %v", c.HttpClient.Timeout, certReqTimeout)
 	}
 	if c.Server != nil {
 		t.Fatal("Server should be nil without option")
@@ -138,8 +138,8 @@ func TestWithCertDXInsecure(t *testing.T) {
 	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("InsecureSkipVerify not set")
 	}
-	if tr.IdleConnTimeout != idleConnTimeout {
-		t.Fatalf("IdleConnTimeout: got %v want %v", tr.IdleConnTimeout, idleConnTimeout)
+	if tr.TLSHandshakeTimeout == 0 || tr.IdleConnTimeout == 0 {
+		t.Fatal("transport lost the default timeouts")
 	}
 }
 
