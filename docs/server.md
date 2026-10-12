@@ -42,8 +42,8 @@ The configuration is a TOML file. Top-level sections:
 | `provider` | string | `"r3"` | One of `r3`, `r3test`, `google`, `googletest`. |
 | `retryCount` | int | `5` | Per-issuance retry count. |
 | `challengeType` | string | `"dns"` | `dns` or `http`. |
-| `certLifeTime` | duration string | `"168h"` | Lifetime of issued certificates the server requests/tracks. |
-| `renewTimeLeft` | duration string | `"24h"` | Renew when remaining lifetime drops below this. The renewal check runs every `renewTimeLeft / 4`. |
+| `certLifeTime` | duration string | `"168h"` | Lifetime of issued certificates the server requests/tracks. At least `48h`; `certLifeTime + renewTimeLeft` must not exceed 90 days. |
+| `renewTimeLeft` | duration string | `"24h"` | Renew when remaining lifetime drops below this. At least `4h` and shorter than `certLifeTime`. The renewal check runs every `renewTimeLeft / 4`. |
 | `allowedDomains` | string list | *(required)* | Root domains the server is allowed to issue. Requests for domains outside this list are rejected. |
 
 Supported ACME providers:

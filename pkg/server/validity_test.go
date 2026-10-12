@@ -26,27 +26,6 @@ func TestTargetValidBeforeIsAlwaysInTheFuture(t *testing.T) {
 	}
 }
 
-func TestClampValidBefore(t *testing.T) {
-	now := time.Date(2026, 8, 15, 13, 42, 17, 0, time.UTC)
-	target := now.Add(24 * time.Hour)
-
-	cases := []struct {
-		name     string
-		notAfter time.Time
-		want     time.Time
-	}{
-		{"cert outlives target", now.Add(90 * 24 * time.Hour), target},
-		{"cert shorter than target", now.Add(6 * time.Hour), now.Add(5 * time.Hour)},
-		{"cert shorter than renew margin", now.Add(10 * time.Minute), now.Add(10 * time.Minute)},
-		{"leaf already expired", now.Add(-time.Minute), target},
-	}
-	for _, tc := range cases {
-		if got := clampValidBefore(now, target, tc.notAfter, time.Hour); !got.Equal(tc.want) {
-			t.Errorf("%s: got %s want %s", tc.name, got, tc.want)
-		}
-	}
-}
-
 func TestRenewCheckInterval(t *testing.T) {
 	s := makeTestServer("", "/", nil)
 	s.Config.ACME.RenewTimeLeftDuration = 24 * time.Hour
@@ -101,7 +80,7 @@ func TestRenewClampsValidBeforeToRealNotAfter(t *testing.T) {
 	}
 }
 
-func TestRenewShortLivedCertIsValidOnArrival(t *testing.T) {
+func TestRenewRejectsCertShorterThanRenewTimeLeft(t *testing.T) {
 	s := makeTestServer("", "/", []string{"example.com"})
 	s.certStore = makeTempCertStore(t)
 	s.Config.ACME.CertLifeTimeDuration = 168 * time.Hour
@@ -109,14 +88,10 @@ func TestRenewShortLivedCertIsValidOnArrival(t *testing.T) {
 	s.acme = acme.NewMockACME(30 * time.Minute)
 
 	entry := newCertEntry([]string{"example.com"})
-	if _, err := s.renew(context.Background(), entry, false); err != nil {
-		t.Fatalf("renew: %v", err)
+	if _, err := s.renew(context.Background(), entry, false); err == nil {
+		t.Fatal("expected error for a cert shorter than renewTimeLeft")
 	}
-	cert := entry.Cert()
-	if !cert.IsValid() {
-		t.Fatalf("cert invalid on arrival: ValidBefore %s", cert.ValidBefore)
-	}
-	if notAfter, _ := leafNotAfter(cert.FullChain); cert.ValidBefore.After(notAfter) {
-		t.Fatalf("ValidBefore %s outlives the cert (%s)", cert.ValidBefore, notAfter)
+	if cert := entry.Cert(); len(cert.FullChain) != 0 {
+		t.Fatal("short cert was stored")
 	}
 }
