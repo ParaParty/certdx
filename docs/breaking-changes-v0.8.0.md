@@ -6,8 +6,11 @@
 later at runtime:
 
 - `certLifeTime` or `renewTimeLeft` that is zero or negative.
-- With `provider = "google"` or `"googletest"`, `certLifeTime + renewTimeLeft`
-  longer than 90 days. The CA would refuse such an order anyway.
+- `renewTimeLeft` that is not shorter than `certLifeTime`.
+- `certLifeTime` shorter than 48 hours or `renewTimeLeft` shorter than
+  4 hours. These bound how often a domain set is ordered from the CA.
+- `certLifeTime + renewTimeLeft` longer than 90 days, the lifetime of
+  certificates issued by the supported CAs.
 - A `[DnsProvider].nameservers` entry that is not `host` or `host:port`, for
   example a URL such as `udp://8.8.8.8`, an empty entry, or an invalid port.
 - `[HttpProvider.S3]` without `bucket`, `url`, `accessKeyId` or

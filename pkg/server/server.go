@@ -149,11 +149,17 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 		return false, err
 	}
 
-	if notAfter, err := leafNotAfter(fullchain); err != nil {
-		logging.Warn("Could not read NotAfter of issued cert %v: %s", c.domains, err)
-	} else if clamped := clampValidBefore(time.Now(), newValidBefore, notAfter, s.Config.ACME.RenewTimeLeftDuration); !clamped.Equal(newValidBefore) {
-		logging.Info("Issued cert %v expires at %s, renewing it from %s", c.domains, notAfter, clamped)
-		newValidBefore = clamped
+	notAfter, err := leafNotAfter(fullchain)
+	if err != nil {
+		return false, fmt.Errorf("issued cert %v: %w", c.domains, err)
+	}
+	// The CA may issue a shorter cert than certLifeTime + renewTimeLeft.
+	if renewBy := notAfter.Add(-s.Config.ACME.RenewTimeLeftDuration); renewBy.Before(newValidBefore) {
+		logging.Info("Issued cert %v expires at %s, renewing it from %s", c.domains, notAfter, renewBy)
+		newValidBefore = renewBy
+	}
+	if !newValidBefore.After(time.Now()) {
+		return false, fmt.Errorf("issued cert %v expires at %s, within renewTimeLeft", c.domains, notAfter)
 	}
 
 	newCert := CertT{

@@ -337,10 +337,10 @@ func TestServerConfigParseDurationRejectsNonPositive(t *testing.T) {
 	}
 }
 
-func TestServerConfigParseDurationGoogleLifetimeCap(t *testing.T) {
+func TestServerConfigParseDurationLifetimeCap(t *testing.T) {
 	c := &ServerConfig{}
 	c.SetDefault()
-	c.ACME.Provider = "google"
+	c.ACME.Provider = "r3"
 	c.ACME.CertLifeTime, c.ACME.RenewTimeLeft = "1440h", "720h" // 60d + 30d
 	if err := c.parseDuration(); err != nil {
 		t.Fatalf("90 days should be accepted: %v", err)
@@ -349,9 +349,42 @@ func TestServerConfigParseDurationGoogleLifetimeCap(t *testing.T) {
 	if err := c.parseDuration(); err == nil {
 		t.Fatal("expected error over 90 days")
 	}
-	c.ACME.Provider = "r3"
+	c.ACME.Provider = "mock"
 	if err := c.parseDuration(); err != nil {
-		t.Fatalf("non-Google providers are not capped: %v", err)
+		t.Fatalf("the mock provider is not capped: %v", err)
+	}
+}
+
+func TestServerConfigParseDurationRenewTimeLeftBelowLifetime(t *testing.T) {
+	c := &ServerConfig{}
+	c.SetDefault()
+	c.ACME.CertLifeTime, c.ACME.RenewTimeLeft = "24h", "24h"
+	if err := c.parseDuration(); err == nil || !strings.Contains(err.Error(), "must be shorter") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestServerConfigParseDurationMinimums(t *testing.T) {
+	for _, tc := range []struct{ life, left string }{{"47h", "4h"}, {"48h", "3h"}} {
+		c := &ServerConfig{}
+		c.SetDefault()
+		c.ACME.Provider = "r3"
+		c.ACME.CertLifeTime, c.ACME.RenewTimeLeft = tc.life, tc.left
+		if err := c.parseDuration(); err == nil || !strings.Contains(err.Error(), "must be at least") {
+			t.Fatalf("%s/%s: err = %v", tc.life, tc.left, err)
+		}
+		c.ACME.Provider = "mock"
+		if err := c.parseDuration(); err != nil {
+			t.Fatalf("%s/%s: the mock provider has no minimum: %v", tc.life, tc.left, err)
+		}
+	}
+
+	c := &ServerConfig{}
+	c.SetDefault()
+	c.ACME.Provider = "r3"
+	c.ACME.CertLifeTime, c.ACME.RenewTimeLeft = "48h", "4h"
+	if err := c.parseDuration(); err != nil {
+		t.Fatalf("minimums should be accepted: %v", err)
 	}
 }
 

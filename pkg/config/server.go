@@ -95,15 +95,35 @@ func (c *ServerConfig) parseDuration() error {
 		return fmt.Errorf("RenewTimeLeft must be positive, got %q", c.ACME.RenewTimeLeft)
 	}
 
-	// The requested NotAfter is certLifeTime + renewTimeLeft from now.
-	if total := c.ACME.CertLifeTimeDuration + c.ACME.RenewTimeLeftDuration; acmeproviders.IsGoogle(c.ACME.Provider) && total > googleMaxLifetime {
-		return fmt.Errorf("CertLifeTime + RenewTimeLeft (%s) exceeds the Google CA maximum of %s", total, googleMaxLifetime)
+	if c.ACME.RenewTimeLeftDuration >= c.ACME.CertLifeTimeDuration {
+		return fmt.Errorf("RenewTimeLeft (%s) must be shorter than CertLifeTime (%s)", c.ACME.RenewTimeLeft, c.ACME.CertLifeTime)
+	}
+
+	// The mock provider issues in-process, so tests may use short lifetimes.
+	if acmeproviders.IsMock(c.ACME.Provider) {
+		return nil
+	}
+	// Bounds how often a domain set is ordered while healthy and while failing.
+	if c.ACME.CertLifeTimeDuration < minCertLifeTime {
+		return fmt.Errorf("CertLifeTime (%s) must be at least %s", c.ACME.CertLifeTime, minCertLifeTime)
+	}
+	if c.ACME.RenewTimeLeftDuration < minRenewTimeLeft {
+		return fmt.Errorf("RenewTimeLeft (%s) must be at least %s", c.ACME.RenewTimeLeft, minRenewTimeLeft)
+	}
+	// The issued cert must cover certLifeTime + renewTimeLeft from now.
+	if total := c.ACME.CertLifeTimeDuration + c.ACME.RenewTimeLeftDuration; total > maxCertLifetime {
+		return fmt.Errorf("CertLifeTime + RenewTimeLeft (%s) exceeds the CA certificate lifetime of %s", total, maxCertLifetime)
 	}
 
 	return nil
 }
 
-const googleMaxLifetime = 90 * 24 * time.Hour
+const (
+	minCertLifeTime  = 48 * time.Hour
+	minRenewTimeLeft = 4 * time.Hour
+	// maxCertLifetime is the lifetime of certificates issued by the supported CAs.
+	maxCertLifetime = 90 * 24 * time.Hour
+)
 
 type ACMEConfig struct {
 	ChallengeType  string   `toml:"challengeType" json:"challenge_type,omitempty"`
