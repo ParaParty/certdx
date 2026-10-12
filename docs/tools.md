@@ -81,8 +81,9 @@ certdx_tools show-certs
 Registers a Google Trust Services ACME account using EAB credentials. The
 account key is saved into `private/<email>_<provider>.key` so the server can
 load it later. If that key already exists the command refuses to run;
-pass `--force` to replace it. The key is only written after the
-registration succeeds.
+pass `--force` to replace it. The key is saved before registering, so a
+registered account never loses its key and the one-time EAB credentials are
+not spent if the key can't be saved.
 
 Usually you do not need this command: if `[GoogleCloudCredential]` is set in
 the server config, the server will register an EAB account automatically on

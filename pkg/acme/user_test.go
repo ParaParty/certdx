@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"pkg.para.party/certdx/pkg/paths"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 // TestParsePEMRoundTrip generates an ECDSA P-384 key (the same curve
@@ -64,23 +65,59 @@ func TestRegisterAccountRefusesExistingKey(t *testing.T) {
 	}
 }
 
-func TestWriteAccountKey(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "account.key")
+func TestCommitAccountKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "account.key")
+	stage := func(content string) string {
+		staged, err := utils.WriteTempFile(path, []byte(content), 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return staged
+	}
 
-	if err := writeAccountKey(path, []byte("first"), false); err != nil {
+	if err := commitAccountKey(stage("first"), path, false); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := writeAccountKey(path, []byte("second"), false); err == nil {
-		t.Fatal("expected an error overwriting without force")
+	staged := stage("second")
+	if err := commitAccountKey(staged, path, false); err == nil {
+		t.Fatal("expected an error replacing without force")
 	}
-	if err := writeAccountKey(path, []byte("third"), true); err != nil {
-		t.Fatalf("forced overwrite: %v", err)
+	if got, _ := os.ReadFile(staged); string(got) != "second" {
+		t.Fatalf("staged key lost after a failed commit: %q", got)
+	}
+	if err := commitAccountKey(stage("third"), path, true); err != nil {
+		t.Fatalf("forced replace: %v", err)
 	}
 	if got, _ := os.ReadFile(path); string(got) != "third" {
 		t.Fatalf("content = %q, want %q", got, "third")
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %v, err = %v", info.Mode().Perm(), err)
+	}
+}
+
+func TestRegisterAccountFailsBeforeRegisteringWhenKeyCannotBeSaved(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	paths.SetDataDir(t.TempDir())
+	t.Cleanup(func() { paths.SetDataDir("") })
+
+	keyPath, err := paths.ACMEPrivateKey("me@example.com", "googletest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(keyPath)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	// An unwritable directory must fail before the CA is contacted.
+	err = RegisterAccount("googletest", "me@example.com", "kid", "hmac", false)
+	if err == nil || !strings.Contains(err.Error(), "save ACME account key") {
+		t.Fatalf("err = %v, want a save error", err)
 	}
 }
 

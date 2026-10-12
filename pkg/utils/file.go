@@ -11,22 +11,31 @@ import (
 // old or the new contents, never a partial file. perm is applied regardless
 // of the umask.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	tmpPath, err := WriteTempFile(path, data, perm)
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+		return err
 	}
-	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath) // no-op once renamed
 
-	if err := writeSynced(tmp, data, perm); err != nil {
-		return fmt.Errorf("write temp file: %w", err)
-	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("replace %s: %w", path, err)
 	}
-	SyncDir(dir)
+	SyncDir(filepath.Dir(path))
 	return nil
+}
+
+// WriteTempFile writes data with perm to a new hidden file next to path and
+// returns its name. The caller renames or removes it.
+func WriteTempFile(path string, data []byte, perm os.FileMode) (string, error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	if err := writeSynced(tmp, data, perm); err != nil {
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+	return tmp.Name(), nil
 }
 
 // writeSynced writes data to f, sets perm and fsyncs before closing f.
