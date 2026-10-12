@@ -219,17 +219,17 @@ func (p *DnsProvider) Validate() error {
 // validateNameserver accepts host or host:port, the forms lego understands;
 // a bare IPv6 address counts as a host.
 func validateNameserver(ns string) error {
-	host, port, err := net.SplitHostPort(ns)
-	if err != nil {
-		host, port = ns, ""
+	addr := ns
+	if _, _, err := net.SplitHostPort(ns); err != nil {
+		// lego appends the default port to an entry without one.
+		addr = net.JoinHostPort(ns, "53")
 	}
-	if host == "" || strings.ContainsAny(host, " \t/") {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host == "" || strings.ContainsAny(host, "[] \t/") {
 		return fmt.Errorf("must be host or host:port")
 	}
-	if port != "" {
-		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("invalid port %q", port)
-		}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("invalid port %q", port)
 	}
 	return nil
 }
