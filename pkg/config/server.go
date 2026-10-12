@@ -129,7 +129,6 @@ type ACMEConfig struct {
 	ChallengeType  string   `toml:"challengeType" json:"challenge_type,omitempty"`
 	Email          string   `toml:"email" json:"email,omitempty"`
 	Provider       string   `toml:"provider" json:"provider,omitempty"`
-	RetryCount     int      `toml:"retryCount" json:"retry_count,omitempty"`
 	CertLifeTime   string   `toml:"certLifeTime" json:"cert_life_time,omitempty"`
 	RenewTimeLeft  string   `toml:"renewTimeLeft" json:"renew_time_left,omitempty"`
 	AllowedDomains []string `toml:"allowedDomains" json:"allowed_domains,omitempty"`
@@ -341,7 +340,6 @@ func (c *ServerConfig) needsMTLS() bool {
 func (c *ServerConfig) SetDefault() {
 	c.ACME = ACMEConfig{
 		ChallengeType:         "dns",
-		RetryCount:            5,
 		RenewTimeLeft:         "24h",
 		CertLifeTime:          "168h",
 		RenewTimeLeftDuration: 24 * time.Hour,

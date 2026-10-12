@@ -22,7 +22,7 @@ import (
 const MockACMETagEnv = "CERTDX_MOCK_TAG"
 
 // MockACME is an in-process ACME stand-in used by the e2e test suite.
-// Each call to Obtain/RetryObtain mints a fresh self-signed leaf cert
+// Each call to Obtain mints a fresh self-signed leaf cert
 // covering the requested domains; no network calls are made.
 type MockACME struct {
 	lifetime time.Duration
@@ -106,8 +106,4 @@ func (m *MockACME) Obtain(ctx context.Context, domains []string, _ time.Time) (f
 	key = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 
 	return fullchain, key, nil
-}
-
-func (m *MockACME) RetryObtain(ctx context.Context, domains []string, deadline time.Time) (fullchain, key []byte, err error) {
-	return m.Obtain(ctx, domains, deadline)
 }

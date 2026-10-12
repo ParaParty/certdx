@@ -205,7 +205,7 @@ func TestRenewPersistsCert(t *testing.T) {
 	s.acme = acme.NewMockACME(48 * time.Hour)
 
 	entry := newCertEntry([]string{"example.com"})
-	if obtained, err := s.renew(context.Background(), entry, false); err != nil || !obtained {
+	if obtained, err := s.renew(context.Background(), entry); err != nil || !obtained {
 		t.Fatalf("renew: obtained=%v err=%v", obtained, err)
 	}
 

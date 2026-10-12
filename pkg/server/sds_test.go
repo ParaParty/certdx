@@ -54,10 +54,6 @@ func (blockingObtainer) Obtain(ctx context.Context, _ []string, _ time.Time) ([]
 	return nil, nil, ctx.Err()
 }
 
-func (b blockingObtainer) RetryObtain(ctx context.Context, d []string, t time.Time) ([]byte, []byte, error) {
-	return b.Obtain(ctx, d, t)
-}
-
 func newSDSTestServer(t *testing.T) *CertDXServer {
 	t.Helper()
 	s := makeTestServer("", "/", []string{"example.com"})

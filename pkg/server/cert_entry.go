@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"pkg.para.party/certdx/pkg/domain"
 )
@@ -37,6 +38,11 @@ type certEntry struct {
 	cancelRenew context.CancelFunc
 
 	subscribing int64
+
+	// Guarded by renewMu: the failed-order streak and when renew may order again.
+	failures int
+	retryAt  time.Time
+	lastErr  error
 }
 
 type certCache struct {
@@ -80,6 +86,13 @@ func (c *certCache) get(domains []string) (*certEntry, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.getNoLock(domains)
+}
+
+// nextOrder is when renew may order again after a failure.
+func (c *certEntry) nextOrder() time.Time {
+	c.renewMu.Lock()
+	defer c.renewMu.Unlock()
+	return c.retryAt
 }
 
 // Snapshot returns the current cert and the version that minted it. The pair

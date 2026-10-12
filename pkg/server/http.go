@@ -128,7 +128,7 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 			waitCtx, cancel := context.WithTimeout(r.Context(), httpCertWaitTimeout)
 			cachedCert.WaitForUpdate(waitCtx, seen)
 			cancel()
-		} else if _, err = s.renew(r.Context(), cachedCert, false); err != nil {
+		} else if _, err = s.renew(r.Context(), cachedCert); err != nil {
 			goto ERR
 		}
 		cert = cachedCert.Cert()
@@ -167,8 +167,8 @@ ERR:
 		http.Error(*w, "", http.StatusBadRequest)
 		return
 	}
-	if errors.Is(err, errCertNotReady) {
-		logging.Warn("No cert for %v available yet, asked by %s", cachedCert.domains, r.RemoteAddr)
+	if errors.Is(err, errCertNotReady) || errors.Is(err, errRenewBackoff) {
+		logging.Warn("No cert for %v available for %s: %s", cachedCert.domains, r.RemoteAddr, err)
 		http.Error(*w, "", http.StatusServiceUnavailable)
 		return
 	}

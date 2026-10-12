@@ -407,9 +407,6 @@ func TestServerConfigSetDefault(t *testing.T) {
 	c := &ServerConfig{}
 	c.SetDefault()
 
-	if c.ACME.RetryCount != 5 {
-		t.Errorf("default retryCount: got %d want 5", c.ACME.RetryCount)
-	}
 	if c.ACME.ChallengeType != "dns" {
 		t.Errorf("default challengeType: got %s want dns", c.ACME.ChallengeType)
 	}
