@@ -229,7 +229,7 @@ func TestDnsProviderValidateNameservers(t *testing.T) {
 			t.Errorf("%q: %v", ns, err)
 		}
 	}
-	for _, ns := range []string{"", "udp://8.8.8.8", "8.8.8.8:0", "8.8.8.8:dns", "dns example.com"} {
+	for _, ns := range []string{"", "udp://8.8.8.8", "8.8.8.8:0", "8.8.8.8:dns", "dns example.com", "[::1]", "8.8.8.8:", ":53"} {
 		p := base
 		p.Nameservers = []string{ns}
 		if err := p.Validate(); err == nil {
