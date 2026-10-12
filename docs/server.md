@@ -40,7 +40,6 @@ The configuration is a TOML file. Top-level sections:
 | --- | --- | --- | --- |
 | `email` | string | `""` | Email used for ACME account registration. |
 | `provider` | string | `"r3"` | One of `r3`, `r3test`, `google`, `googletest`. |
-| `retryCount` | int | `5` | Per-issuance retry count. |
 | `challengeType` | string | `"dns"` | `dns` or `http`. |
 | `certLifeTime` | duration string | `"168h"` | Lifetime of issued certificates the server requests/tracks. At least `48h`; `certLifeTime + renewTimeLeft` must not exceed 90 days. |
 | `renewTimeLeft` | duration string | `"24h"` | Renew when remaining lifetime drops below this. At least `4h` and shorter than `certLifeTime`. The renewal check runs every `renewTimeLeft / 4`. |
@@ -58,6 +57,19 @@ Supported ACME providers:
 When using a Google provider, the server will automatically register an EAB
 account on first start if `[GoogleCloudCredential]` is present. Otherwise,
 register manually with `certdx_tools google-account` — see [tools.md](tools.md).
+
+Each renewal places one order. If it fails, the server waits before ordering
+that domain set again, whether the next attempt comes from the renewal loop
+or a client request:
+
+| Failure | Wait before the next order |
+| --- | --- |
+| No response from the CA or the DNS provider API | 30s, doubling up to 5m |
+| The CA rejected the order, or the challenge or DNS propagation failed | 10m, doubling up to 1h |
+| The CA rate-limited the account | The CA's `Retry-After`, or 1h if it sent none |
+
+The log line of each failure names its kind and includes the CA's error type
+and detail.
 
 ### `[GoogleCloudCredential]`
 

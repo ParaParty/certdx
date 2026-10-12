@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -13,13 +14,20 @@ import (
 )
 
 const (
-	// Retry backoff while an entry holds no valid cert.
-	renewRetryMin = 30 * time.Second
-	renewRetryMax = 5 * time.Minute
+	// Delay before ordering again after an order failed with no response.
+	networkRetryMin = 30 * time.Second
+	networkRetryMax = 5 * time.Minute
+	// Delay after a CA rejection or a challenge failure, which a quick retry
+	// would only repeat while using up the CA's failed-validation limit.
+	failureRetryMin = 10 * time.Minute
+	failureRetryMax = time.Hour
 	// Floor for the healthy re-check so a cert at the edge of its validity
 	// can't spin the renewer.
 	renewCheckMin = 5 * time.Second
 )
+
+// errRenewBackoff is returned by renew while an entry waits to order again.
+var errRenewBackoff = errors.New("waiting to retry a failed order")
 
 type CertT struct {
 	FullChain   []byte    `json:"fullChain"`
@@ -108,16 +116,14 @@ func (s *CertDXServer) loadCertStore() error {
 	return nil
 }
 
-// renew obtains a fresh cert from ACME if the cached cert has expired or
-// is missing, updates the cache, and broadcasts the new version to every
+// renew obtains a fresh cert from ACME if the cached cert is past ValidBefore
+// or missing, updates the cache, and broadcasts the new version to every
 // subscriber waiting on WaitForUpdate.
 //
-// retry controls whether the underlying ACME obtain uses the retry-with-
-// backoff helper. ctx bounds the operation; on cancellation renew returns
-// ctx.Err() without contacting ACME (the underlying lego client is not
-// context-aware, so cancellation is checked between operations rather
-// than mid-flight).
-func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (bool, error) {
+// Each call places at most one order. After a failed order the entry does not
+// order again until its retry delay passes, whichever path calls renew. ctx is
+// only checked before ordering; the lego client is not context-aware.
+func (s *CertDXServer) renew(ctx context.Context, c *certEntry) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -136,38 +142,21 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 		return false, nil
 	}
 
-	newValidBefore := targetValidBefore(time.Now(), s.Config.ACME.CertLifeTimeDuration)
-
-	var fullchain, key []byte
-	var err error
-	if retry {
-		fullchain, key, err = s.acme.RetryObtain(ctx, c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
-	} else {
-		fullchain, key, err = s.acme.Obtain(ctx, c.domains, newValidBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
+	if time.Now().Before(c.retryAt) {
+		return false, fmt.Errorf("%w until %s: %w", errRenewBackoff, c.retryAt.Format(time.RFC3339), c.lastErr)
 	}
+
+	newCert, err := s.obtain(ctx, c.domains)
 	if err != nil {
-		return false, err
+		if ctx.Err() != nil {
+			return false, err
+		}
+		c.failures++
+		kind, delay := retryDelay(err, c.failures)
+		c.retryAt, c.lastErr = time.Now().Add(delay), err
+		return false, fmt.Errorf("%s, next order in %s: %w", kind, delay, err)
 	}
-
-	notAfter, err := leafNotAfter(fullchain)
-	if err != nil {
-		return false, fmt.Errorf("issued cert %v: %w", c.domains, err)
-	}
-	// The CA may issue a shorter cert than certLifeTime + renewTimeLeft.
-	if renewBy := notAfter.Add(-s.Config.ACME.RenewTimeLeftDuration); renewBy.Before(newValidBefore) {
-		logging.Info("Issued cert %v expires at %s, renewing it from %s", c.domains, notAfter, renewBy)
-		newValidBefore = renewBy
-	}
-	if !newValidBefore.After(time.Now()) {
-		return false, fmt.Errorf("issued cert %v expires at %s, within renewTimeLeft", c.domains, notAfter)
-	}
-
-	newCert := CertT{
-		FullChain:   fullchain,
-		Key:         key,
-		ValidBefore: newValidBefore,
-		RenewAt:     time.Now(),
-	}
+	c.failures, c.retryAt, c.lastErr = 0, time.Time{}, nil
 
 	// Broadcast: under stateMu, swap in the new cert + version and
 	// close+replace the updated chan. Holding stateMu makes the
@@ -189,28 +178,78 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry, retry bool) (boo
 	return true, nil
 }
 
+// obtain places one order for domains and returns the cert with its ValidBefore.
+func (s *CertDXServer) obtain(ctx context.Context, domains []string) (CertT, error) {
+	validBefore := targetValidBefore(time.Now(), s.Config.ACME.CertLifeTimeDuration)
+	fullchain, key, err := s.acme.Obtain(ctx, domains, validBefore.Add(s.Config.ACME.RenewTimeLeftDuration))
+	if err != nil {
+		return CertT{}, err
+	}
+
+	notAfter, err := leafNotAfter(fullchain)
+	if err != nil {
+		return CertT{}, fmt.Errorf("issued cert %v: %w", domains, err)
+	}
+	// The CA may issue a shorter cert than certLifeTime + renewTimeLeft.
+	if renewBy := notAfter.Add(-s.Config.ACME.RenewTimeLeftDuration); renewBy.Before(validBefore) {
+		logging.Info("Issued cert %v expires at %s, renewing it from %s", domains, notAfter, renewBy)
+		validBefore = renewBy
+	}
+	if !validBefore.After(time.Now()) {
+		return CertT{}, fmt.Errorf("issued cert %v expires at %s, within renewTimeLeft", domains, notAfter)
+	}
+
+	return CertT{
+		FullChain:   fullchain,
+		Key:         key,
+		ValidBefore: validBefore,
+		RenewAt:     time.Now(),
+	}, nil
+}
+
+// retryDelay is how long an entry waits to order again after its
+// failures-th consecutive failed order.
+func retryDelay(err error, failures int) (acme.Failure, time.Duration) {
+	kind, after := acme.Classify(err)
+	switch kind {
+	case acme.FailureRateLimited:
+		if after <= 0 {
+			return kind, failureRetryMax
+		}
+		return kind, max(after, networkRetryMin)
+	case acme.FailureNetwork:
+		return kind, backoff(networkRetryMin, networkRetryMax, failures)
+	default:
+		return kind, backoff(failureRetryMin, failureRetryMax, failures)
+	}
+}
+
+// backoff doubles lo for each failure after the first, up to hi.
+func backoff(lo, hi time.Duration, failures int) time.Duration {
+	d := lo
+	for i := 1; i < failures && d < hi; i++ {
+		d *= 2
+	}
+	return min(d, hi)
+}
+
 func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry) {
 	logging.Info("Start subscribing cert: %v", c.domains)
 	defer logging.Info("Stopped subscribing cert: %v", c.domains)
 
-	backoff := renewRetryMin
 	for {
-		_, err := s.renew(ctx, c, true)
-		if err != nil {
+		if _, err := s.renew(ctx, c); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			logging.Error("Failed to renew cert %s: %s", c.domains, err)
+			logging.Error("Failed to renew cert %v: %s", c.domains, err)
 		}
 
-		var wait time.Duration
+		wait := renewCheckMin
 		if cert := c.Cert(); cert.IsValid() {
 			wait = s.renewCheckInterval(time.Now(), cert.ValidBefore)
-			backoff = renewRetryMin
-		} else {
-			wait = backoff
-			backoff = min(backoff*2, renewRetryMax)
-			logging.Warn("No valid cert for %v, retrying in %s", c.domains, wait)
+		} else if until := time.Until(c.nextOrder()); until > wait {
+			wait = until
 		}
 
 		t := time.NewTimer(wait)

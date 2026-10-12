@@ -16,6 +16,13 @@ later at runtime:
 - `[HttpProvider.S3]` without `bucket`, `url`, `accessKeyId` or
   `accessKeySecret`.
 
+## `[ACME].retryCount` removed
+
+The server no longer retries a failed order right away. Each renewal places
+one order, and after a failure the server waits based on the kind of
+failure; see [server.md](server.md#acme). `retryCount` is ignored; remove it
+from `[ACME]`.
+
 ## Stricter client config validation
 
 `certdx_client` now rejects certificates that would overwrite each other:

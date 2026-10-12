@@ -46,7 +46,6 @@ email = "e2e@certdx.test"
 challengeType = "dns"
 certLifeTime = "{{.CertLifeTime}}"
 renewTimeLeft = "{{.RenewTimeLeft}}"
-retryCount = 1
 allowedDomains = [{{range $i, $d := .AllowedDomains}}{{if $i}}, {{end}}"{{$d}}"{{end}}]
 
 [HttpServer]
