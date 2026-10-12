@@ -21,9 +21,6 @@ const (
 	// would only repeat while using up the CA's failed-validation limit.
 	failureRetryMin = 10 * time.Minute
 	failureRetryMax = time.Hour
-	// Floor for the healthy re-check so a cert at the edge of its validity
-	// can't spin the renewer.
-	renewCheckMin = 5 * time.Second
 )
 
 // errRenewBackoff is returned by renew while an entry waits to order again.
@@ -245,11 +242,9 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 			logging.Error("Failed to renew cert %v: %s", c.domains, err)
 		}
 
-		wait := renewCheckMin
-		if cert := c.Cert(); cert.IsValid() {
-			wait = s.renewCheckInterval(time.Now(), cert.ValidBefore)
-		} else if until := time.Until(c.nextOrder()); until > wait {
-			wait = until
+		wait := s.Config.ACME.RenewTimeLeftDuration / 4
+		if cert := c.Cert(); !cert.IsValid() {
+			wait = time.Until(c.nextOrder())
 		}
 
 		t := time.NewTimer(wait)
@@ -261,13 +256,6 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 			return
 		}
 	}
-}
-
-// renewCheckInterval is how long a renewer holding a valid cert sleeps:
-// RenewTimeLeft/4, but never past validBefore and never below renewCheckMin.
-func (s *CertDXServer) renewCheckInterval(now, validBefore time.Time) time.Duration {
-	interval := min(s.Config.ACME.RenewTimeLeftDuration/4, validBefore.Sub(now))
-	return max(interval, renewCheckMin)
 }
 
 // Subscribe registers a consumer for the entry's renewal stream. The first
