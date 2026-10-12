@@ -36,7 +36,7 @@ Top-level sections:
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `retryCount` | int | `5` | Retries of a failing update action, and attempts on each server before switching to the next (HTTP: requests; gRPC: reconnects). |
+| `retryCount` | int | `5` | Update actions: retries after a failed run, so an action runs at most `retryCount + 1` times. Servers: failed requests (HTTP) or connections (gRPC) to one server before switching to the next. |
 | `mode` | string | `"http"` | `http` or `grpc`. |
 | `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. |
 
@@ -50,8 +50,9 @@ Top-level sections:
 | `pem` | path | | PEM bundle (client cert + key + CA cert). Required with `authMethod = "mtls"`. |
 
 `StandbyServer` is optional; if `url` is set, it must also pass validation. The
-client falls back to the standby when the main server is unreachable and
-periodically retries the main server based on `reconnectInterval`.
+client switches to the standby after `retryCount` failed requests to the main
+server, and goes back to the main server after its next successful request;
+see [Renewal cadence](#renewal-cadence).
 
 ### `[GRPC.MainServer]` / `[GRPC.StandbyServer]`
 
@@ -62,7 +63,9 @@ The gRPC endpoint always uses mTLS.
 | `server` | string | `host:port` of the certdx gRPC SDS endpoint. |
 | `pem` | path | PEM bundle (client cert + key + CA cert). |
 
-`StandbyServer` is optional; same fallback semantics as in HTTP mode.
+`StandbyServer` is optional. The client switches to the standby after
+`retryCount` failed connections to the main server, and retries the main
+server every `reconnectInterval` while on the standby.
 
 Generate the mTLS material with `certdx_tools` (`make-ca`, `make-server`,
 `make-client`); see [tools.md](tools.md).
