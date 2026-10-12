@@ -24,8 +24,10 @@ import (
 const httpShutdownTimeout = 30 * time.Second
 
 // httpCertWaitTimeout caps how long a request waits for another subscriber's
-// in-flight issuance before answering 503.
-const httpCertWaitTimeout = 30 * time.Second
+// in-flight issuance before answering 503. Long enough for a slow DNS-01
+// propagation (dnsTimeout = "120s" plus validation), and below the client's
+// request timeout so the client sees the 503.
+const httpCertWaitTimeout = 3 * time.Minute
 
 var errCertNotReady = errors.New("certificate not issued yet")
 var errBadRequest = errors.New("bad request")

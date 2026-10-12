@@ -22,9 +22,18 @@ type CertDXHttpClient struct {
 
 type CertDXHttpClientOption func(client *CertDXHttpClient) error
 
-// idleConnTimeout matches http.DefaultTransport and stays below the server's
-// IdleTimeout, so the client closes idle connections first.
-const idleConnTimeout = 90 * time.Second
+// certReqTimeout bounds a cert request. It covers a server waiting up to 3
+// minutes for an issuance in progress.
+const certReqTimeout = 4 * time.Minute
+
+// newTransport is http.DefaultTransport with tlsConfig. It keeps the default
+// dial and TLS handshake timeouts, so an unreachable server fails fast
+// despite the long certReqTimeout.
+func newTransport(tlsConfig *tls.Config) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = tlsConfig
+	return t
+}
 
 // maxCertRespBodySize bounds a cert response; a real one is a few KiB.
 const maxCertRespBodySize = 1 << 20
@@ -38,10 +47,7 @@ func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOptio
 			if err != nil {
 				return fmt.Errorf("load mtls bundle: %w", err)
 			}
-			client.HttpClient.Transport = &http.Transport{
-				TLSClientConfig: cfg,
-				IdleConnTimeout: idleConnTimeout,
-			}
+			client.HttpClient.Transport = newTransport(cfg)
 		}
 		return nil
 	}
@@ -49,12 +55,7 @@ func WithCertDXServerInfo(server *config.ClientHttpServer) CertDXHttpClientOptio
 
 func WithCertDXInsecure() CertDXHttpClientOption {
 	return func(client *CertDXHttpClient) error {
-		client.HttpClient.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-			IdleConnTimeout: idleConnTimeout,
-		}
+		client.HttpClient.Transport = newTransport(&tls.Config{InsecureSkipVerify: true})
 		return nil
 	}
 }
@@ -62,7 +63,7 @@ func WithCertDXInsecure() CertDXHttpClientOption {
 func MakeCertDXHttpClient(s ...CertDXHttpClientOption) (*CertDXHttpClient, error) {
 	ret := &CertDXHttpClient{
 		HttpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: certReqTimeout,
 		},
 	}
 
