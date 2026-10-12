@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/lego"
@@ -18,6 +19,7 @@ import (
 	"pkg.para.party/certdx/pkg/acme/acmeproviders/google"
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/paths"
+	"pkg.para.party/certdx/pkg/utils"
 )
 
 type ACMEUser struct {
@@ -103,6 +105,9 @@ func makeACMEUser(c *config.ServerConfig) (*ACMEUser, error) {
 
 // RegisterAccount creates a new account key, registers it with the ACME
 // provider and saves it. An existing key is only replaced when force is set.
+// The key is written to disk before registering, so an account the CA has
+// registered never loses its key, and single-use EAB credentials aren't spent
+// when the key can't be saved.
 func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 	keyPath, err := paths.ACMEPrivateKey(Email, ACMEProvider)
 	if err != nil {
@@ -122,6 +127,17 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 		return fmt.Errorf("marshal ACME account key: %w", err)
 	}
 	pemEncoded := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: x509Encoded})
+
+	staged, err := utils.WriteTempFile(keyPath, pemEncoded, 0o600)
+	if err != nil {
+		return fmt.Errorf("save ACME account key: %w", err)
+	}
+	keepStaged := false
+	defer func() {
+		if !keepStaged {
+			os.Remove(staged)
+		}
+	}()
 
 	myUser := ACMEUser{
 		Email: Email,
@@ -153,8 +169,9 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 		return fmt.Errorf("failed to register: %w", err)
 	}
 
-	if err := writeAccountKey(keyPath, pemEncoded, force); err != nil {
-		return fmt.Errorf("save ACME account key: %w", err)
+	if err := commitAccountKey(staged, keyPath, force); err != nil {
+		keepStaged = true
+		return fmt.Errorf("account registered, but saving its key to %s failed: %w; the key is kept in %s", keyPath, err, staged)
 	}
 
 	reg, err := json.Marshal(myUser.Registration)
@@ -166,20 +183,16 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 	return nil
 }
 
-// writeAccountKey saves key with mode 0600. Without force it fails if path
-// already exists, closing the race with a concurrent registration.
-func writeAccountKey(path string, key []byte, force bool) error {
-	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	if !force {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+// commitAccountKey moves the staged key to path. Without force it fails if
+// path already exists, closing the race with a concurrent registration.
+func commitAccountKey(staged, path string, force bool) error {
+	commit := os.Link
+	if force {
+		commit = os.Rename
 	}
-	f, err := os.OpenFile(path, flags, 0o600)
-	if err != nil {
+	if err := commit(staged, path); err != nil {
 		return err
 	}
-	if _, err := f.Write(key); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	utils.SyncDir(filepath.Dir(path))
+	return nil
 }
