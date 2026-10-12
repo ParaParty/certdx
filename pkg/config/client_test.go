@@ -228,6 +228,11 @@ func fileCert(name, savePath string, domains ...string) ClientCertificate {
 }
 
 func TestClientConfigValidateCollisions(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	cases := []struct {
 		name  string
 		mode  string
@@ -246,6 +251,10 @@ func TestClientConfigValidateCollisions(t *testing.T) {
 			{Name: "x", Domains: []string{"a.example.com"}, Actions: []UpdateActionConfig{
 				&FileAction{SavePath: "/tmp/certs"}, &FileAction{SavePath: "/tmp/certs"},
 			}},
+		}, "also writes"},
+		{"relative and absolute path to one file", CLIENT_MODE_HTTP, []ClientCertificate{
+			fileCert("x", "certs", "a.example.com"),
+			fileCert("x", filepath.Join(wd, "certs"), "b.example.com"),
 		}, "also writes"},
 	}
 	for _, tc := range cases {
