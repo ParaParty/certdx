@@ -129,6 +129,10 @@ The HTTPS endpoint that `certdx_client` and the Caddy plugin call into.
 | `names` | string list | `[]` | SANs for the self-issued server certificate. Required when `secure = true`. Must be issuable under `ACME.allowedDomains`. |
 | `token` | string | `""` | Shared bearer token (only with `authMethod = "token"`). Empty disables token auth. |
 
+With `authMethod = "token"`, the default, and an empty `token`, anyone who
+can reach the API can fetch private keys; the server only logs a warning at
+startup. Always set a token, or use `authMethod = "mtls"`.
+
 When `authMethod = "mtls"`, the server loads its mTLS material from the
 PEM bundle specified in `[MTLS].pem`. The bundle contains the server cert,
 server key and CA cert.

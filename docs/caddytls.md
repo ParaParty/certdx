@@ -99,7 +99,7 @@ Top-level directives:
 
 | Directive | Argument | Notes |
 | --- | --- | --- |
-| `retry_count` | int | Per-request retry count. |
+| `retry_count` | int | Failed requests (HTTP) or connections (gRPC) to one server before switching to the next. |
 | `mode` | `http` \| `grpc` | Transport to use. |
 | `reconnect_interval` | duration | gRPC reconnect cadence (same semantics as the standalone client). |
 | `http` | block | HTTP transport options. |
