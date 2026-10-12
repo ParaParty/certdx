@@ -116,7 +116,10 @@ func (c *ClientConfig) validateCollisions() []error {
 			if err != nil {
 				continue
 			}
-			p = filepath.Clean(p)
+			// A relative savePath resolves against the client's working directory.
+			if p, err = filepath.Abs(p); err != nil {
+				continue
+			}
 			if prev, ok := byFile[p]; ok {
 				ret = append(ret, fmt.Errorf("certificate %s: file update action writes %s, which certificate %s also writes", cert.Name, p, prev))
 			} else {
