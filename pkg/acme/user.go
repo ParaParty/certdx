@@ -169,10 +169,11 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 		return fmt.Errorf("failed to register: %w", err)
 	}
 
-	if err := commitAccountKey(staged, keyPath, force); err != nil {
+	if err := os.Rename(staged, keyPath); err != nil {
 		keepStaged = true
 		return fmt.Errorf("account registered, but saving its key to %s failed: %w; the key is kept in %s", keyPath, err, staged)
 	}
+	utils.SyncDir(filepath.Dir(keyPath))
 
 	reg, err := json.Marshal(myUser.Registration)
 	if err != nil {
@@ -180,19 +181,5 @@ func RegisterAccount(ACMEProvider, Email, Kid, Hmac string, force bool) error {
 	}
 
 	fmt.Println(string(reg))
-	return nil
-}
-
-// commitAccountKey moves the staged key to path. Without force it fails if
-// path already exists, closing the race with a concurrent registration.
-func commitAccountKey(staged, path string, force bool) error {
-	commit := os.Link
-	if force {
-		commit = os.Rename
-	}
-	if err := commit(staged, path); err != nil {
-		return err
-	}
-	utils.SyncDir(filepath.Dir(path))
 	return nil
 }
