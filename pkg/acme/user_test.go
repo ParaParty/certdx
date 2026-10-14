@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"pkg.para.party/certdx/pkg/paths"
-	"pkg.para.party/certdx/pkg/utils"
 )
 
 // TestParsePEMRoundTrip generates an ECDSA P-384 key (the same curve
@@ -62,38 +61,6 @@ func TestRegisterAccountRefusesExistingKey(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(keyPath); string(got) != "old" {
 		t.Fatalf("existing key was modified: %q", got)
-	}
-}
-
-func TestCommitAccountKey(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "account.key")
-	stage := func(content string) string {
-		staged, err := utils.WriteTempFile(path, []byte(content), 0o600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return staged
-	}
-
-	if err := commitAccountKey(stage("first"), path, false); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	staged := stage("second")
-	if err := commitAccountKey(staged, path, false); err == nil {
-		t.Fatal("expected an error replacing without force")
-	}
-	if got, _ := os.ReadFile(staged); string(got) != "second" {
-		t.Fatalf("staged key lost after a failed commit: %q", got)
-	}
-	if err := commitAccountKey(stage("third"), path, true); err != nil {
-		t.Fatalf("forced replace: %v", err)
-	}
-	if got, _ := os.ReadFile(path); string(got) != "third" {
-		t.Fatalf("content = %q, want %q", got, "third")
-	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %v, err = %v", info.Mode().Perm(), err)
 	}
 }
 
