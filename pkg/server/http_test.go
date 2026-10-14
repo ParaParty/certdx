@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -306,13 +307,41 @@ func TestHandleCertReqServesHeldCertPastRenewDeadline(t *testing.T) {
 		ValidBefore: time.Now().Add(-time.Hour),
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	w := postCertReq(ctx, s)
-
+	w, elapsed := timedCertReq(t, s)
 	if w.Code != http.StatusOK {
 		t.Fatalf("got status %d want %d", w.Code, http.StatusOK)
 	}
+	if elapsed > time.Second {
+		t.Fatalf("held cert served after %s, want no wait", elapsed)
+	}
+}
+
+func TestHandleCertReqSubscribedInBackoff(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	subscribedEntry(t, s, CertT{})
+	entry := mustGet(t, &s.certCache, []string{"example.com"})
+	entry.stateMu.Lock()
+	entry.retryAt, entry.lastErr = time.Now().Add(time.Hour), errors.New("CA said no")
+	entry.stateMu.Unlock()
+
+	w, elapsed := timedCertReq(t, s)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got status %d want %d", w.Code, http.StatusServiceUnavailable)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("503 sent after %s, want no wait", elapsed)
+	}
+}
+
+// timedCertReq posts a cert request with a deadline long enough to notice a
+// wait for issuance, and reports how long it took.
+func timedCertReq(t *testing.T, s *CertDXServer) (*httptest.ResponseRecorder, time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	w := postCertReq(ctx, s)
+	return w, time.Since(start)
 }
 
 func TestHandleCertReqInvalidJSON(t *testing.T) {

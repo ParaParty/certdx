@@ -126,10 +126,16 @@ func (s *CertDXServer) handleCertReq(w *http.ResponseWriter, r *http.Request) {
 	cert, seen = cachedCert.Snapshot()
 	if !cert.IsValid() {
 		if s.isSubscribing(cachedCert) {
-			// The owning renewer is already obtaining; don't race it with a second order.
-			waitCtx, cancel := context.WithTimeout(r.Context(), httpCertWaitTimeout)
-			cachedCert.WaitForUpdate(waitCtx, seen)
-			cancel()
+			// The renewer owns issuance. Serve a held cert at once; wait only
+			// when there is none and an order may be in flight.
+			if len(cert.FullChain) == 0 {
+				if err = cachedCert.backoffErr(); err != nil {
+					goto ERR
+				}
+				waitCtx, cancel := context.WithTimeout(r.Context(), httpCertWaitTimeout)
+				cachedCert.WaitForUpdate(waitCtx, seen)
+				cancel()
+			}
 		} else if _, err = s.renew(r.Context(), cachedCert); err != nil {
 			goto ERR
 		}

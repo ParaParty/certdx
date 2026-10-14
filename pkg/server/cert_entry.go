@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -29,7 +30,8 @@ var ErrNoDomains = errors.New("no domains requested")
 type certEntry struct {
 	domains []string // canonical, see domain.Canonical
 
-	renewMu sync.Mutex // serializes Renew (held during ACME)
+	renewMu  sync.Mutex // serializes Renew (held during ACME)
+	failures int        // consecutive failed orders, guarded by renewMu
 
 	stateMu     sync.Mutex // brief; guards everything below
 	cert        CertT
@@ -39,10 +41,10 @@ type certEntry struct {
 
 	subscribing int64
 
-	// Guarded by renewMu: the failed-order streak and when renew may order again.
-	failures int
-	retryAt  time.Time
-	lastErr  error
+	// When renew may order again after a failure, and that failure. Kept
+	// under stateMu so HTTP requests can read them during an order.
+	retryAt time.Time
+	lastErr error
 }
 
 type certCache struct {
@@ -90,9 +92,20 @@ func (c *certCache) get(domains []string) (*certEntry, error) {
 
 // nextOrder is when renew may order again after a failure.
 func (c *certEntry) nextOrder() time.Time {
-	c.renewMu.Lock()
-	defer c.renewMu.Unlock()
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
 	return c.retryAt
+}
+
+// backoffErr wraps errRenewBackoff with the last failure while the entry
+// waits to order again, and is nil otherwise.
+func (c *certEntry) backoffErr() error {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if !time.Now().Before(c.retryAt) {
+		return nil
+	}
+	return fmt.Errorf("%w until %s: %w", errRenewBackoff, c.retryAt.Format(time.RFC3339), c.lastErr)
 }
 
 // Snapshot returns the current cert and the version that minted it. The pair
