@@ -77,11 +77,33 @@ func TestRenewRejectsCertShorterThanRenewTimeLeft(t *testing.T) {
 type failingObtainer struct {
 	err    error
 	orders int
+	// cancel, if set, cancels the caller's ctx during the order.
+	cancel context.CancelFunc
 }
 
 func (f *failingObtainer) Obtain(context.Context, []string, time.Time) ([]byte, []byte, error) {
 	f.orders++
+	if f.cancel != nil {
+		f.cancel()
+	}
 	return nil, nil, f.err
+}
+
+func TestRenewRecordsFailureWhenCallerCancelsMidOrder(t *testing.T) {
+	s := makeTestServer("", "/", []string{"example.com"})
+	s.certStore = makeTempCertStore(t)
+	obtainer := &failingObtainer{err: &legoacme.ProblemDetails{Type: "urn:ietf:params:acme:error:unauthorized"}}
+	s.acme = obtainer
+
+	entry := newCertEntry([]string{"example.com"})
+	for range 3 {
+		ctx, cancel := context.WithCancel(context.Background())
+		obtainer.cancel = cancel
+		s.renew(ctx, entry)
+	}
+	if obtainer.orders != 1 {
+		t.Fatalf("orders = %d, want 1: a cancelled caller bypassed the retry delay", obtainer.orders)
+	}
 }
 
 func TestRenewWaitsBeforeOrderingAgain(t *testing.T) {

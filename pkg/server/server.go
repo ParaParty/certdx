@@ -145,7 +145,8 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry) (bool, error) {
 
 	newCert, err := s.obtain(ctx, c.domains)
 	if err != nil {
-		if ctx.Err() != nil {
+		// lego ignores ctx once ordering; only its pre-check returns ctx's error.
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
 			return false, err
 		}
 		c.failures++
