@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	// Delay before ordering again after an order failed with no response.
+	// Delay after a request got no response. DNS provider and S3 failures
+	// come after the order exists at the CA, hence the 30m cap.
 	networkRetryMin = 30 * time.Second
-	networkRetryMax = 5 * time.Minute
+	networkRetryMax = 30 * time.Minute
 	// Delay after a CA rejection or a challenge failure, which a quick retry
 	// would only repeat while using up the CA's failed-validation limit.
 	failureRetryMin = 10 * time.Minute
