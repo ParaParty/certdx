@@ -64,7 +64,7 @@ or a client request:
 
 | Failure | Wait before the next order |
 | --- | --- |
-| No response from the CA or the DNS provider API | 30s, doubling up to 5m |
+| No response from the CA, the DNS provider API or S3 | 30s, doubling up to 30m |
 | The CA rejected the order, or the challenge or DNS propagation failed | 10m, doubling up to 1h |
 | The CA rate-limited the account | The CA's `Retry-After`, or 1h if it sent none |
 
