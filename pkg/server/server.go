@@ -139,8 +139,8 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry) (bool, error) {
 		return false, nil
 	}
 
-	if time.Now().Before(c.retryAt) {
-		return false, fmt.Errorf("%w until %s: %w", errRenewBackoff, c.retryAt.Format(time.RFC3339), c.lastErr)
+	if err := c.backoffErr(); err != nil {
+		return false, err
 	}
 
 	newCert, err := s.obtain(ctx, c.domains)
@@ -150,10 +150,12 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry) (bool, error) {
 		}
 		c.failures++
 		kind, delay := retryDelay(err, c.failures)
+		c.stateMu.Lock()
 		c.retryAt, c.lastErr = time.Now().Add(delay), err
+		c.stateMu.Unlock()
 		return false, fmt.Errorf("%s, next order in %s: %w", kind, delay, err)
 	}
-	c.failures, c.retryAt, c.lastErr = 0, time.Time{}, nil
+	c.failures = 0
 
 	// Broadcast: under stateMu, swap in the new cert + version and
 	// close+replace the updated chan. Holding stateMu makes the
@@ -162,6 +164,7 @@ func (s *CertDXServer) renew(ctx context.Context, c *certEntry) (bool, error) {
 	c.stateMu.Lock()
 	c.cert = newCert
 	c.version++
+	c.retryAt, c.lastErr = time.Time{}, nil
 	close(c.updated)
 	c.updated = make(chan struct{})
 	c.stateMu.Unlock()
@@ -242,8 +245,10 @@ func (s *CertDXServer) subscribeCertCacheEntry(ctx context.Context, c *certEntry
 			logging.Error("Failed to renew cert %v: %s", c.domains, err)
 		}
 
-		wait := s.Config.ACME.RenewTimeLeftDuration / 4
-		if cert := c.Cert(); !cert.IsValid() {
+		cert := c.Cert()
+		// Wake at ValidBefore so the renewal starts on time.
+		wait := min(s.Config.ACME.RenewTimeLeftDuration/4, time.Until(cert.ValidBefore))
+		if !cert.IsValid() {
 			wait = time.Until(c.nextOrder())
 		}
 
