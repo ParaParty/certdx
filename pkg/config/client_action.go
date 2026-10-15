@@ -194,8 +194,8 @@ func (a *AliESAAction) Validate(c *ClientConfig) error {
 	if a.SiteID <= 0 {
 		ret = append(ret, fmt.Errorf("aliESA update action: siteId must be positive"))
 	}
-	if a.RetainCount < 0 || a.RetainCount > 5 {
-		ret = append(ret, fmt.Errorf("aliESA update action: retainCount must be between 1 and 5 (or 0 for the default of 3)"))
+	if a.RetainCount < 0 {
+		ret = append(ret, fmt.Errorf("aliESA update action: retainCount must not be negative"))
 	}
 	return errors.Join(ret...)
 }

@@ -32,6 +32,8 @@ type fakeESA struct {
 	events      []string
 	setErr      error
 	deleteErr   error
+	quota       int
+	quotaCode   string
 }
 
 func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, _ *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
@@ -72,14 +74,22 @@ func (f *fakeESA) SetCertificateWithContext(ctx context.Context, req *esa.SetCer
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	f.events = append(f.events, "set")
 	if f.setErr != nil {
 		return nil, f.setErr
 	}
-	if len(f.entries) >= uploadQuota {
-		return nil, fmt.Errorf("upload quota exceeded")
+	quota := f.quota
+	if quota == 0 {
+		quota = 5
+	}
+	if len(f.entries) >= quota {
+		code := f.quotaCode
+		if code == "" {
+			code = "CertQuotaCheckFailed"
+		}
+		return nil, fmt.Errorf("ESA request: %w", &dara.SDKError{Code: ptr(code), Message: ptr("custom certificate quota exceeded")})
 	}
 	f.sets = append(f.sets, req)
-	f.events = append(f.events, "set")
 	id := fmt.Sprintf("new-cert-%d", len(f.sets))
 	leaf, err := parseLeaf([]byte(*req.Certificate))
 	if err != nil {
@@ -283,6 +293,31 @@ func TestRefuseToReplaceNewerCertificate(t *testing.T) {
 	}
 }
 
+func TestExactMatchWinsOverEqualExpirySibling(t *testing.T) {
+	expires := time.Now().Add(48 * time.Hour)
+	fullchain, key, leaf := testMaterial(t, expires)
+	siblingPEM, _, siblingLeaf := testMaterial(t, expires)
+	for _, missingFingerprint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing_fingerprint=%t", missingFingerprint), func(t *testing.T) {
+			exact := testEntry("exact", leaf)
+			if missingFingerprint {
+				exact.FingerprintSha256 = nil
+			}
+			api := &fakeESA{
+				entries: []*esa.ListCertificatesResponseBodyResult{testEntry("sibling", siblingLeaf), exact},
+				certs:   map[string]string{"sibling": string(siblingPEM), "exact": string(fullchain)},
+				status:  "OK",
+			}
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if len(api.sets) != 0 {
+				t.Fatalf("exact certificate was uploaded again: %+v", api.sets)
+			}
+		})
+	}
+}
+
 func TestCertificateFailureIsReported(t *testing.T) {
 	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
 	api := &fakeESA{certs: map[string]string{}, status: "ApplyFailed"}
@@ -326,7 +361,7 @@ func TestQuotaPrunesOldestBeforeAndAfterUpload(t *testing.T) {
 	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(api.events, ","); got != "delete:old-1,set,delete:old-2" {
+	if got := strings.Join(api.events, ","); got != "set,delete:old-1,set,delete:old-2" {
 		t.Fatalf("unexpected operation order: %s", got)
 	}
 	if len(api.entries) != 4 {
@@ -339,6 +374,48 @@ func TestQuotaPrunesOldestBeforeAndAfterUpload(t *testing.T) {
 		if _, ok := api.certs[id]; !ok {
 			t.Fatalf("certificate %s was unexpectedly deleted", id)
 		}
+	}
+}
+
+func TestFreeQuotaRecoversByDeletingOneOldVersion(t *testing.T) {
+	for _, code := range []string{"CertQuotaCheckFailed", "QuotaExceeded"} {
+		t.Run(code, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 2)
+			api.quota, api.quotaCode = 2, code
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.events, ","); got != "set,delete:old-1,set" {
+				t.Fatalf("unexpected Free-plan upload sequence: %s", got)
+			}
+		})
+	}
+}
+
+func TestReducedQuotaRetiresOnlyAsManyOldVersionsAsNeeded(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.quota = 2
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old-1,old-2,old-3,old-4" {
+		t.Fatalf("deleted %s, want four obsolete versions", got)
+	}
+	if len(api.entries) != 2 {
+		t.Fatalf("retained %d certificates above quota 2", len(api.entries))
+	}
+}
+
+func TestHigherQuotaDoesNotDeleteBeforeUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.quota = 10
+	action := testAction(api)
+	action.cfg.RetainCount = 10
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.events, ","); got != "set" {
+		t.Fatalf("unnecessary deletion at higher quota: %s", got)
 	}
 }
 
@@ -389,15 +466,27 @@ func TestConfiguredRetainCount(t *testing.T) {
 	}
 }
 
-func TestFailedUploadOnlyRemovesMinimumForQuota(t *testing.T) {
+func TestNonQuotaUploadFailureDoesNotDelete(t *testing.T) {
 	api, fullchain, key := managedEntries(t, 5)
 	api.setErr = errors.New("upload failed")
 	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
 	if err == nil || !strings.Contains(err.Error(), "upload failed") {
 		t.Fatalf("expected upload error, got %v", err)
 	}
-	if got := strings.Join(api.events, ","); got != "delete:old-1" {
+	if got := strings.Join(api.events, ","); got != "set" {
 		t.Fatalf("unexpected operations after upload failure: %s", got)
+	}
+}
+
+func TestOtherQuotaErrorDoesNotDelete(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.setErr = &dara.SDKError{Code: ptr("QuotaNotExist"), Message: ptr("plan is not active")}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "QuotaNotExist") {
+		t.Fatalf("expected original API error, got %v", err)
+	}
+	if got := strings.Join(api.events, ","); got != "set" {
+		t.Fatalf("unexpected operations after non-capacity error: %s", got)
 	}
 }
 
@@ -412,7 +501,7 @@ func TestQuotaDoesNotDeleteLastManagedOrManualUpload(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "only 0 old versions can be retired safely") {
 		t.Fatalf("expected quota safety error, got %v", err)
 	}
-	if len(api.events) != 0 {
+	if got := strings.Join(api.events, ","); got != "set" {
 		t.Fatalf("unexpected operations: %v", api.events)
 	}
 }

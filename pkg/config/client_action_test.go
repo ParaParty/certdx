@@ -245,7 +245,6 @@ func TestAliESAActionValidate(t *testing.T) {
 		{Profile: "missing", SiteID: 1},
 		{Profile: "prod"},
 		{Profile: "prod", SiteID: 1, RetainCount: -1},
-		{Profile: "prod", SiteID: 1, RetainCount: 6},
 	} {
 		if err := a.Validate(c); err == nil {
 			t.Fatal("expected invalid Ali ESA action to be rejected")
@@ -253,6 +252,9 @@ func TestAliESAActionValidate(t *testing.T) {
 	}
 	if err := (&AliESAAction{Profile: "prod", SiteID: 12345}).Validate(c); err != nil {
 		t.Fatalf("valid Ali ESA action: %v", err)
+	}
+	if err := (&AliESAAction{Profile: "prod", SiteID: 12345, RetainCount: 20}).Validate(c); err != nil {
+		t.Fatalf("higher-plan retention rejected: %v", err)
 	}
 	if got := (&AliESAAction{}).CertificateRetainCount(); got != 3 {
 		t.Fatalf("default retain count = %d, want 3", got)

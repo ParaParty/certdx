@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -28,7 +29,6 @@ import (
 const (
 	defaultRegionID = "cn-hangzhou"
 	pageSize        = int64(100)
-	uploadQuota     = 5
 	confirmTimeout  = 2 * time.Minute
 	confirmEvery    = 3 * time.Second
 )
@@ -101,30 +101,32 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 		return a.cleanup(ctx, *stored.Id)
 	}
 
-	uploaded := 0
-	for _, entry := range entries {
-		if entry != nil && stringValue(entry.Type) == "upload" {
-			uploaded++
-		}
-	}
-	if uploaded >= uploadQuota {
-		if err := a.deleteOldest(ctx, entries, uploaded-uploadQuota+1, ""); err != nil {
-			return fmt.Errorf("free ESA upload slot at site %d: %w", a.cfg.SiteID, err)
-		}
-	}
-
 	req := new(esa.SetCertificateRequest).
 		SetSiteId(a.cfg.SiteID).
 		SetType("upload").
 		SetName(fmt.Sprintf("certdx-%d-%s", a.cfg.SiteID, fingerprint(leaf)[:12])).
 		SetCertificate(strings.TrimSpace(string(fullchain))).
 		SetPrivateKey(strings.TrimSpace(string(key)))
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	resp, err := a.client.SetCertificateWithContext(ctx, req, apiOptions())
-	if err != nil {
-		return fmt.Errorf("SetCertificate at ESA site %d: %w", a.cfg.SiteID, err)
+	var resp *esa.SetCertificateResponse
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		resp, err = a.client.SetCertificateWithContext(ctx, req, apiOptions())
+		if err == nil {
+			break
+		}
+		if !isCertificateQuotaError(err) {
+			return fmt.Errorf("SetCertificate at ESA site %d: %w", a.cfg.SiteID, err)
+		}
+		deleted, deleteErr := a.deleteOldest(ctx, entries, 1, "")
+		if deleteErr != nil {
+			return errors.Join(fmt.Errorf("SetCertificate at ESA site %d: %w", a.cfg.SiteID, err),
+				fmt.Errorf("cannot free ESA upload slot: %w", deleteErr))
+		}
+		entries = slices.DeleteFunc(entries, func(entry *esa.ListCertificatesResponseBodyResult) bool {
+			return entry != nil && stringValue(entry.Id) == deleted[0]
+		})
 	}
 	if resp == nil || resp.Body == nil || resp.Body.Id == nil || *resp.Body.Id == "" {
 		return fmt.Errorf("SetCertificate at ESA site %d returned no certificate ID", a.cfg.SiteID)
@@ -134,6 +136,15 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 		return err
 	}
 	return a.cleanup(ctx, *resp.Body.Id)
+}
+
+func isCertificateQuotaError(err error) bool {
+	var apiErr dara.BaseError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	code := apiErr.GetCode()
+	return code != nil && (*code == "CertQuotaCheckFailed" || *code == "QuotaExceeded")
 }
 
 func (a *Action) cleanup(ctx context.Context, currentID string) error {
@@ -154,7 +165,7 @@ func (a *Action) cleanup(ctx context.Context, currentID string) error {
 	if !seen {
 		return fmt.Errorf("ESA certificate %s is not visible in site %d list after confirmation", currentID, a.cfg.SiteID)
 	}
-	if err := a.deleteOldest(ctx, entries, managed-a.cfg.CertificateRetainCount(), currentID); err != nil {
+	if _, err := a.deleteOldest(ctx, entries, managed-a.cfg.CertificateRetainCount(), currentID); err != nil {
 		return fmt.Errorf("retain ESA certificates at site %d: %w", a.cfg.SiteID, err)
 	}
 	return nil
@@ -166,9 +177,9 @@ func (a *Action) isManaged(entry *esa.ListCertificatesResponseBodyResult) bool {
 }
 
 func (a *Action) deleteOldest(ctx context.Context, entries []*esa.ListCertificatesResponseBodyResult,
-	count int, protectedID string) error {
+	count int, protectedID string) ([]string, error) {
 	if count <= 0 {
-		return nil
+		return nil, nil
 	}
 	type candidate struct {
 		id      string
@@ -181,11 +192,11 @@ func (a *Action) deleteOldest(ctx context.Context, entries []*esa.ListCertificat
 			continue
 		}
 		if stringValue(entry.Id) == "" || stringValue(entry.CreateTime) == "" {
-			return fmt.Errorf("managed certificate %q has no ID or creation time", stringValue(entry.Name))
+			return nil, fmt.Errorf("managed certificate %q has no ID or creation time", stringValue(entry.Name))
 		}
 		created, err := time.Parse("2006-01-02 15:04:05", *entry.CreateTime)
 		if err != nil {
-			return fmt.Errorf("managed certificate %s has invalid creation time %q: %w", *entry.Id, *entry.CreateTime, err)
+			return nil, fmt.Errorf("managed certificate %s has invalid creation time %q: %w", *entry.Id, *entry.CreateTime, err)
 		}
 		group := "id:" + *entry.Id
 		if stringValue(entry.SAN) != "" {
@@ -210,20 +221,22 @@ func (a *Action) deleteOldest(ctx context.Context, entries []*esa.ListCertificat
 		}
 	}
 	if len(candidates) < count {
-		return fmt.Errorf("need to delete %d certdx certificates, but only %d old versions can be retired safely", count, len(candidates))
+		return nil, fmt.Errorf("need to delete %d certdx certificates, but only %d old versions can be retired safely", count, len(candidates))
 	}
+	var deleted []string
 	for _, old := range candidates[:count] {
 		if err := ctx.Err(); err != nil {
-			return err
+			return deleted, err
 		}
 		_, err := a.client.DeleteCertificateWithContext(ctx,
 			new(esa.DeleteCertificateRequest).SetSiteId(a.cfg.SiteID).SetId(old.id), apiOptions())
 		if err != nil {
-			return fmt.Errorf("DeleteCertificate %s: %w", old.id, err)
+			return deleted, fmt.Errorf("DeleteCertificate %s: %w", old.id, err)
 		}
+		deleted = append(deleted, old.id)
 		logging.Info("Ali ESA site %d deleted old certdx certificate %s", a.cfg.SiteID, old.id)
 	}
-	return nil
+	return deleted, nil
 }
 
 func (a *Action) listCertificates(ctx context.Context) ([]*esa.ListCertificatesResponseBodyResult, error) {
@@ -252,8 +265,9 @@ func (a *Action) listCertificates(ctx context.Context) ([]*esa.ListCertificatesR
 }
 
 func (a *Action) findCertificate(ctx context.Context, entries []*esa.ListCertificatesResponseBodyResult,
-	leaf *x509.Certificate) (stored *esa.ListCertificatesResponseBodyResult, err error) {
+	leaf *x509.Certificate) (*esa.ListCertificatesResponseBodyResult, error) {
 	wantFingerprint := fingerprint(leaf)
+	var matching []*esa.ListCertificatesResponseBodyResult
 	for _, entry := range entries {
 		if entry == nil || entry.Id == nil || *entry.Id == "" ||
 			entry.Type == nil || *entry.Type != "upload" || entry.SAN == nil ||
@@ -261,29 +275,40 @@ func (a *Action) findCertificate(ctx context.Context, entries []*esa.ListCertifi
 			continue
 		}
 		if normalizeFingerprint(entry.FingerprintSha256) == wantFingerprint {
-			stored = entry
-			continue
+			return entry, nil
 		}
+		matching = append(matching, entry)
+	}
+	var firstErr error
+	for _, entry := range matching {
 		current, getErr := a.getCertificate(ctx, *entry.Id)
 		if getErr != nil {
-			return nil, fmt.Errorf("read matching ESA certificate %s: %w", *entry.Id, getErr)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("read matching ESA certificate %s: %w", *entry.Id, getErr)
+			}
+			continue
 		}
 		if current.Certificate == nil {
-			return nil, fmt.Errorf("ESA certificate %s has no public certificate", *entry.Id)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("ESA certificate %s has no public certificate", *entry.Id)
+			}
+			continue
 		}
 		currentLeaf, parseErr := parseLeaf([]byte(*current.Certificate))
 		if parseErr != nil {
-			return nil, fmt.Errorf("parse ESA certificate %s: %w", *entry.Id, parseErr)
-		}
-		if bytes.Equal(currentLeaf.Raw, leaf.Raw) {
-			stored = entry
+			if firstErr == nil {
+				firstErr = fmt.Errorf("parse ESA certificate %s: %w", *entry.Id, parseErr)
+			}
 			continue
 		}
-		if !currentLeaf.NotAfter.Before(leaf.NotAfter) {
-			return nil, fmt.Errorf("ESA certificate %s expires no earlier than the renewed certificate", *entry.Id)
+		if bytes.Equal(currentLeaf.Raw, leaf.Raw) {
+			return entry, nil
+		}
+		if !currentLeaf.NotAfter.Before(leaf.NotAfter) && firstErr == nil {
+			firstErr = fmt.Errorf("ESA certificate %s expires no earlier than the renewed certificate", *entry.Id)
 		}
 	}
-	return stored, nil
+	return nil, firstErr
 }
 
 func (a *Action) getCertificate(ctx context.Context, id string) (*esa.GetCertificateResponseBody, error) {

@@ -84,7 +84,7 @@ reloadCommand = "bash /opt/acme/reload.sh"
 # type = "aliESA"
 # profile = "esa-prod"
 # siteId = 1234567890123
-# retainCount = 3 # optional; default 3, allowed range 1-5
+# retainCount = 3 # optional; default 3, any positive count
 
 # Patch kubernetes.io/tls secrets annotated with
 # party.para.certdx/domains whose domains this certificate covers.

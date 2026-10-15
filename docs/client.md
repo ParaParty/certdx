@@ -145,11 +145,12 @@ Uploads a new certificate version at an Alibaba Cloud ESA site using ESA's
 `SetCertificate` API. The action matches certificates by the exact SAN set,
 reuses material already stored at the site, and refuses to upload an older
 certificate over a newer one. It names uploads `certdx-<siteId>-<fingerprint prefix>` and
-caps certdx uploads across that site at `retainCount`. When the
-five-upload quota is full, it deletes only as many oldest certdx uploads as
-needed to free one slot. It never deletes non-certdx uploads or the latest
-certdx upload for another SAN set. After `GetCertificate`
-reports the new fingerprint with status `OK` or `Expiring`, it prunes excess
+caps certdx uploads across that site at `retainCount`. If ESA rejects an
+upload because the plan's custom-certificate quota is full, it deletes one
+safe older certdx version and retries, repeating only as needed. It never
+deletes non-certdx uploads or the latest certdx upload for another SAN set.
+After `GetCertificate` reports the new fingerprint with status `OK` or
+`Expiring`, it prunes excess
 older certdx uploads. This confirms ESA's certificate record, not which
 certificate every edge node currently serves; verify the live TLS endpoint
 separately when deploying to production.
@@ -158,7 +159,11 @@ separately when deploying to production.
 | --- | --- | --- |
 | `profile` | string | Name of a `[[Profile.AliESA]]` entry. |
 | `siteId` | integer | ESA site ID returned by `ListSites`. Must be positive. |
-| `retainCount` | integer | Maximum number of recent certdx uploads to retain across the site. Defaults to `3`; allowed range `1` to `5`. |
+| `retainCount` | integer | Maximum number of recent certdx uploads to retain across the site. Defaults to `3`; any positive value is accepted. |
+
+The [custom-certificate quota](https://help.aliyun.com/en/edge-security-acceleration/esa/user-guide/ssl-tls-overview)
+depends on the ESA plan. If no older certdx version can be retired safely,
+the action reports the quota error without deleting another certificate.
 
 #### `type = "kubernetes"`
 
