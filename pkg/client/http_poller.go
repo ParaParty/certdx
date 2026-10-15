@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -41,6 +42,7 @@ type httpPoller struct {
 	failures  int           // consecutive failures of servers[current]
 	retryWait time.Duration // wait before the next retry of servers[current]
 	interval  time.Duration // wait after a successful round
+	onceDone  bool          // the first fetch has finished in --quit mode
 }
 
 func (r *CertDXClientDaemon) newHttpPoller(cert *watchingCert, main, standby *CertDXHttpClient) *httpPoller {
@@ -59,7 +61,11 @@ func (r *CertDXClientDaemon) newHttpPoller(cert *watchingCert, main, standby *Ce
 
 // run polls until the daemon stops.
 func (p *httpPoller) run() {
-	for p.sleep(p.poll()) {
+	for {
+		wait := p.poll()
+		if p.onceDone || !p.sleep(wait) {
+			return
+		}
 	}
 }
 
@@ -77,12 +83,14 @@ func (p *httpPoller) poll() time.Duration {
 	if resp.Err != "" {
 		// A refusal such as "domains not allowed" won't change soon.
 		logging.Error("Server refused cert %v: %s", domains, resp.Err)
+		p.failOnce(errors.New(resp.Err))
 		return p.interval
 	}
 
 	p.interval = pollInterval(resp.RenewTimeLeft)
 	select {
 	case p.cert.UpdateChan <- certData{Domains: domains, Fullchain: resp.FullChain, Key: resp.Key}:
+		p.onceDone = p.daemon.once != nil
 	case <-p.daemon.rootCtx.Done():
 	}
 	return p.interval
@@ -108,8 +116,20 @@ func (p *httpPoller) onFailure(err error) time.Duration {
 		return 0
 	}
 	p.current = 0
+	if p.daemon.once != nil {
+		p.failOnce(fmt.Errorf("all HTTP servers failed: %w", err))
+		return 0
+	}
 	logging.Error("All servers failed for cert %v, retrying in %s", p.cert.Config.Domains, pollIdleWait)
 	return pollIdleWait
+}
+
+func (p *httpPoller) failOnce(err error) {
+	if p.daemon.once == nil {
+		return
+	}
+	p.onceDone = true
+	p.cert.onceFetch.Do(func() { p.daemon.once.fetchFinished(p.cert, err) })
 }
 
 func (p *httpPoller) serverName() string {

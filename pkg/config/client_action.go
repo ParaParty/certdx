@@ -13,6 +13,7 @@ import (
 // list. Concrete types are selected by the `type` key at decode time.
 type UpdateActionConfig interface {
 	ActionType() string
+	OneShot() bool
 	Validate(c *ClientConfig) error
 }
 
@@ -98,6 +99,8 @@ func (a *FileAction) ActionType() string {
 	return UPDATE_ACTION_FILE
 }
 
+func (a *FileAction) OneShot() bool { return true }
+
 func (a *FileAction) Validate(_ *ClientConfig) error {
 	if a.SavePath == "" {
 		return fmt.Errorf("file update action: savePath is empty")
@@ -137,6 +140,8 @@ func (a *TencentCloudAction) ActionType() string {
 	return UPDATE_ACTION_TENCENT_CLOUD
 }
 
+func (a *TencentCloudAction) OneShot() bool { return true }
+
 func (a *TencentCloudAction) Validate(c *ClientConfig) error {
 	var ret []error
 
@@ -174,6 +179,8 @@ type KubernetesAction struct {
 func (a *KubernetesAction) ActionType() string {
 	return UPDATE_ACTION_KUBERNETES
 }
+
+func (a *KubernetesAction) OneShot() bool { return true }
 
 func (a *KubernetesAction) Validate(c *ClientConfig) error {
 	if a.Profile == "" {

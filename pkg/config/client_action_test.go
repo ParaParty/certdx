@@ -67,6 +67,23 @@ profile = "cluster-a"
 	}
 }
 
+func TestAllActionsOneShot(t *testing.T) {
+	config := &ClientConfig{}
+	if config.AllActionsOneShot() {
+		t.Fatal("empty configuration is not one-shot")
+	}
+	config.Certificates = []ClientCertificate{{Actions: []UpdateActionConfig{
+		&FileAction{}, &TencentCloudAction{}, &KubernetesAction{},
+	}}}
+	if !config.AllActionsOneShot() {
+		t.Fatal("all built-in actions should be one-shot")
+	}
+	config.Certificates = append(config.Certificates, ClientCertificate{})
+	if config.AllActionsOneShot() {
+		t.Fatal("certificate without actions is not one-shot")
+	}
+}
+
 func TestDecodeActionsRejectsUnknownType(t *testing.T) {
 	_, err := decodeAndResolve(t, `
 [[Certificate]]

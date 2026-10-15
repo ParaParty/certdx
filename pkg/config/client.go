@@ -30,6 +30,25 @@ type ClientConfig struct {
 	Certificates []ClientCertificate `toml:"Certificate" json:"certificates,omitempty"`
 }
 
+// AllActionsOneShot reports whether every configured certificate action can
+// finish in a single run. Empty configurations never qualify.
+func (c *ClientConfig) AllActionsOneShot() bool {
+	if len(c.Certificates) == 0 {
+		return false
+	}
+	for _, cert := range c.Certificates {
+		if len(cert.Actions) == 0 {
+			return false
+		}
+		for _, action := range cert.Actions {
+			if !action.OneShot() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (c *ClientConfig) Validate(optionList []ValidatingOption) error {
 	option := makeValidatingConfiguration()
 	for _, it := range optionList {

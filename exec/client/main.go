@@ -32,6 +32,7 @@ var (
 	version  = flag.BoolP("version", "v", false, "Print version")
 	conf     = flag.StringP("conf", "c", "", "Config file path (required)")
 	pDebug   = flag.BoolP("debug", "d", false, "Enable debug log")
+	quit     = flag.Bool("quit", false, "Exit after all one-shot update actions finish")
 )
 
 var certDXDaemon *client.CertDXClientDaemon
@@ -77,6 +78,13 @@ func init() {
 
 func main() {
 	go cli.WaitForShutdown(certDXDaemon.Stop, shutdownTimeout)
+	if *quit && certDXDaemon.Config.AllActionsOneShot() {
+		if err := certDXDaemon.RunOnce(); err != nil {
+			logging.Error("One-shot run failed: %s", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	switch certDXDaemon.Config.Common.Mode {
 	case config.CLIENT_MODE_HTTP:

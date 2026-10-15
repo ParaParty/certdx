@@ -39,6 +39,7 @@ type CertDXClientDaemon struct {
 
 	certs map[domain.Key]*watchingCert
 	wg    sync.WaitGroup
+	once  *onceRun
 
 	// rootCtx is the lifecycle parent for every daemon subgoroutine
 	// (watchers, pollers, the gRPC failover state machine). Stop cancels
@@ -67,6 +68,7 @@ type watchingCert struct {
 	UpdateHandlers []CertificateUpdateHandler
 	Runners        []*actionRunner
 	UpdateChan     chan certData
+	onceFetch      sync.Once
 }
 
 // CertificateUpdateHandler is invoked whenever a watched cert receives
@@ -101,9 +103,23 @@ func (r *CertDXClientDaemon) watchUpdate(c *watchingCert) {
 			parsed, err := tls.X509KeyPair(newCert.Fullchain, newCert.Key)
 			if err != nil {
 				logging.Error("Dropping invalid cert %v: %s", newCert.Domains, err)
+				if r.once != nil {
+					c.onceFetch.Do(func() { r.once.fetchFinished(c, fmt.Errorf("invalid certificate or key: %w", err)) })
+				}
 				continue
 			}
 			newCert.parsed = &parsed
+			if r.once != nil {
+				c.onceFetch.Do(func() {
+					r.once.fetchFinished(c, nil)
+					r.wg.Add(1)
+					go func() {
+						defer r.wg.Done()
+						r.once.actionsFinished(r.deliverOnce(c, newCert))
+					}()
+				})
+				continue
+			}
 			currentCert := c.Data.Load()
 			if !bytes.Equal(currentCert.Fullchain, newCert.Fullchain) || !bytes.Equal(currentCert.Key, newCert.Key) {
 				logging.Notice("Notify cert %v changed", newCert.Domains)
@@ -239,20 +255,22 @@ func (r *CertDXClientDaemon) AddCertToWatch(name string, domains []string) error
 	return r.AddCertToWatchOpt(name, domains, []WatchingCertsOption{})
 }
 
-// startWatchers launches one watchUpdate goroutine per registered cert,
-// plus one goroutine per update action. All exit when the daemon's
-// rootCtx fires.
+// startWatchers launches one watchUpdate goroutine per registered cert.
+// Continuous mode also starts an action runner for each update action.
+// All exit when the daemon's rootCtx fires.
 func (r *CertDXClientDaemon) startWatchers() {
 	for _, c := range r.certs {
 		r.wg.Add(1)
 		go r.watchUpdate(c)
 
-		for _, runner := range c.Runners {
-			r.wg.Add(1)
-			go func() {
-				defer r.wg.Done()
-				runner.run(r.rootCtx)
-			}()
+		if r.once == nil {
+			for _, runner := range c.Runners {
+				r.wg.Add(1)
+				go func() {
+					defer r.wg.Done()
+					runner.run(r.rootCtx)
+				}()
+			}
 		}
 	}
 }

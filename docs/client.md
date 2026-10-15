@@ -19,6 +19,7 @@ certdx_client [flags]
 | `-l`, `--log` | *(stderr)* | Path to a log file. |
 | `-d`, `--debug` | `false` | Enable debug logging. |
 | `-t`, `--test` | `false` | Test mode: skip TLS verification on the HTTP server. |
+| `--quit` | `false` | When every configured action is one-shot, fetch each certificate once, wait for all actions, then exit with status 0 on success or 1 on failure. |
 | `-h`, `--help` | | Print help. |
 | `-v`, `--version` | | Print build version. |
 
@@ -38,7 +39,7 @@ Top-level sections:
 | --- | --- | --- | --- |
 | `retryCount` | int | `5` | Update actions: retries after a failed run, so an action runs at most `retryCount + 1` times. Servers: failed requests (HTTP) or connections (gRPC) to one server before switching to the next. |
 | `mode` | string | `"http"` | `http` or `grpc`. |
-| `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. |
+| `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. With `--quit`, this bounds the wait for the first certificate from each configured entry. |
 
 ### `[Http.MainServer]` / `[Http.StandbyServer]`
 
@@ -91,12 +92,17 @@ material. Actions for one certificate run concurrently, each on its own
 goroutine, retried `Common.retryCount` times; a failing action never
 stops the others or the daemon.
 
+With `--quit`, the client fetches each configured certificate once, waits for
+all its update actions, and exits. `file`, `tencentCloud`, and `kubernetes` are
+all one-shot actions. Certificate fetches and actions must all succeed for exit
+status 0.
+
 #### `type = "file"`
 
 | Key | Type | Notes |
 | --- | --- | --- |
 | `savePath` | path | Output directory. The certificate is written to `<savePath>/<name>.pem` and the private key to `<savePath>/<name>.key`. |
-| `reloadCommand` | string | Shell command executed after a successful write. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. It is killed if it runs longer than 5 minutes. |
+| `reloadCommand` | string | Shell command executed after a successful write. A nonzero exit fails the action; commands running longer than 5 minutes are killed. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
 
 #### `type = "tencentCloud"`
 
