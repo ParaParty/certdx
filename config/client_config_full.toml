@@ -37,6 +37,14 @@ pem = "/path/to/mtls/client-bundle.pem"
 # defaults to ssl.tencentcloudapi.com
 # endpoint = "ssl.tencentcloudapi.com"
 
+# [[Profile.AliESA]]
+# name = "esa-prod"
+# accessKeyId = ""
+# accessKeySecret = ""
+# securityToken = "" # optional for temporary credentials
+# regionId = "cn-hangzhou" # optional; defaults to cn-hangzhou
+# endpoint = "esa.cn-hangzhou.aliyuncs.com" # optional; defaults to the public endpoint for regionId
+
 # [[Profile.Kubernetes]]
 # name = "cluster-a"
 # empty means in-cluster, then $KUBECONFIG, then ~/.kube/config
@@ -70,6 +78,13 @@ reloadCommand = "bash /opt/acme/reload.sh"
 # optional per-resource-type region filter; every resourceType listed
 # here must also appear in resourceTypes above
 # resourceTypesRegions = [{ resourceType = "clb", regions = ["ap-guangzhou"] }]
+
+# Upload certificates at an Alibaba Cloud ESA site and retain recent certdx versions.
+# [[Certificate.UpdateAction]]
+# type = "aliESA"
+# profile = "esa-prod"
+# siteId = 1234567890123
+# retainCount = 3 # optional; default 3, any positive count
 
 # Patch kubernetes.io/tls secrets annotated with
 # party.para.certdx/domains whose domains this certificate covers.

@@ -51,13 +51,19 @@ apiKey = ""
 
 # or cloudflare auth token and zone token
 # type = "cloudflare"
-# authToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
-# zoneToken = "XOoC9QinSF_LRBQwmAfKPKbqZyKeZH2vyOLZUKVw"
+# authToken = ""
+# zoneToken = ""
 
 # or you can use tencent cloud
-# type = "tencent"
+# type = "tencentcloud"
 # secretID = ""
-# SecretKey = ""
+# secretKey = ""
+
+# or you can use Alibaba Cloud DNS
+# type = "alidns"
+# accessKeyId = ""
+# accessKeySecret = ""
+# securityToken = "" # optional for temporary credentials
 
 [HttpProvider]
 type = "s3"

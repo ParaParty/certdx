@@ -98,12 +98,12 @@ func (r *actionRunner) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case cert := <-r.updateChan:
-			r.deliver(ctx, cert)
+			_ = r.deliver(ctx, cert)
 		}
 	}
 }
 
-func (r *actionRunner) deliver(ctx context.Context, cert certData) {
+func (r *actionRunner) deliver(ctx context.Context, cert certData) error {
 	logging.Info("Running %s update action for cert %s", r.action.Type(), r.cert.Name)
 
 	err := retry.Do(ctx, r.retryCount, func() error {
@@ -111,11 +111,12 @@ func (r *actionRunner) deliver(ctx context.Context, cert certData) {
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return
+			return err
 		}
 		logging.Error("Update action %s failed for cert %s: %s", r.action.Type(), r.cert.Name, err)
-		return
+		return fmt.Errorf("certificate %s: update action %s: %w", r.cert.Name, r.action.Type(), err)
 	}
 
 	logging.Notice("Update action %s succeeded for cert %s", r.action.Type(), r.cert.Name)
+	return nil
 }

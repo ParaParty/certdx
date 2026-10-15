@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-acme/lego/v4/challenge"
+	"github.com/go-acme/lego/v4/lego"
 	"pkg.para.party/certdx/pkg/config"
 )
 
@@ -65,5 +66,26 @@ func TestOverridePropagationTimeout(t *testing.T) {
 	}
 	if interval != 3*time.Second {
 		t.Fatalf("polling interval: got %s want %s", interval, 3*time.Second)
+	}
+}
+
+func TestGetChallengerAliDNS(t *testing.T) {
+	for _, token := range []string{"", "test-token"} {
+		cfg := &config.ServerConfig{
+			ACME: config.ACMEConfig{ChallengeType: config.ChallengeTypeDns01},
+			DnsProvider: &config.DnsProvider{
+				Type:            config.DnsProviderTypeAliDNS,
+				AccessKeyID:     "test-id",
+				AccessKeySecret: "test-secret",
+				SecurityToken:   token,
+			},
+		}
+		typ, provider, err := getChallenger(&lego.Config{}, cfg)
+		if err != nil {
+			t.Fatalf("construct AliDNS provider: %v", err)
+		}
+		if typ != config.ChallengeTypeDns01 || provider == nil {
+			t.Fatalf("unexpected challenger: type=%q provider=%T", typ, provider)
+		}
 	}
 }

@@ -31,6 +31,12 @@ resourceTypes = ["teo", "cdn"]
 resourceTypesRegions = [{ resourceType = "teo", regions = ["ap-guangzhou"] }]
 
 [[Certificate.UpdateAction]]
+type = "aliESA"
+profile = "esa-prod"
+siteId = 12345
+retainCount = 2
+
+[[Certificate.UpdateAction]]
 type = "kubernetes"
 profile = "cluster-a"
 `)
@@ -39,8 +45,8 @@ profile = "cluster-a"
 	}
 
 	actions := c.Certificates[0].Actions
-	if len(actions) != 3 {
-		t.Fatalf("expected 3 actions, got %d", len(actions))
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d", len(actions))
 	}
 
 	file, ok := actions[0].(*FileAction)
@@ -62,8 +68,29 @@ profile = "cluster-a"
 		t.Fatalf("resourceTypesRegions decoded as %+v", txc.ResourceTypesRegions)
 	}
 
-	if _, ok := actions[2].(*KubernetesAction); !ok {
-		t.Fatalf("action 2 is %T", actions[2])
+	ali, ok := actions[2].(*AliESAAction)
+	if !ok || ali.Profile != "esa-prod" || ali.SiteID != 12345 || ali.RetainCount != 2 {
+		t.Fatalf("aliESA action decoded incorrectly: %T", actions[2])
+	}
+	if _, ok := actions[3].(*KubernetesAction); !ok {
+		t.Fatalf("action 3 is %T", actions[3])
+	}
+}
+
+func TestAllActionsOneShot(t *testing.T) {
+	config := &ClientConfig{}
+	if config.AllActionsOneShot() {
+		t.Fatal("empty configuration is not one-shot")
+	}
+	config.Certificates = []ClientCertificate{{Actions: []UpdateActionConfig{
+		&FileAction{}, &TencentCloudAction{}, &AliESAAction{}, &KubernetesAction{},
+	}}}
+	if !config.AllActionsOneShot() {
+		t.Fatal("all built-in actions should be one-shot")
+	}
+	config.Certificates = append(config.Certificates, ClientCertificate{})
+	if config.AllActionsOneShot() {
+		t.Fatal("certificate without actions is not one-shot")
 	}
 }
 
@@ -207,6 +234,30 @@ func TestKubernetesActionValidate(t *testing.T) {
 
 	if err := (&KubernetesAction{Profile: "cluster-a"}).Validate(c); err != nil {
 		t.Fatalf("valid action rejected: %v", err)
+	}
+}
+
+func TestAliESAActionValidate(t *testing.T) {
+	c := &ClientConfig{}
+	c.Profiles.AliESA = []AliESAProfile{{Name: "prod", AccessKeyID: "id", AccessKeySecret: "secret"}}
+	for _, a := range []AliESAAction{
+		{SiteID: 1},
+		{Profile: "missing", SiteID: 1},
+		{Profile: "prod"},
+		{Profile: "prod", SiteID: 1, RetainCount: -1},
+	} {
+		if err := a.Validate(c); err == nil {
+			t.Fatal("expected invalid Ali ESA action to be rejected")
+		}
+	}
+	if err := (&AliESAAction{Profile: "prod", SiteID: 12345}).Validate(c); err != nil {
+		t.Fatalf("valid Ali ESA action: %v", err)
+	}
+	if err := (&AliESAAction{Profile: "prod", SiteID: 12345, RetainCount: 20}).Validate(c); err != nil {
+		t.Fatalf("higher-plan retention rejected: %v", err)
+	}
+	if got := (&AliESAAction{}).CertificateRetainCount(); got != 3 {
+		t.Fatalf("default retain count = %d, want 3", got)
 	}
 }
 

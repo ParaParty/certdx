@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/retry"
 )
 
 func update(t *testing.T, savePath, reloadCommand string, c *config.ClientCertificate) error {
@@ -196,9 +197,27 @@ func TestRunReloadCommandStopsWithContext(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	a.runReloadCommand(ctx)
+	if err := a.runReloadCommand(ctx); err == nil {
+		t.Fatal("expected canceled reload command to fail")
+	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("reload command ran for %s after its context ended", d)
+	}
+}
+
+func TestUpdateReportsReloadFailure(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"site.pem", "site.key"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := update(t, root, filepath.Join(root, "missing-command"), &config.ClientCertificate{Name: "site"})
+	if err == nil || !strings.Contains(err.Error(), "reload command") {
+		t.Fatalf("Update error = %v, want reload failure", err)
+	}
+	if !retry.IsPermanent(err) {
+		t.Fatalf("reload failure must not retry the file write: %v", err)
 	}
 }
 

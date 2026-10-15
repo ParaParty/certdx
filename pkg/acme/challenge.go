@@ -7,6 +7,7 @@ import (
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/lego"
+	"pkg.para.party/certdx/pkg/acme/challengeproviders/alidns"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/cloudflare"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/s3"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/tencentcloud"
@@ -17,7 +18,7 @@ import (
 func SetChallenger(legoCfg *lego.Config, instance *ACME, p *config.ServerConfig) error {
 	typ, clg, err := getChallenger(legoCfg, p)
 	if err != nil {
-		return fmt.Errorf("unexpected error constructing cloudflare dns client: %w", err)
+		return fmt.Errorf("unexpected error constructing challenge provider: %w", err)
 	}
 	switch typ {
 	case config.ChallengeTypeDns01:
@@ -111,6 +112,8 @@ func getChallenger(legoCfg *lego.Config, p *config.ServerConfig) (string, challe
 			return makeCloudflareProvider(legoCfg, *p.DnsProvider)
 		case config.DnsProviderTypeTencentCloud:
 			return makeTencentCloudProvider(legoCfg, *p.DnsProvider)
+		case config.DnsProviderTypeAliDNS:
+			return makeAliDNSProvider(legoCfg, *p.DnsProvider)
 		default:
 			return "", nil, fmt.Errorf("unknown dns provider type: %s", p.DnsProvider.Type)
 		}
@@ -133,6 +136,11 @@ func makeCloudflareProvider(legoCfg *lego.Config, p config.DnsProvider) (string,
 
 func makeTencentCloudProvider(_ *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
 	c, err := tencentcloud.New(p)
+	return config.ChallengeTypeDns01, c, err
+}
+
+func makeAliDNSProvider(_ *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
+	c, err := alidns.New(p)
 	return config.ChallengeTypeDns01, c, err
 }
 

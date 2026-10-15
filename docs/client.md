@@ -19,6 +19,7 @@ certdx_client [flags]
 | `-l`, `--log` | *(stderr)* | Path to a log file. |
 | `-d`, `--debug` | `false` | Enable debug logging. |
 | `-t`, `--test` | `false` | Test mode: skip TLS verification on the HTTP server. |
+| `--quit` | `false` | When every configured action is one-shot, fetch each certificate once, wait for all actions, then exit with status 0 on success or 1 on failure. |
 | `-h`, `--help` | | Print help. |
 | `-v`, `--version` | | Print build version. |
 
@@ -38,7 +39,7 @@ Top-level sections:
 | --- | --- | --- | --- |
 | `retryCount` | int | `5` | Update actions: retries after a failed run, so an action runs at most `retryCount + 1` times. Servers: failed requests (HTTP) or connections (gRPC) to one server before switching to the next. |
 | `mode` | string | `"http"` | `http` or `grpc`. |
-| `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. |
+| `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. With `--quit`, this bounds the wait for the first certificate from each configured entry. |
 
 ### `[Http.MainServer]` / `[Http.StandbyServer]`
 
@@ -91,12 +92,17 @@ material. Actions for one certificate run concurrently, each on its own
 goroutine, retried `Common.retryCount` times; a failing action never
 stops the others or the daemon.
 
+With `--quit`, the client fetches each configured certificate once, waits for
+all its update actions, and exits. `file`, `tencentCloud`, `aliESA`, and `kubernetes`
+are all one-shot actions. Certificate fetches and actions must all succeed
+for exit status 0.
+
 #### `type = "file"`
 
 | Key | Type | Notes |
 | --- | --- | --- |
 | `savePath` | path | Output directory. The certificate is written to `<savePath>/<name>.pem` and the private key to `<savePath>/<name>.key`. |
-| `reloadCommand` | string | Shell command executed after a successful write. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. It is killed if it runs longer than 5 minutes. |
+| `reloadCommand` | string | Shell command executed after a successful write. A nonzero exit fails the action; commands running longer than 5 minutes are killed. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
 
 #### `type = "tencentCloud"`
 
@@ -132,6 +138,32 @@ retried: replaying the upload cannot change the outcome.
 | `profile` | string | Name of a `[[Profile.TencentCloud]]` entry. |
 | `resourceTypes` | string list | One or more of `clb`, `cdn`, `waf`, `live`, `vod`, `ddos`, `tke`, `apigateway`, `tcb`, `teo`. |
 | `resourceTypesRegions` | table list | Optional per-resource-type region filter. Every `resourceType` used here must also appear in `resourceTypes`. |
+
+#### `type = "aliESA"`
+
+Uploads a new certificate version at an Alibaba Cloud ESA site using ESA's
+`SetCertificate` API. The action matches certificates by the exact SAN set,
+reuses material already stored at the site, and refuses to upload an older
+certificate over a newer one. It names uploads `certdx-<siteId>-<fingerprint prefix>` and
+caps certdx uploads across that site at `retainCount`. If ESA rejects an
+upload because the plan's custom-certificate quota is full, it deletes one
+safe older certdx version and retries, repeating only as needed. It never
+deletes non-certdx uploads or the latest certdx upload for another SAN set.
+After `GetCertificate` reports the new fingerprint with status `OK` or
+`Expiring`, it prunes excess
+older certdx uploads. This confirms ESA's certificate record, not which
+certificate every edge node currently serves; verify the live TLS endpoint
+separately when deploying to production.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `profile` | string | Name of a `[[Profile.AliESA]]` entry. |
+| `siteId` | integer | ESA site ID returned by `ListSites`. Must be positive. |
+| `retainCount` | integer | Maximum number of recent certdx uploads to retain across the site. Defaults to `3`; any positive value is accepted. |
+
+The [custom-certificate quota](https://help.aliyun.com/en/edge-security-acceleration/esa/user-guide/ssl-tls-overview)
+depends on the ESA plan. If no older certdx version can be retired safely,
+the action reports the quota error without deleting another certificate.
 
 #### `type = "kubernetes"`
 
@@ -174,7 +206,7 @@ rules:
       verbs: ["list", "get", "update"]
 ```
 
-### `[[Profile.TencentCloud]]` / `[[Profile.Kubernetes]]`
+### `[[Profile.TencentCloud]]` / `[[Profile.AliESA]]` / `[[Profile.Kubernetes]]`
 
 Named credentials referenced by update actions. Names are scoped per
 profile type, so a Tencent Cloud profile and a Kubernetes profile may
@@ -185,8 +217,16 @@ share a name.
 | `[[Profile.TencentCloud]]` | `name` | Referenced by `profile` in a `tencentCloud` action. |
 | | `secretID` / `secretKey` | Tencent Cloud API credentials. Both required. |
 | | `endpoint` | Optional, defaults to `ssl.tencentcloudapi.com`. |
+| `[[Profile.AliESA]]` | `name` | Referenced by `profile` in an `aliESA` action. |
+| | `accessKeyId` / `accessKeySecret` | Alibaba Cloud credentials. Both required. |
+| | `securityToken` | Optional temporary credential token. |
+| | `regionId` | ESA API region. Defaults to `cn-hangzhou`. |
+| | `endpoint` | ESA API host. Defaults to `esa.<regionId>.aliyuncs.com`; set this explicitly for a VPC endpoint. |
 | `[[Profile.Kubernetes]]` | `name` | Referenced by `profile` in a `kubernetes` action. |
 | | `kubeConfig` | Path to a kubeconfig. Empty means in-cluster, then `$KUBECONFIG`, then `~/.kube/config`. |
+
+Alibaba Cloud lists the available ESA public and VPC hosts in its
+[service endpoint reference](https://help.aliyun.com/zh/edge-security-acceleration/esa/api-esa-2024-09-10-endpoint).
 
 Example:
 
@@ -241,7 +281,7 @@ yet up.
   action needs a known `type`.
 - `<action> update action: no such profile: <name>` — the `profile` does
   not match any entry of the matching profile type.
-- `unsupported profile type: <x>` — only `TencentCloud` and `Kubernetes`
+- `unsupported profile type: <x>` — only `TencentCloud`, `AliESA`, and `Kubernetes`
   exist under `[Profile]`.
 - `http main server url is empty` — set `Http.MainServer.url` when in HTTP mode.
 - `grpc main server url is empty` — set `GRPC.MainServer.server` when in gRPC mode.

@@ -64,6 +64,7 @@ Required for wildcard certificates. Configure `[DnsProvider]`:
 - `cloudflare` — either `email` + `apiKey` (global API key) or `authToken` +
   `zoneToken` (scoped tokens).
 - `tencentcloud` — `secretID` + `secretKey`.
+- `alidns` — `accessKeyId` + `accessKeySecret`, and `securityToken` for temporary credentials.
 
 Set `conservativeDnsCheck = true` to resolve every authoritative nameserver to
 all of its IPv4 and IPv6 addresses and require the DNS-01 TXT value from each
