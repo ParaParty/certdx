@@ -68,6 +68,10 @@ func (c *ServerConfig) Validate() error {
 		ret = append(ret, err)
 	}
 
+	if !c.HttpServer.Enabled && !c.GRPCSDSServer.Enabled {
+		ret = append(ret, fmt.Errorf("no server mode enabled"))
+	}
+
 	if c.needsMTLS() {
 		if err := c.MTLS.Validate(); err != nil {
 			ret = append(ret, err)
@@ -184,6 +188,12 @@ type DnsProvider struct {
 	// tencentcloud
 	SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
 	SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
+
+	// alidns
+	AccessKeyID     string `toml:"accessKeyId" json:"access_key_id,omitempty"`
+	AccessKeySecret string `toml:"accessKeySecret" json:"access_key_secret,omitempty"`
+	SecurityToken   string `toml:"securityToken" json:"security_token,omitempty"`
+	RAMRole         string `toml:"ramRole" json:"ram_role,omitempty"`
 }
 
 func (p *DnsProvider) Validate() error {
@@ -204,11 +214,20 @@ func (p *DnsProvider) Validate() error {
 	switch p.Type {
 	case DnsProviderTypeCloudflare:
 		if (p.Email == "" || p.APIKey == "") && (p.AuthToken == "" || p.ZoneToken == "") {
-			return fmt.Errorf("DnsProvider Cloudflare: empty Email or APIKey")
+			return fmt.Errorf("DnsProvider Cloudflare: set email and apiKey, or authToken and zoneToken")
 		}
 	case DnsProviderTypeTencentCloud:
 		if p.SecretID == "" || p.SecretKey == "" {
 			return fmt.Errorf("DnsProvider TencentCloud: empty SecretID or SecretKey")
+		}
+	case DnsProviderTypeAliDNS:
+		if p.RAMRole != "" {
+			// lego prefers the role and would silently ignore the keys.
+			if p.AccessKeyID != "" || p.AccessKeySecret != "" || p.SecurityToken != "" {
+				return fmt.Errorf("DnsProvider AliDNS: set either ramRole or access key credentials, not both")
+			}
+		} else if p.AccessKeyID == "" || p.AccessKeySecret == "" {
+			return fmt.Errorf("DnsProvider AliDNS: set accessKeyId and accessKeySecret, or ramRole")
 		}
 	default:
 		return fmt.Errorf("unknown DnsProvider: %s", p.Type)

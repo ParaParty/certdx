@@ -8,6 +8,7 @@ const (
 const (
 	DnsProviderTypeCloudflare   string = "cloudflare"
 	DnsProviderTypeTencentCloud string = "tencentcloud"
+	DnsProviderTypeAliDNS       string = "alidns"
 
 	HttpProviderTypeS3    string = "s3"
 	HttpProviderTypeLocal string = "local"
@@ -26,5 +27,6 @@ const (
 const (
 	UPDATE_ACTION_FILE          string = "file"
 	UPDATE_ACTION_TENCENT_CLOUD string = "tencentCloud"
+	UPDATE_ACTION_ALI_ESA       string = "aliESA"
 	UPDATE_ACTION_KUBERNETES    string = "kubernetes"
 )

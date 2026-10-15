@@ -1,0 +1,126 @@
+package client
+
+import (
+	"errors"
+	"fmt"
+	"sync"
+
+	"pkg.para.party/certdx/pkg/config"
+)
+
+// onceRun tracks the first fetch and final action result for each certificate.
+type onceRun struct {
+	mu             sync.Mutex
+	pendingFetches int
+	pendingCerts   int
+	fetched        chan struct{}
+	done           chan struct{}
+	errs           []error
+}
+
+func newOnceRun(count int) *onceRun {
+	return &onceRun{
+		pendingFetches: count,
+		pendingCerts:   count,
+		fetched:        make(chan struct{}),
+		done:           make(chan struct{}),
+	}
+}
+
+func (o *onceRun) fetchFinished(cert *watchingCert, err error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err != nil {
+		o.errs = append(o.errs, fmt.Errorf("certificate %s: %w", cert.Config.Name, err))
+		o.pendingCerts--
+		if o.pendingCerts == 0 {
+			close(o.done)
+		}
+	}
+	o.pendingFetches--
+	if o.pendingFetches == 0 {
+		close(o.fetched)
+	}
+}
+
+func (o *onceRun) actionsFinished(err error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err != nil {
+		o.errs = append(o.errs, err)
+	}
+	o.pendingCerts--
+	if o.pendingCerts == 0 {
+		close(o.done)
+	}
+}
+
+func (o *onceRun) result() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return errors.Join(o.errs...)
+}
+
+func (r *CertDXClientDaemon) deliverOnce(cert *watchingCert, data certData) error {
+	results := make([]error, len(cert.Runners))
+	var wg sync.WaitGroup
+	for i, runner := range cert.Runners {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = runner.deliver(r.rootCtx, data)
+		}()
+	}
+	wg.Wait()
+	return errors.Join(results...)
+}
+
+// RunOnce uses the normal HTTP client loop and stops it after all first
+// certificate fetches and their update actions have completed.
+func (r *CertDXClientDaemon) RunOnce() error {
+	if !r.Config.AllActionsOneShot() {
+		return fmt.Errorf("one-shot run requires only one-shot update actions")
+	}
+	if r.Config.Common.Mode != config.CLIENT_MODE_HTTP {
+		return fmt.Errorf("one-shot mode is not supported with %s", r.Config.Common.Mode)
+	}
+	if len(r.certs) == 0 {
+		return fmt.Errorf("client has no initialized certificates")
+	}
+	r.once = newOnceRun(len(r.certs))
+
+	daemonDone := make(chan struct{})
+	var daemonErr error
+	go func() {
+		defer close(daemonDone)
+		daemonErr = r.HttpMain()
+	}()
+	defer func() {
+		r.Stop()
+		<-daemonDone
+	}()
+	// In-flight actions record their errors as they finish, so a cancelled run
+	// waits for them before reading the result.
+	cancelled := func() error {
+		<-daemonDone
+		return errors.Join(r.once.result(), r.rootCtx.Err())
+	}
+
+	select {
+	case <-r.once.fetched:
+	case <-daemonDone:
+		if daemonErr == nil {
+			daemonErr = fmt.Errorf("client stopped before the first fetch completed")
+		}
+		return errors.Join(r.once.result(), daemonErr)
+	case <-r.rootCtx.Done():
+		return cancelled()
+	}
+
+	select {
+	case <-r.once.done:
+		return r.once.result()
+	case <-r.rootCtx.Done():
+		return cancelled()
+	}
+}

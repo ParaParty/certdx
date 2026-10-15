@@ -16,8 +16,8 @@ Reference pages with every option:
 `certdx_server` is the only component that talks to the ACME CA. Everything
 else — `certdx_client`, the Caddy plugin, Envoy via SDS — is a consumer that
 pulls finished certificates from the server. Pushing certificates on to
-Kubernetes secrets or Tencent Cloud resources is done by the client's
-update actions.
+Kubernetes secrets, Tencent Cloud resources, or Alibaba Cloud ESA sites is
+done by the client's update actions.
 
 ## 1. Pick the ACME provider
 
@@ -64,6 +64,7 @@ Required for wildcard certificates. Configure `[DnsProvider]`:
 - `cloudflare` — either `email` + `apiKey` (global API key) or `authToken` +
   `zoneToken` (scoped tokens).
 - `tencentcloud` — `secretID` + `secretKey`.
+- `alidns` — `accessKeyId` + `accessKeySecret`, or an ECS instance `ramRole`. A static `securityToken` is suitable only for a short-lived process because it expires.
 
 Set `conservativeDnsCheck = true` to resolve every authoritative nameserver to
 all of its IPv4 and IPv6 addresses and require the DNS-01 TXT value from each
@@ -472,9 +473,10 @@ rules:
   verbs: ["list", "get", "update"]
 ```
 
-Because the client is a long-running process, run it as a Deployment
-rather than a CronJob; secrets are re-listed on every renewal, so ones
-created later are picked up without a restart. In-cluster it uses the
+Run the client as a Deployment; secrets are re-listed on every renewal, so
+ones created later are picked up without a restart. A CronJob also works in
+HTTP mode with [`--quit`](client.md#certificateupdateaction), given a schedule
+short enough for the renewal window. In-cluster it uses the
 pod's service account automatically; outside the cluster set
 `kubeConfig` on the profile. Ready-to-adapt manifests live in
 `config/kubernetes/`.

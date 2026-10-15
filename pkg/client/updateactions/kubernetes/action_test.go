@@ -3,6 +3,8 @@ package kubernetes
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -11,7 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stesting "k8s.io/client-go/testing"
 
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	"pkg.para.party/certdx/pkg/config"
 )
 
@@ -252,5 +256,32 @@ func TestParseDomainsAnnotation(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("parseDomainsAnnotation(%q) = %v, want %v", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestNewBoundsEachAPIRequest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	const kubeconfig = `apiVersion: v1
+kind: Config
+clusters:
+- name: test
+  cluster: {server: "https://127.0.0.1:6443"}
+users:
+- name: test
+contexts:
+- name: test
+  context: {cluster: test, user: test}
+current-context: test
+`
+	if err := os.WriteFile(path, []byte(kubeconfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	action, err := New(&config.KubernetesProfile{KubeConfig: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := action.kubeClient.(*kubernetes.Clientset).CoreV1().RESTClient().(*rest.RESTClient).Client
+	if client.Timeout != requestTimeout {
+		t.Fatalf("HTTP client timeout = %s, want %s", client.Timeout, requestTimeout)
 	}
 }

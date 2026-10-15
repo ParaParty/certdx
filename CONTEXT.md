@@ -10,10 +10,11 @@ term enters the codebase.
 - **certdx_server**: the single ACME issuer for a fleet. Talks to
   Let's Encrypt or Google Trust Services, caches certificates, and
   serves them to clients over HTTP and/or gRPC SDS.
-- **certdx_client**: a standalone daemon that pulls certificates from a
-  `certdx_server` and runs one or more **update actions** per certificate:
+- **certdx_client**: a standalone daemon, or a **one-shot run** with `--quit`,
+  that pulls certificates from a `certdx_server` and runs one or more **update actions** per certificate:
   writing them to disk with an optional reload command, patching annotated
-  Kubernetes TLS secrets, or re-binding Tencent Cloud resources.
+  Kubernetes TLS secrets, re-binding Tencent Cloud resources, or uploading
+  certificates to Alibaba Cloud ESA sites.
 - **Caddy plugin** (`exec/caddytls`): a Caddy module that consumes
   `certdx_server` directly via Caddy's `get_certificate` extension
   point, with no `certdx_client` daemon in between.
@@ -25,6 +26,10 @@ term enters the codebase.
 
 ## Lifecycle vocabulary
 
+- **One-shot run**: `certdx_client --quit` in HTTP mode. It fetches each
+  certificate once, waits for all its update actions, and exits nonzero if
+  any failed. Tracked by `onceRun`. Not to be confused with the `certdx_tools`
+  one-shot tasks, which do not fetch certificates.
 - **Subscriber**: a goroutine registered through the server's internal
   `subscribe(entry)` helper and not yet released. The renewal goroutine is
   alive while at least one subscriber is registered.
@@ -68,9 +73,18 @@ term enters the codebase.
   The e2e test suite uses it for hermetic test runs.
 - **Challenge provider**: the DNS-01 or HTTP-01 backend that satisfies
   the ACME challenge. Lives under `pkg/acme/challengeproviders/` —
-  `cloudflare`, `tencentcloud`, and `s3` (HTTP-01). The Google EAB
+  `cloudflare`, `tencentcloud`, `alidns`, and `s3` (HTTP-01). The Google EAB
   helper sits separately under `pkg/acme/acmeproviders/google/`; it is
   not a challenge backend.
+
+## Alibaba Cloud ESA
+
+- **aliESA**: the update action type that uploads certificates to an ESA
+  (Edge Security Acceleration) site.
+- **Managed upload**: an ESA upload named `certdx-<siteId>-<fingerprint prefix>`.
+  Only managed uploads are ever deleted.
+- **`retainCount`**: the soft, site-wide target for managed uploads. Each SAN
+  set keeps its latest healthy upload even when that exceeds the target.
 
 ## Failover
 

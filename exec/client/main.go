@@ -12,6 +12,7 @@ import (
 
 	// Update actions are linked here rather than from pkg/client so that
 	// their SDKs stay out of the server and Caddy plugin builds.
+	_ "pkg.para.party/certdx/pkg/client/updateactions/aliesa"
 	_ "pkg.para.party/certdx/pkg/client/updateactions/kubernetes"
 	_ "pkg.para.party/certdx/pkg/client/updateactions/tencentcloud"
 )
@@ -32,6 +33,7 @@ var (
 	version  = flag.BoolP("version", "v", false, "Print version")
 	conf     = flag.StringP("conf", "c", "", "Config file path (required)")
 	pDebug   = flag.BoolP("debug", "d", false, "Enable debug log")
+	quit     = flag.Bool("quit", false, "Exit after all one-shot update actions finish")
 )
 
 var certDXDaemon *client.CertDXClientDaemon
@@ -68,6 +70,9 @@ func init() {
 	if err := certDXDaemon.LoadConfigurationAndValidate(confPath); err != nil {
 		logging.Fatal("Invalid config: %s", err)
 	}
+	if *quit && certDXDaemon.Config.Common.Mode == config.CLIENT_MODE_GRPC {
+		logging.Fatal("--quit is not supported in grpc mode")
+	}
 	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)
 
 	if err := certDXDaemon.ClientInit(); err != nil {
@@ -77,6 +82,16 @@ func init() {
 
 func main() {
 	go cli.WaitForShutdown(certDXDaemon.Stop, shutdownTimeout)
+	if *quit {
+		if !certDXDaemon.Config.AllActionsOneShot() {
+			logging.Fatal("--quit requires all update actions to be one-shot")
+		}
+		if err := certDXDaemon.RunOnce(); err != nil {
+			logging.Error("One-shot run failed: %s", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	switch certDXDaemon.Config.Common.Mode {
 	case config.CLIENT_MODE_HTTP:

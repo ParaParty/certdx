@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +33,10 @@ import (
 	"pkg.para.party/certdx/pkg/logging"
 )
 
+// requestTimeout bounds each API request. A --quit run waits for its actions,
+// so an apiserver that accepts a request and never answers must not hang it.
+const requestTimeout = 60 * time.Second
+
 type Action struct {
 	kubeClient kubernetes.Interface
 }
@@ -43,6 +48,7 @@ func New(profile *config.KubernetesProfile) (*Action, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build kubernetes config failed: %w", err)
 	}
+	restConfig.Timeout = requestTimeout
 
 	kubeClient, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {

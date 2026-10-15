@@ -17,6 +17,7 @@ import (
 
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/logging"
+	"pkg.para.party/certdx/pkg/retry"
 	"pkg.para.party/certdx/pkg/utils"
 )
 
@@ -133,9 +134,8 @@ func writeCertKeyPairAtomic(certPath string, fullchain []byte, keyPath string, k
 //
 // The reload command runs only when both files pre-existed; the first
 // install is effectively a bootstrap and the downstream service is
-// unlikely to be running yet. A failing reload command is logged but not
-// returned: the certificate is already on disk, so retrying the whole
-// action would rewrite identical bytes.
+// unlikely to be running yet. A failing reload is permanent so the runner
+// reports it without rewriting the certificate on retry.
 func (a *Action) Update(ctx context.Context, fullchain, key []byte, c *config.ClientCertificate) error {
 	certPath, keyPath, err := a.cfg.GetFullChainAndKeyPath(c.Name)
 	if err != nil {
@@ -158,19 +158,21 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, c *config.Cl
 	logging.Info("Saved cert %v", c.Domains)
 
 	if certExists && keyExists {
-		a.runReloadCommand(ctx)
+		if err := a.runReloadCommand(ctx); err != nil {
+			return retry.Permanent(err)
+		}
 	}
 
 	return nil
 }
 
-func (a *Action) runReloadCommand(ctx context.Context) {
+func (a *Action) runReloadCommand(ctx context.Context) error {
 	// strings.Fields collapses whitespace and skips empty inputs, so
 	// a whitespace-only ReloadCommand returns an empty slice — guard
 	// against args[0] panicking instead of just !=  "".
 	args := strings.Fields(a.cfg.ReloadCommand)
 	if len(args) == 0 {
-		return
+		return nil
 	}
 
 	logging.Debug("Executing reload command: %s", a.cfg.ReloadCommand)
@@ -178,5 +180,7 @@ func (a *Action) runReloadCommand(ctx context.Context) {
 	defer cancel()
 	if err := exec.CommandContext(ctx, args[0], args[1:]...).Run(); err != nil {
 		logging.Error("Failed executing reload command %s: %s", a.cfg.ReloadCommand, err)
+		return fmt.Errorf("reload command %q: %w", a.cfg.ReloadCommand, err)
 	}
+	return nil
 }

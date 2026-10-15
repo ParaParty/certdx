@@ -1,0 +1,1200 @@
+package aliesa
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"math/big"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	esa "github.com/alibabacloud-go/esa-20240910/v2/client"
+	"github.com/alibabacloud-go/tea/dara"
+	"github.com/alibabacloud-go/tea/tea"
+
+	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/retry"
+)
+
+type fakeESA struct {
+	entries           []*esa.ListCertificatesResponseBodyResult
+	certs             map[string]string
+	status            string
+	outerStatus       bool
+	sets              []*esa.SetCertificateRequest
+	deletes           []string
+	events            []string
+	setErr            error
+	setErrs           []error
+	setAfterStoreErrs []error
+	listErrs          []error
+	getErrs           []error
+	deleteErrs        []error
+	deleteErr         error
+	quota             int
+	quotaCode         string
+	listPageSize      int64
+	listPages         []int64
+	omitTotalCount    bool
+	wrongFingerprint  bool
+}
+
+func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, _ *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := popErr(&f.listErrs); err != nil {
+		return nil, err
+	}
+	if f.listPageSize <= 0 {
+		return &esa.ListCertificatesResponse{Body: &esa.ListCertificatesResponseBody{Result: f.entries}}, nil
+	}
+	page := int64(1)
+	if req.PageNumber != nil && *req.PageNumber > 0 {
+		page = *req.PageNumber
+	}
+	f.listPages = append(f.listPages, page)
+	start := (page - 1) * f.listPageSize
+	if start >= int64(len(f.entries)) {
+		return &esa.ListCertificatesResponse{Body: &esa.ListCertificatesResponseBody{
+			Result: nil, PageNumber: ptrInt64(page), PageSize: ptrInt64(f.listPageSize), TotalCount: ptrInt64(int64(len(f.entries))),
+		}}, nil
+	}
+	end := min(start+f.listPageSize, int64(len(f.entries)))
+	body := &esa.ListCertificatesResponseBody{
+		Result: f.entries[start:end], PageNumber: ptrInt64(page), PageSize: ptrInt64(f.listPageSize), TotalCount: ptrInt64(int64(len(f.entries))),
+	}
+	if f.omitTotalCount {
+		body.TotalCount = nil
+	}
+	return &esa.ListCertificatesResponse{Body: body}, nil
+}
+
+func (f *fakeESA) GetCertificateWithContext(ctx context.Context, req *esa.GetCertificateRequest, _ *dara.RuntimeOptions) (*esa.GetCertificateResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := popErr(&f.getErrs); err != nil {
+		return nil, err
+	}
+	certPEM, stored := f.certs[*req.Id]
+	if !stored {
+		return nil, certificateNotFound()
+	}
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil {
+		return &esa.GetCertificateResponse{Body: &esa.GetCertificateResponseBody{}}, nil
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	body := &esa.GetCertificateResponseBody{
+		Certificate: &certPEM,
+		Result: &esa.GetCertificateResponseBodyResult{
+			FingerprintSha256: ptr(fingerprint(leaf)),
+		},
+	}
+	if f.wrongFingerprint {
+		body.Result.FingerprintSha256 = ptr("00" + fingerprint(leaf)[2:])
+	}
+	if f.outerStatus {
+		body.Status = ptr(f.status)
+	} else {
+		body.Result.Status = ptr(f.status)
+	}
+	return &esa.GetCertificateResponse{Body: body}, nil
+}
+
+func (f *fakeESA) SetCertificateWithContext(ctx context.Context, req *esa.SetCertificateRequest, _ *dara.RuntimeOptions) (*esa.SetCertificateResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.events = append(f.events, "set")
+	if len(f.setErrs) > 0 {
+		err := f.setErrs[0]
+		f.setErrs = f.setErrs[1:]
+		return nil, err
+	}
+	if f.setErr != nil {
+		return nil, f.setErr
+	}
+	for _, entry := range f.entries {
+		if stringValue(entry.Name) == stringValue(req.Name) {
+			return nil, &tea.SDKError{Code: ptr("Certificate.Duplicated"), Message: ptr("certificate already exists")}
+		}
+	}
+	quota := f.quota
+	if quota == 0 {
+		quota = 5
+	}
+	if len(f.entries) >= quota {
+		code := f.quotaCode
+		if code == "" {
+			code = "CertQuotaCheckFailed"
+		}
+		return nil, fmt.Errorf("ESA request: %w", &tea.SDKError{Code: ptr(code), Message: ptr("custom certificate quota exceeded")})
+	}
+	f.sets = append(f.sets, req)
+	id := fmt.Sprintf("new-cert-%d", len(f.sets))
+	leaf, err := parseLeaf([]byte(*req.Certificate))
+	if err != nil {
+		return nil, err
+	}
+	f.certs[id] = *req.Certificate
+	entry := testEntry(id, leaf)
+	entry.Name = req.Name
+	entry.CreateTime = ptr(time.Now().UTC().Format("2006-01-02 15:04:05"))
+	f.entries = append(f.entries, entry)
+	if len(f.setAfterStoreErrs) > 0 {
+		err := f.setAfterStoreErrs[0]
+		f.setAfterStoreErrs = f.setAfterStoreErrs[1:]
+		return nil, err
+	}
+	return &esa.SetCertificateResponse{Body: &esa.SetCertificateResponseBody{Id: &id}}, nil
+}
+
+func (f *fakeESA) DeleteCertificateWithContext(ctx context.Context, req *esa.DeleteCertificateRequest, _ *dara.RuntimeOptions) (*esa.DeleteCertificateResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := popErr(&f.deleteErrs); err != nil {
+		return nil, err
+	}
+	if f.deleteErr != nil {
+		return nil, f.deleteErr
+	}
+	index := slices.IndexFunc(f.entries, func(entry *esa.ListCertificatesResponseBodyResult) bool {
+		return stringValue(entry.Id) == *req.Id
+	})
+	if index < 0 {
+		return nil, certificateNotFound()
+	}
+	f.deletes = append(f.deletes, *req.Id)
+	f.events = append(f.events, "delete:"+*req.Id)
+	f.entries = slices.Delete(slices.Clone(f.entries), index, index+1)
+	delete(f.certs, *req.Id)
+	return &esa.DeleteCertificateResponse{Body: &esa.DeleteCertificateResponseBody{Id: req.Id}}, nil
+}
+
+func popErr(errs *[]error) error {
+	if len(*errs) == 0 {
+		return nil
+	}
+	err := (*errs)[0]
+	*errs = (*errs)[1:]
+	return err
+}
+
+func certificateNotFound() error {
+	return &tea.SDKError{Code: ptr("Certificate.NotFound"), Message: ptr("certificate not found")}
+}
+
+func ptr(s string) *string { return &s }
+
+func ptrInt64(n int64) *int64 { return &n }
+
+func testMaterial(t *testing.T, expires time.Time) ([]byte, []byte, *x509.Certificate) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(expires.Unix()),
+		Subject:      pkix.Name{CommonName: "example.com"},
+		DNSNames:     []string{"example.com", "*.example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     expires,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), leaf
+}
+
+func testEntry(id string, leaf *x509.Certificate) *esa.ListCertificatesResponseBodyResult {
+	return &esa.ListCertificatesResponseBodyResult{
+		Id:                ptr(id),
+		Type:              ptr("upload"),
+		SAN:               ptr(strings.Join(leaf.DNSNames, ",")),
+		FingerprintSha256: ptr(fingerprint(leaf)),
+		Status:            ptr("OK"),
+	}
+}
+
+func testAction(api *fakeESA) *Action {
+	return &Action{cfg: &config.AliESAAction{SiteID: 123}, client: api}
+}
+
+func testCertificate() *config.ClientCertificate {
+	return &config.ClientCertificate{Name: "web", Domains: []string{"*.example.com", "example.com"}}
+}
+
+func TestNewUsesRegionalEndpoint(t *testing.T) {
+	action, err := New(&config.AliESAAction{SiteID: 123}, &config.AliESAProfile{
+		AccessKeyID: "id", AccessKeySecret: "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := action.client.(*esa.Client)
+	if got := stringValue(api.Endpoint); got != "esa.cn-hangzhou.aliyuncs.com" {
+		t.Fatalf("endpoint = %q, want Hangzhou public endpoint", got)
+	}
+	if got := stringValue(api.RegionId); got != defaultRegionID {
+		t.Fatalf("region = %q, want %q", got, defaultRegionID)
+	}
+}
+
+func TestNewUsesConfiguredEndpointAndRegion(t *testing.T) {
+	action, err := New(&config.AliESAAction{SiteID: 123}, &config.AliESAProfile{
+		AccessKeyID: "id", AccessKeySecret: "secret",
+		RegionID: "ap-southeast-1", Endpoint: "esa-vpc.ap-southeast-1.aliyuncs.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := action.client.(*esa.Client)
+	if got := stringValue(api.Endpoint); got != "esa-vpc.ap-southeast-1.aliyuncs.com" {
+		t.Fatalf("endpoint = %q, want configured VPC endpoint", got)
+	}
+	if got := stringValue(api.RegionId); got != "ap-southeast-1" {
+		t.Fatalf("region = %q, want ap-southeast-1", got)
+	}
+}
+
+func TestNewDerivesEndpointFromRegion(t *testing.T) {
+	action, err := New(&config.AliESAAction{SiteID: 123}, &config.AliESAProfile{
+		AccessKeyID: "id", AccessKeySecret: "secret", RegionID: "ap-southeast-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := action.client.(*esa.Client)
+	if got := stringValue(api.Endpoint); got != "esa.ap-southeast-1.aliyuncs.com" {
+		t.Fatalf("endpoint = %q, want Singapore public endpoint", got)
+	}
+}
+
+func TestUploadNewCertificate(t *testing.T) {
+	fullchain, key, leaf := testMaterial(t, time.Now().Add(48*time.Hour))
+	api := &fakeESA{certs: map[string]string{}, status: "OK"}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.sets) != 1 || api.sets[0].Id != nil || *api.sets[0].SiteId != 123 ||
+		*api.sets[0].Type != "upload" || *api.sets[0].Name != "certdx-123-"+fingerprint(leaf)[:12] {
+		t.Fatalf("unexpected SetCertificate request: %+v", api.sets)
+	}
+}
+
+func TestListCertificatesFollowsServerPageSize(t *testing.T) {
+	api := &fakeESA{listPageSize: 2}
+	for i := 0; i < 5; i++ {
+		api.entries = append(api.entries, &esa.ListCertificatesResponseBodyResult{Id: ptr(fmt.Sprintf("cert-%d", i))})
+	}
+
+	entries, err := testAction(api).listCertificates(context.Background())
+	if err != nil {
+		t.Fatalf("listCertificates: %v", err)
+	}
+	if len(entries) != len(api.entries) {
+		t.Fatalf("got %d entries, want %d", len(entries), len(api.entries))
+	}
+	if got := fmt.Sprint(api.listPages); got != "[1 2 3]" {
+		t.Fatalf("requested pages %s, want [1 2 3]", got)
+	}
+}
+
+func TestCloudCertificateIsLeftAlone(t *testing.T) {
+	cloudPEM, _, cloudLeaf := testMaterial(t, time.Now().Add(24*time.Hour))
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	cloud := testEntry("cloud-cert", cloudLeaf)
+	cloud.Type = ptr("cas")
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{cloud},
+		certs:   map[string]string{"cloud-cert": string(cloudPEM)},
+		status:  "OK",
+	}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.sets) != 1 || api.sets[0].Id != nil || api.certs["cloud-cert"] != string(cloudPEM) {
+		t.Fatalf("cloud certificate should remain intact; requests: %+v", api.sets)
+	}
+}
+
+func TestUploadNewVersionWithoutOverwritingOld(t *testing.T) {
+	oldPEM, _, oldLeaf := testMaterial(t, time.Now().Add(24*time.Hour))
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	old := testEntry("old-cert", oldLeaf)
+	old.Name = ptr("certdx-123-web-old")
+	old.CreateTime = ptr("2026-01-01 00:00:00")
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{old},
+		certs:   map[string]string{"old-cert": string(oldPEM)},
+		status:  "OK",
+	}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.sets) != 1 || api.sets[0].Id != nil || api.certs["old-cert"] != string(oldPEM) {
+		t.Fatalf("expected a new certificate while preserving the old one, got %+v", api.sets)
+	}
+}
+
+func TestAlreadyStoredCertificateSkipsUpload(t *testing.T) {
+	fullchain, key, leaf := testMaterial(t, time.Now().Add(48*time.Hour))
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{testEntry("stored", leaf)},
+		certs:   map[string]string{"stored": string(fullchain)},
+		status:  "OK",
+	}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.sets) != 0 {
+		t.Fatalf("already stored certificate uploaded again: %+v", api.sets)
+	}
+}
+
+func TestRefuseToReplaceNewerCertificate(t *testing.T) {
+	oldPEM, _, oldLeaf := testMaterial(t, time.Now().Add(72*time.Hour))
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{testEntry("newer", oldLeaf)},
+		certs:   map[string]string{"newer": string(oldPEM)},
+	}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "expires no earlier") || len(api.sets) != 0 {
+		t.Fatalf("expected downgrade rejection, got err=%v sets=%d", err, len(api.sets))
+	}
+}
+
+func TestExactMatchWinsOverEqualExpirySibling(t *testing.T) {
+	expires := time.Now().Add(48 * time.Hour)
+	fullchain, key, leaf := testMaterial(t, expires)
+	siblingPEM, _, siblingLeaf := testMaterial(t, expires)
+	for _, missingFingerprint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing_fingerprint=%t", missingFingerprint), func(t *testing.T) {
+			exact := testEntry("exact", leaf)
+			if missingFingerprint {
+				exact.FingerprintSha256 = nil
+			}
+			api := &fakeESA{
+				entries: []*esa.ListCertificatesResponseBodyResult{testEntry("sibling", siblingLeaf), exact},
+				certs:   map[string]string{"sibling": string(siblingPEM), "exact": string(fullchain)},
+				status:  "OK",
+			}
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if len(api.sets) != 0 {
+				t.Fatalf("exact certificate was uploaded again: %+v", api.sets)
+			}
+		})
+	}
+}
+
+func TestCertificateFailureIsReported(t *testing.T) {
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	api := &fakeESA{certs: map[string]string{}, status: "ApplyFailed"}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "ApplyFailed") || !retry.IsPermanent(err) {
+		t.Fatalf("expected failed ESA status, got %v", err)
+	}
+}
+
+func TestTopLevelCertificateStatusIsAccepted(t *testing.T) {
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	api := &fakeESA{certs: map[string]string{}, status: "OK", outerStatus: true}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func managedEntries(t *testing.T, n int) (*fakeESA, []byte, []byte) {
+	t.Helper()
+	oldPEM, _, oldLeaf := testMaterial(t, time.Now().Add(24*time.Hour))
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	api := &fakeESA{certs: make(map[string]string), status: "OK"}
+	for i := 1; i <= n; i++ {
+		id := fmt.Sprintf("old-%d", i)
+		entry := testEntry(id, oldLeaf)
+		entry.Name = ptr(fmt.Sprintf("certdx-123-web-version-%d", i))
+		entry.CreateTime = ptr(fmt.Sprintf("2026-01-%02d 00:00:00", i))
+		api.entries = append(api.entries, entry)
+		api.certs[id] = string(oldPEM)
+	}
+	return api, fullchain, key
+}
+
+func TestQuotaPrunesOldestBeforeAndAfterUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 4)
+	manual := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("manual"), Type: ptr("upload"), Name: ptr("operator-upload"),
+		SAN: ptr("other.example.com"),
+	}
+	api.entries = append(api.entries, manual)
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.events, ","); got != "set,delete:old-1,set,delete:old-2" {
+		t.Fatalf("unexpected operation order: %s", got)
+	}
+	if len(api.entries) != 4 {
+		t.Fatalf("expected three certdx certificates and the manual upload, got %d entries", len(api.entries))
+	}
+	if !slices.Contains(api.entries, manual) {
+		t.Fatal("manual certificate was removed")
+	}
+	for _, id := range []string{"old-3", "old-4", "new-cert-1"} {
+		if _, ok := api.certs[id]; !ok {
+			t.Fatalf("certificate %s was unexpectedly deleted", id)
+		}
+	}
+}
+
+func TestFreeQuotaRecoversByDeletingOneOldVersion(t *testing.T) {
+	for _, code := range []string{"CertQuotaCheckFailed", "QuotaExceeded"} {
+		t.Run(code, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 2)
+			api.quota, api.quotaCode = 2, code
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.events, ","); got != "set,delete:old-1,set" {
+				t.Fatalf("unexpected Free-plan upload sequence: %s", got)
+			}
+		})
+	}
+}
+
+func TestReducedQuotaRetiresOnlyAsManyOldVersionsAsNeeded(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.quota = 2
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old-1,old-2,old-3,old-4" {
+		t.Fatalf("deleted %s, want four obsolete versions", got)
+	}
+	if len(api.entries) != 2 {
+		t.Fatalf("retained %d certificates above quota 2", len(api.entries))
+	}
+}
+
+func TestHigherQuotaDoesNotDeleteBeforeUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.quota = 10
+	action := testAction(api)
+	action.cfg.RetainCount = 10
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.events, ","); got != "set" {
+		t.Fatalf("unnecessary deletion at higher quota: %s", got)
+	}
+}
+
+func TestQuotaPreservesLatestCertificateForOtherSANs(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 4)
+	other := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("other-domain"), Type: ptr("upload"), Name: ptr("certdx-123-other-domain"),
+		SAN: ptr("other.example.com"), CreateTime: ptr("2025-01-01 00:00:00"),
+	}
+	api.entries = append(api.entries, other)
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old-1,old-2,old-3" {
+		t.Fatalf("deleted %s; expected only old versions of the updated SANs", got)
+	}
+	if !slices.Contains(api.entries, other) {
+		t.Fatal("the only certdx certificate for another SAN set was deleted")
+	}
+}
+
+func TestStoredCertificateIsReusedAndOldVersionsPruned(t *testing.T) {
+	api, _, _ := managedEntries(t, 4)
+	fullchain, key, leaf := testMaterial(t, time.Now().Add(48*time.Hour))
+	api.entries[3].FingerprintSha256 = ptr(fingerprint(leaf))
+	api.certs["old-4"] = string(fullchain)
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.sets) != 0 || strings.Join(api.deletes, ",") != "old-1" {
+		t.Fatalf("unexpected upload or cleanup: sets=%d deletes=%v", len(api.sets), api.deletes)
+	}
+}
+
+func TestConfiguredRetainCount(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 4)
+	api.entries[2].Name = ptr("certdx-123-another-action-version")
+	action := testAction(api)
+	action.cfg.RetainCount = 2
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old-1,old-2,old-3" {
+		t.Fatalf("configured retention deleted %s, want three oldest site uploads", got)
+	}
+	if len(api.entries) != 2 {
+		t.Fatalf("retained %d certificates, want 2", len(api.entries))
+	}
+}
+
+func TestCleanupKeepsLatestUploadForEachSANSetWhenGroupsExceedRetainCount(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	other := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("other-domain"), Type: ptr("upload"), Name: ptr("certdx-123-other-domain"),
+		SAN: ptr("other.example.com"), CreateTime: ptr("2025-01-01 00:00:00"),
+	}
+	api.entries = append(api.entries, other)
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("confirmed upload should succeed when safe candidates are fewer than retain target: %v", err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old-1" {
+		t.Fatalf("deleted %s, want only the old version of the updated SAN set", got)
+	}
+	if !slices.Contains(api.entries, other) {
+		t.Fatal("the latest certificate for another SAN set was deleted")
+	}
+}
+
+func TestCleanupProtectsLatestHealthyCertificateWhenNewerUploadFailed(t *testing.T) {
+	api := &fakeESA{certs: make(map[string]string), status: "OK"}
+	old := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("working"), Type: ptr("upload"), Name: ptr("certdx-123-web-old"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-01 00:00:00"),
+	}
+	failed := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("failed"), Type: ptr("upload"), Name: ptr("certdx-123-web-new"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("ApplyFailed"), CreateTime: ptr("2026-01-02 00:00:00"),
+	}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{old, failed}
+
+	if _, err := testAction(api).deleteOldest(context.Background(), api.entries, 1, ""); err != nil {
+		t.Fatalf("deleteOldest: %v", err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "failed" {
+		t.Fatalf("deleted %s, want the failed newest upload", got)
+	}
+}
+
+func TestCleanupNeverDeletesProtectedCertificate(t *testing.T) {
+	api := &fakeESA{certs: make(map[string]string), status: "OK"}
+	old := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("old"), Type: ptr("upload"), Name: ptr("certdx-123-web-old"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-01 00:00:00"),
+	}
+	protected := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("a-current"), Type: ptr("upload"), Name: ptr("certdx-123-web-current"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-02 00:00:00"),
+	}
+	// The sibling sorts after the protected upload, so it is the group's latest
+	// and only the protected ID can keep the current upload from being deleted.
+	latestSibling := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("z-sibling"), Type: ptr("upload"), Name: ptr("certdx-123-web-sibling"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-02 00:00:00"),
+	}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{old, protected, latestSibling}
+
+	deleted, err := testAction(api).deleteOldestBestEffort(context.Background(), api.entries, 2, "a-current")
+	if err != nil {
+		t.Fatalf("deleteOldestBestEffort: %v", err)
+	}
+	if !slices.Equal(deleted, []string{"old"}) {
+		t.Fatalf("deleted %v, want only old while keeping protected a-current and latest z-sibling", deleted)
+	}
+}
+
+func retentionEntry(id, san, status, created string) *esa.ListCertificatesResponseBodyResult {
+	return &esa.ListCertificatesResponseBodyResult{
+		Id: ptr(id), Type: ptr("upload"), Name: ptr("certdx-123-" + id),
+		SAN: ptr(san), Status: ptr(status), CreateTime: ptr(created),
+	}
+}
+
+func TestCleanupKeepsInProgressUploadOfAnotherSANSet(t *testing.T) {
+	for _, status := range []string{"Applying", ""} {
+		t.Run("status="+status, func(t *testing.T) {
+			api := &fakeESA{certs: map[string]string{}, status: "OK"}
+			api.entries = []*esa.ListCertificatesResponseBodyResult{
+				retentionEntry("a-old", "a.example.com", "OK", "2026-01-01 00:00:00"),
+				retentionEntry("b-old", "b.example.com", "OK", "2026-01-01 00:00:01"),
+				retentionEntry("a-new", "a.example.com", status, "2026-02-01 00:00:00"),
+				retentionEntry("b-new", "b.example.com", "OK", "2026-02-01 00:00:01"),
+			}
+			action := testAction(api)
+			action.cfg.RetainCount = 1
+			if err := action.cleanup(context.Background(), "b-new"); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "b-old" {
+				t.Fatalf("deleted %s, want only b-old", got)
+			}
+		})
+	}
+}
+
+func TestCleanupRetiresDeadUploadsBeforeRollbackVersions(t *testing.T) {
+	api := &fakeESA{certs: map[string]string{}, status: "OK"}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{
+		retentionEntry("rollback", "a.example.com", "OK", "2026-01-01 00:00:00"),
+		retentionEntry("latest", "a.example.com", "OK", "2026-01-02 00:00:00"),
+		retentionEntry("failed", "a.example.com", "ApplyFailed", "2026-01-03 00:00:00"),
+	}
+	if _, err := testAction(api).deleteOldest(context.Background(), api.entries, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "failed" {
+		t.Fatalf("deleted %s, want the failed upload rather than the usable rollback", got)
+	}
+}
+
+func TestQuotaRetiresTerminalUploadWithoutNewerVersion(t *testing.T) {
+	for _, status := range []string{"Expired", "ApplyFailed", "Canceled"} {
+		t.Run("same SAN set "+status, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 1)
+			api.entries[0].Status = ptr(status)
+			api.entries = append(api.entries, retentionEntry("other", "other.example.com", "OK", "2026-02-01 00:00:00"))
+			api.quota = 2
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "old-1" {
+				t.Fatalf("deleted %s, want only the %s upload", got, status)
+			}
+		})
+		t.Run("retired SAN set "+status, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 1)
+			api.entries = append(api.entries, retentionEntry("retired", "retired.example.com", status, "2026-02-01 00:00:00"))
+			api.quota = 2
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "retired" {
+				t.Fatalf("deleted %s, want only the %s upload", got, status)
+			}
+		})
+	}
+}
+
+func TestQuotaFailsWhenEveryUploadIsTheHealthyLatestOfItsSANSet(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	api.entries = append(api.entries, retentionEntry("other", "other.example.com", "OK", "2026-02-01 00:00:00"))
+	api.quota = 2
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "cannot free ESA upload slot") {
+		t.Fatalf("Update error = %v, want a quota failure", err)
+	}
+	if len(api.deletes) != 0 || len(api.sets) != 0 {
+		t.Fatalf("deletes = %v, uploads = %d; want neither", api.deletes, len(api.sets))
+	}
+}
+
+func TestCleanupDeleteFailureDoesNotFailConfirmedUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 2)
+	api.deleteErr = errors.New("cleanup permission denied")
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("confirmed upload should succeed when cleanup delete fails: %v", err)
+	}
+	if len(api.sets) != 1 {
+		t.Fatalf("SetCertificate attempts = %d, want one successful upload", len(api.sets))
+	}
+}
+
+func TestNonQuotaUploadFailureDoesNotDelete(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.setErr = errors.New("upload failed")
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "upload failed") {
+		t.Fatalf("expected upload error, got %v", err)
+	}
+	if got := strings.Join(api.events, ","); got != "set" {
+		t.Fatalf("unexpected operations after upload failure: %s", got)
+	}
+}
+
+func TestSetCertificateRetriesTransientErrors(t *testing.T) {
+	oldBackoff := transientBackoff
+	transientBackoff = 0
+	t.Cleanup(func() { transientBackoff = oldBackoff })
+
+	api := &fakeESA{
+		certs: map[string]string{}, status: "OK",
+		setErrs: []error{
+			&tea.SDKError{Code: ptr("LockFailed"), Message: ptr("site is locked")},
+			&tea.SDKError{Code: ptr("InternalException"), Message: ptr("try again")},
+		},
+	}
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("transient SetCertificate errors should be retried: %v", err)
+	}
+	if len(api.sets) != 1 || len(api.events) != 3 {
+		t.Fatalf("SetCertificate attempts = %d, events = %v; want 3 attempts and one successful upload", len(api.sets), api.events)
+	}
+}
+
+func TestDuplicateUploadAfterLostResponseIsConfirmed(t *testing.T) {
+	oldBackoff := transientBackoff
+	transientBackoff = 0
+	t.Cleanup(func() { transientBackoff = oldBackoff })
+
+	api := &fakeESA{
+		certs: map[string]string{}, status: "OK",
+		setAfterStoreErrs: []error{
+			&tea.SDKError{Code: ptr("InternalException"), Message: ptr("response lost")},
+		},
+	}
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("stored upload should be recovered after duplicate response: %v", err)
+	}
+	if len(api.sets) != 1 || len(api.events) != 2 {
+		t.Fatalf("SetCertificate calls = %d, events = %v; want one stored upload and one duplicate retry", len(api.sets), api.events)
+	}
+}
+
+func TestOtherQuotaErrorDoesNotDelete(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.setErr = &tea.SDKError{Code: ptr("QuotaNotExist"), Message: ptr("plan is not active")}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "QuotaNotExist") {
+		t.Fatalf("expected original API error, got %v", err)
+	}
+	if got := strings.Join(api.events, ","); got != "set" {
+		t.Fatalf("unexpected operations after non-capacity error: %s", got)
+	}
+}
+
+func TestSetCertificateErrorHasOneOperationPrefix(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	api.setErr = &tea.SDKError{Code: ptr("AuthFailure"), Message: ptr("denied")}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || strings.Count(err.Error(), "SetCertificate") != 1 {
+		t.Fatalf("error = %v, want one SetCertificate prefix", err)
+	}
+}
+
+func TestQuotaDoesNotDeleteLastManagedOrManualUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	for i := 0; i < 4; i++ {
+		api.entries = append(api.entries, &esa.ListCertificatesResponseBodyResult{
+			Id: ptr(fmt.Sprintf("manual-%d", i)), Name: ptr("operator-upload"), Type: ptr("upload"),
+		})
+	}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "only 0 old versions can be retired safely") {
+		t.Fatalf("expected quota safety error, got %v", err)
+	}
+	if got := strings.Join(api.events, ","); got != "set" {
+		t.Fatalf("unexpected operations: %v", api.events)
+	}
+}
+
+func TestDeleteFailureStopsUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 5)
+	api.deleteErr = errors.New("permission denied")
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "permission denied") || len(api.sets) != 0 {
+		t.Fatalf("expected deletion error before upload, got err=%v sets=%d", err, len(api.sets))
+	}
+}
+
+// peerDeletesDuringUpload simulates another host retiring a certificate after
+// this action listed the site: the certificate is gone by the time the action
+// tries to delete it.
+type peerDeletesDuringUpload struct {
+	*fakeESA
+	id   string
+	done bool
+}
+
+func (p *peerDeletesDuringUpload) SetCertificateWithContext(ctx context.Context, req *esa.SetCertificateRequest, opts *dara.RuntimeOptions) (*esa.SetCertificateResponse, error) {
+	resp, err := p.fakeESA.SetCertificateWithContext(ctx, req, opts)
+	if !p.done {
+		p.done = true
+		p.entries = slices.DeleteFunc(slices.Clone(p.entries), func(entry *esa.ListCertificatesResponseBodyResult) bool {
+			return stringValue(entry.Id) == p.id
+		})
+		delete(p.certs, p.id)
+	}
+	return resp, err
+}
+
+func TestQuotaTreatsPeerDeletionAsFreedSlot(t *testing.T) {
+	fake, fullchain, key := managedEntries(t, 3)
+	fake.quota = 3
+	api := &peerDeletesDuringUpload{fakeESA: fake, id: "old-1"}
+	action := &Action{cfg: &config.AliESAAction{SiteID: 123}, client: api}
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("a certificate deleted by a peer should count as freed: %v", err)
+	}
+	if len(fake.sets) != 1 || len(fake.deletes) != 0 {
+		t.Fatalf("uploads = %d, deletes = %v; want one upload and no further deletes", len(fake.sets), fake.deletes)
+	}
+}
+
+func TestSiblingDeletedAfterListingDoesNotBlockUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	delete(api.certs, "old-1")
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("a sibling that no longer exists should not block the upload: %v", err)
+	}
+	if len(api.sets) != 1 {
+		t.Fatalf("uploads = %d, want 1", len(api.sets))
+	}
+}
+
+// slowList widens the window in which unserialized actions would overlap.
+type slowList struct {
+	*fakeESA
+	active, peak atomic.Int32
+}
+
+func (s *slowList) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, opts *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
+	active := s.active.Add(1)
+	defer s.active.Add(-1)
+	for {
+		peak := s.peak.Load()
+		if active <= peak || s.peak.CompareAndSwap(peak, active) {
+			break
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	return s.fakeESA.ListCertificatesWithContext(ctx, req, opts)
+}
+
+func TestActionsOnOneSiteAreSerialized(t *testing.T) {
+	fake := &fakeESA{certs: map[string]string{}, status: "OK"}
+	api := &slowList{fakeESA: fake}
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Go(func() {
+			action := &Action{cfg: &config.AliESAAction{SiteID: 123}, client: api}
+			errs[i] = action.Update(context.Background(), fullchain, key, testCertificate())
+		})
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
+	if peak := api.peak.Load(); peak != 1 {
+		t.Fatalf("%d actions used the site at once, want 1", peak)
+	}
+	if len(fake.sets) != 1 {
+		t.Fatalf("uploads = %d, want the second action to reuse the first upload", len(fake.sets))
+	}
+}
+
+func TestWaitingForSiteLockHonorsContext(t *testing.T) {
+	unlock, err := lockSite(context.Background(), 987)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := lockSite(ctx, 987); !errors.Is(err, context.Canceled) {
+		t.Fatalf("lockSite error = %v, want context.Canceled", err)
+	}
+}
+
+func fastESARetries(t *testing.T) {
+	t.Helper()
+	backoff, every, timeout := transientBackoff, confirmEvery, confirmTimeout
+	transientBackoff, confirmEvery, confirmTimeout = 0, time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { transientBackoff, confirmEvery, confirmTimeout = backoff, every, timeout })
+}
+
+func TestTransientErrorsAreRetriedOnEveryAPICall(t *testing.T) {
+	fastESARetries(t)
+	throttled := &tea.SDKError{Code: ptr("Throttling.User"), Message: ptr("slow down")}
+	cases := map[string]func(*fakeESA){
+		"ListCertificates":  func(f *fakeESA) { f.listErrs = []error{throttled} },
+		"GetCertificate":    func(f *fakeESA) { f.getErrs = []error{throttled} },
+		"DeleteCertificate": func(f *fakeESA) { f.deleteErrs = []error{throttled} },
+	}
+	for name, inject := range cases {
+		t.Run(name, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 2)
+			action := testAction(api)
+			action.cfg.RetainCount = 1
+			inject(api)
+			if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatalf("one throttled %s call should be retried: %v", name, err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "old-1,old-2" {
+				t.Fatalf("deleted %s, want old-1,old-2", got)
+			}
+		})
+	}
+}
+
+func TestIsTransientESAError(t *testing.T) {
+	status := func(code int) *int { return &code }
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"lock", &tea.SDKError{Code: ptr("LockFailed")}, true},
+		{"internal exception", &tea.SDKError{Code: ptr("InternalException")}, true},
+		{"internal error", &tea.SDKError{Code: ptr("InternalError")}, true},
+		{"unavailable", &tea.SDKError{Code: ptr("ServiceUnavailable")}, true},
+		{"throttling", &tea.SDKError{Code: ptr("Throttling")}, true},
+		{"throttling api", &tea.SDKError{Code: ptr("Throttling.Api")}, true},
+		{"wrapped 503", fmt.Errorf("call: %w", &tea.SDKError{Code: ptr("Other"), StatusCode: status(503)}), true},
+		{"client error", &tea.SDKError{Code: ptr("Forbidden"), StatusCode: status(403)}, false},
+		{"not found", certificateNotFound(), false},
+		{"plain error", errors.New("boom"), false},
+	} {
+		if got := isTransientESAError(tc.err); got != tc.want {
+			t.Errorf("%s: isTransientESAError = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestConfirmKeepsPollingThroughTransientErrors(t *testing.T) {
+	fastESARetries(t)
+	api, fullchain, key := managedEntries(t, 0)
+	busy := &tea.SDKError{Code: ptr("InternalException"), Message: ptr("try later")}
+	api.getErrs = []error{busy, busy}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("confirm should outlast transient errors: %v", err)
+	}
+	if len(api.getErrs) != 0 {
+		t.Fatalf("%d injected errors were not consumed", len(api.getErrs))
+	}
+}
+
+func TestConfirmStopsOnPermanentGetError(t *testing.T) {
+	fastESARetries(t)
+	api, fullchain, key := managedEntries(t, 0)
+	api.getErrs = []error{&tea.SDKError{Code: ptr("Forbidden"), Message: ptr("denied")}}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "Forbidden") {
+		t.Fatalf("Update error = %v, want the Get failure", err)
+	}
+}
+
+func TestFailedConfirmDoesNotPruneOldVersions(t *testing.T) {
+	fastESARetries(t)
+	storedEntry := func(t *testing.T) (*fakeESA, []byte, []byte) {
+		api, _, _ := managedEntries(t, 3)
+		fullchain, key, leaf := testMaterial(t, time.Now().Add(48*time.Hour))
+		entry := testEntry("stored", leaf)
+		entry.Name = ptr("certdx-123-stored")
+		entry.CreateTime = ptr("2026-02-01 00:00:00")
+		api.entries = append(api.entries, entry)
+		api.certs["stored"] = string(fullchain)
+		return api, fullchain, key
+	}
+	for name, setup := range map[string]func(*testing.T) (*fakeESA, []byte, []byte){
+		"new upload": func(t *testing.T) (*fakeESA, []byte, []byte) { return managedEntries(t, 3) },
+		"stored":     storedEntry,
+	} {
+		t.Run(name, func(t *testing.T) {
+			api, fullchain, key := setup(t)
+			api.status = "ApplyFailed"
+			action := testAction(api)
+			action.cfg.RetainCount = 1
+			err := action.Update(context.Background(), fullchain, key, testCertificate())
+			if err == nil || !retry.IsPermanent(err) {
+				t.Fatalf("Update error = %v, want a permanent failure", err)
+			}
+			if len(api.deletes) != 0 {
+				t.Fatalf("deleted %v after a failed confirm", api.deletes)
+			}
+		})
+	}
+}
+
+func TestConfirmRejectsDifferentFingerprint(t *testing.T) {
+	fastESARetries(t)
+	api, fullchain, key := managedEntries(t, 3)
+	api.wrongFingerprint = true
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+	// Sibling reads use the fake's real certificates, so only confirm sees the
+	// mismatch once the upload's ID is polled.
+	err := action.Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "timed out confirming") || !retry.IsPermanent(err) {
+		t.Fatalf("Update error = %v, want a permanent confirm timeout", err)
+	}
+	if len(api.deletes) != 0 {
+		t.Fatalf("deleted %v without confirming the upload", api.deletes)
+	}
+}
+
+func TestConfirmStatusHandling(t *testing.T) {
+	fastESARetries(t)
+	for status, wantErr := range map[string]bool{
+		"OK": false, "Expiring": false, "Expired": true, "ApplyFailed": true, "Canceled": true,
+	} {
+		t.Run(status, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 0)
+			api.status = status
+			err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+			if wantErr != (err != nil) {
+				t.Fatalf("Update error = %v, want error: %v", err, wantErr)
+			}
+			if wantErr && (!strings.Contains(err.Error(), status) || !retry.IsPermanent(err)) {
+				t.Fatalf("Update error = %v, want a permanent %s failure", err, status)
+			}
+		})
+	}
+}
+
+func TestUpdateRejectsUnusableMaterial(t *testing.T) {
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	expired, expiredKey, _ := testMaterial(t, time.Now().Add(-time.Minute))
+	otherDomains := &config.ClientCertificate{Name: "web", Domains: []string{"other.example.com"}}
+	for name, tc := range map[string]struct {
+		chain, key []byte
+		cert       *config.ClientCertificate
+		want       string
+	}{
+		"SAN mismatch": {fullchain, key, otherDomains, "do not match"},
+		"expired":      {expired, expiredKey, testCertificate(), "has expired"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := &fakeESA{certs: map[string]string{}, status: "OK"}
+			err := testAction(api).Update(context.Background(), tc.chain, tc.key, tc.cert)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Update error = %v, want %q", err, tc.want)
+			}
+			if len(api.events) != 0 {
+				t.Fatalf("unexpected API writes: %v", api.events)
+			}
+		})
+	}
+}
+
+func TestRefuseEqualExpirySibling(t *testing.T) {
+	expires := time.Now().Add(48 * time.Hour)
+	siblingPEM, _, sibling := testMaterial(t, expires)
+	fullchain, key, _ := testMaterial(t, expires)
+	entry := testEntry("sibling", sibling)
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{entry},
+		certs:   map[string]string{"sibling": string(siblingPEM)},
+		status:  "OK",
+	}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "expires no earlier") || len(api.sets) != 0 {
+		t.Fatalf("Update error = %v, uploads = %d; want a refused upload", err, len(api.sets))
+	}
+}
+
+func TestCloudCertificateDoesNotTriggerDowngradeGuard(t *testing.T) {
+	cloudPEM, _, cloudLeaf := testMaterial(t, time.Now().Add(72*time.Hour))
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	cloud := testEntry("cloud-cert", cloudLeaf)
+	cloud.Type = ptr("cas")
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{cloud},
+		certs:   map[string]string{"cloud-cert": string(cloudPEM)},
+		status:  "OK",
+	}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("a later-expiring cas certificate should not block the upload: %v", err)
+	}
+}
+
+func TestRetentionManagesOnlyThisSitesUploads(t *testing.T) {
+	cloud := retentionEntry("cloud", "a.example.com", "OK", "2026-01-01 00:00:00")
+	cloud.Type = ptr("cas")
+	otherSite := retentionEntry("other-site", "a.example.com", "OK", "2026-01-01 00:00:01")
+	otherSite.Name = ptr("certdx-999-other-site")
+	api := &fakeESA{certs: map[string]string{}, status: "OK"}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{
+		cloud, otherSite,
+		retentionEntry("old", "a.example.com", "OK", "2026-01-02 00:00:00"),
+		retentionEntry("current", "a.example.com", "OK", "2026-01-03 00:00:00"),
+	}
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+	if err := action.cleanup(context.Background(), "current"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old" {
+		t.Fatalf("deleted %s, want only this site's old upload", got)
+	}
+}
+
+func TestCleanupIsBestEffort(t *testing.T) {
+	entries := func() []*esa.ListCertificatesResponseBodyResult {
+		return []*esa.ListCertificatesResponseBodyResult{
+			retentionEntry("old", "a.example.com", "OK", "2026-01-01 00:00:00"),
+			retentionEntry("latest", "a.example.com", "OK", "2026-01-02 00:00:00"),
+		}
+	}
+	t.Run("list failure", func(t *testing.T) {
+		api := &fakeESA{certs: map[string]string{}, entries: entries()}
+		api.listErrs = []error{errors.New("list failed")}
+		action := testAction(api)
+		action.cfg.RetainCount = 1
+		if err := action.cleanup(context.Background(), "latest"); err != nil {
+			t.Fatalf("cleanup should not fail a confirmed upload: %v", err)
+		}
+		if len(api.deletes) != 0 {
+			t.Fatalf("deleted %v without a listing", api.deletes)
+		}
+	})
+	t.Run("current upload not listed", func(t *testing.T) {
+		api := &fakeESA{certs: map[string]string{}, entries: entries()}
+		action := testAction(api)
+		action.cfg.RetainCount = 1
+		if err := action.cleanup(context.Background(), "missing"); err != nil {
+			t.Fatalf("cleanup should not fail a confirmed upload: %v", err)
+		}
+		if len(api.deletes) != 0 {
+			t.Fatalf("deleted %v though the current upload is not listed", api.deletes)
+		}
+	})
+}
+
+func TestListCertificatesWithoutTotalCountFollowsServerPageSize(t *testing.T) {
+	api, _, _ := managedEntries(t, 5)
+	api.listPageSize, api.omitTotalCount = 2, true
+	entries, err := testAction(api).listCertificates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("listed %d entries from pages %v, want 5", len(entries), api.listPages)
+	}
+}

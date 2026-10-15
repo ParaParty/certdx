@@ -10,7 +10,16 @@ require (
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.9.1 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
+	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.16 // indirect
+	github.com/alibabacloud-go/debug v1.0.1 // indirect
+	github.com/alibabacloud-go/esa-20240910/v2 v2.48.0 // indirect
+	github.com/alibabacloud-go/tea v1.4.0 // indirect
+	github.com/alibabacloud-go/tea-utils/v2 v2.0.9 // indirect
+	github.com/aliyun/credentials-go v1.4.7 // indirect
+	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
@@ -42,6 +51,7 @@ require (
 	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.182 // indirect
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/ssl v1.3.147 // indirect
+	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
@@ -57,6 +67,7 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/ini.v1 v1.67.1 // indirect
 	k8s.io/api v0.37.0 // indirect
 	k8s.io/apimachinery v0.37.0 // indirect
 	k8s.io/client-go v0.37.0 // indirect

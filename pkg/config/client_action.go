@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -13,6 +14,7 @@ import (
 // list. Concrete types are selected by the `type` key at decode time.
 type UpdateActionConfig interface {
 	ActionType() string
+	OneShot() bool
 	Validate(c *ClientConfig) error
 }
 
@@ -57,6 +59,8 @@ func decodeAction(md toml.MetaData, raw toml.Primitive) (UpdateActionConfig, err
 		action = &FileAction{}
 	case UPDATE_ACTION_TENCENT_CLOUD:
 		action = &TencentCloudAction{}
+	case UPDATE_ACTION_ALI_ESA:
+		action = &AliESAAction{}
 	case UPDATE_ACTION_KUBERNETES:
 		action = &KubernetesAction{}
 	default:
@@ -83,9 +87,22 @@ func undecodedProfileKeys(md toml.MetaData) []error {
 			continue
 		}
 		seen[key[1]] = struct{}{}
+		if isKnownProfileType(key[1]) && len(key) > 2 {
+			ret = append(ret, fmt.Errorf("unsupported key in profile %s: %s", key[1], strings.Join(key[2:], ".")))
+			continue
+		}
 		ret = append(ret, fmt.Errorf("unsupported profile type: %s", key[1]))
 	}
 	return ret
+}
+
+func isKnownProfileType(name string) bool {
+	switch name {
+	case "TencentCloud", "AliESA", "Kubernetes":
+		return true
+	default:
+		return false
+	}
 }
 
 // FileAction writes the certificate to disk and optionally runs a reload command.
@@ -97,6 +114,8 @@ type FileAction struct {
 func (a *FileAction) ActionType() string {
 	return UPDATE_ACTION_FILE
 }
+
+func (a *FileAction) OneShot() bool { return true }
 
 func (a *FileAction) Validate(_ *ClientConfig) error {
 	if a.SavePath == "" {
@@ -137,6 +156,8 @@ func (a *TencentCloudAction) ActionType() string {
 	return UPDATE_ACTION_TENCENT_CLOUD
 }
 
+func (a *TencentCloudAction) OneShot() bool { return true }
+
 func (a *TencentCloudAction) Validate(c *ClientConfig) error {
 	var ret []error
 
@@ -166,6 +187,40 @@ func (a *TencentCloudAction) Validate(c *ClientConfig) error {
 	return errors.Join(ret...)
 }
 
+// AliESAAction uploads a certificate at an ESA site and retains recent versions.
+type AliESAAction struct {
+	Profile     string `toml:"profile" json:"profile,omitempty"`
+	SiteID      int64  `toml:"siteId" json:"site_id,omitempty"`
+	RetainCount int    `toml:"retainCount" json:"retain_count,omitempty"`
+}
+
+func (a *AliESAAction) ActionType() string { return UPDATE_ACTION_ALI_ESA }
+
+func (a *AliESAAction) OneShot() bool { return true }
+
+func (a *AliESAAction) Validate(c *ClientConfig) error {
+	var ret []error
+	if a.Profile == "" {
+		ret = append(ret, fmt.Errorf("aliESA update action: profile is empty"))
+	} else if _, ok := c.FindAliESAProfile(a.Profile); !ok {
+		ret = append(ret, fmt.Errorf("aliESA update action: no such profile: %s", a.Profile))
+	}
+	if a.SiteID <= 0 {
+		ret = append(ret, fmt.Errorf("aliESA update action: siteId must be positive"))
+	}
+	if a.RetainCount < 0 {
+		ret = append(ret, fmt.Errorf("aliESA update action: retainCount must not be negative"))
+	}
+	return errors.Join(ret...)
+}
+
+func (a *AliESAAction) CertificateRetainCount() int {
+	if a.RetainCount == 0 {
+		return 3
+	}
+	return a.RetainCount
+}
+
 // KubernetesAction patches annotated kubernetes.io/tls secrets in place.
 type KubernetesAction struct {
 	Profile string `toml:"profile" json:"profile,omitempty"`
@@ -174,6 +229,8 @@ type KubernetesAction struct {
 func (a *KubernetesAction) ActionType() string {
 	return UPDATE_ACTION_KUBERNETES
 }
+
+func (a *KubernetesAction) OneShot() bool { return true }
 
 func (a *KubernetesAction) Validate(c *ClientConfig) error {
 	if a.Profile == "" {
