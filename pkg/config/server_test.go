@@ -141,6 +141,40 @@ func TestDnsProviderValidateTencentCloudEmpty(t *testing.T) {
 	}
 }
 
+func TestDnsProviderAliDNSTOML(t *testing.T) {
+	var c ServerConfig
+	err := toml.Unmarshal([]byte(`
+[DnsProvider]
+type = "alidns"
+accessKeyId = "test-id"
+accessKeySecret = "test-secret"
+securityToken = "test-token"
+`), &c)
+	if err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if c.DnsProvider == nil || c.DnsProvider.Type != DnsProviderTypeAliDNS ||
+		c.DnsProvider.AccessKeyID != "test-id" || c.DnsProvider.AccessKeySecret != "test-secret" ||
+		c.DnsProvider.SecurityToken != "test-token" {
+		t.Fatal("AliDNS credentials were not decoded")
+	}
+	if err := c.DnsProvider.Validate(); err != nil {
+		t.Fatalf("valid AliDNS config: %v", err)
+	}
+}
+
+func TestDnsProviderValidateAliDNSMissingCredentials(t *testing.T) {
+	for _, p := range []DnsProvider{
+		{Type: DnsProviderTypeAliDNS},
+		{Type: DnsProviderTypeAliDNS, AccessKeyID: "test-id"},
+		{Type: DnsProviderTypeAliDNS, AccessKeySecret: "test-secret"},
+	} {
+		if err := p.Validate(); err == nil {
+			t.Fatal("expected error for missing AliDNS credentials")
+		}
+	}
+}
+
 func TestDnsProviderValidateDNSTimeout(t *testing.T) {
 	base := DnsProvider{Type: DnsProviderTypeCloudflare, Email: "a@b.com", APIKey: "key"}
 

@@ -93,9 +93,9 @@ goroutine, retried `Common.retryCount` times; a failing action never
 stops the others or the daemon.
 
 With `--quit`, the client fetches each configured certificate once, waits for
-all its update actions, and exits. `file`, `tencentCloud`, and `kubernetes` are
-all one-shot actions. Certificate fetches and actions must all succeed for exit
-status 0.
+all its update actions, and exits. `file`, `tencentCloud`, `aliESA`, and `kubernetes`
+are all one-shot actions. Certificate fetches and actions must all succeed
+for exit status 0.
 
 #### `type = "file"`
 
@@ -139,6 +139,27 @@ retried: replaying the upload cannot change the outcome.
 | `resourceTypes` | string list | One or more of `clb`, `cdn`, `waf`, `live`, `vod`, `ddos`, `tke`, `apigateway`, `tcb`, `teo`. |
 | `resourceTypesRegions` | table list | Optional per-resource-type region filter. Every `resourceType` used here must also appear in `resourceTypes`. |
 
+#### `type = "aliESA"`
+
+Uploads a new certificate version at an Alibaba Cloud ESA site using ESA's
+`SetCertificate` API. The action matches certificates by the exact SAN set,
+reuses material already stored at the site, and refuses to upload an older
+certificate over a newer one. It names uploads `certdx-<siteId>-<fingerprint prefix>` and
+caps certdx uploads across that site at `retainCount`. When the
+five-upload quota is full, it deletes only as many oldest certdx uploads as
+needed to free one slot. It never deletes non-certdx uploads or the latest
+certdx upload for another SAN set. After `GetCertificate`
+reports the new fingerprint with status `OK` or `Expiring`, it prunes excess
+older certdx uploads. This confirms ESA's certificate record, not which
+certificate every edge node currently serves; verify the live TLS endpoint
+separately when deploying to production.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `profile` | string | Name of a `[[Profile.AliESA]]` entry. |
+| `siteId` | integer | ESA site ID returned by `ListSites`. Must be positive. |
+| `retainCount` | integer | Maximum number of recent certdx uploads to retain across the site. Defaults to `3`; allowed range `1` to `5`. |
+
 #### `type = "kubernetes"`
 
 Patches `kubernetes.io/tls` secrets in place. On each update it lists
@@ -180,7 +201,7 @@ rules:
       verbs: ["list", "get", "update"]
 ```
 
-### `[[Profile.TencentCloud]]` / `[[Profile.Kubernetes]]`
+### `[[Profile.TencentCloud]]` / `[[Profile.AliESA]]` / `[[Profile.Kubernetes]]`
 
 Named credentials referenced by update actions. Names are scoped per
 profile type, so a Tencent Cloud profile and a Kubernetes profile may
@@ -191,8 +212,16 @@ share a name.
 | `[[Profile.TencentCloud]]` | `name` | Referenced by `profile` in a `tencentCloud` action. |
 | | `secretID` / `secretKey` | Tencent Cloud API credentials. Both required. |
 | | `endpoint` | Optional, defaults to `ssl.tencentcloudapi.com`. |
+| `[[Profile.AliESA]]` | `name` | Referenced by `profile` in an `aliESA` action. |
+| | `accessKeyId` / `accessKeySecret` | Alibaba Cloud credentials. Both required. |
+| | `securityToken` | Optional temporary credential token. |
+| | `regionId` | ESA API region. Defaults to `cn-hangzhou`. |
+| | `endpoint` | ESA API host. Defaults to `esa.<regionId>.aliyuncs.com`; set this explicitly for a VPC endpoint. |
 | `[[Profile.Kubernetes]]` | `name` | Referenced by `profile` in a `kubernetes` action. |
 | | `kubeConfig` | Path to a kubeconfig. Empty means in-cluster, then `$KUBECONFIG`, then `~/.kube/config`. |
+
+Alibaba Cloud lists the available ESA public and VPC hosts in its
+[service endpoint reference](https://help.aliyun.com/zh/edge-security-acceleration/esa/api-esa-2024-09-10-endpoint).
 
 Example:
 
@@ -247,7 +276,7 @@ yet up.
   action needs a known `type`.
 - `<action> update action: no such profile: <name>` — the `profile` does
   not match any entry of the matching profile type.
-- `unsupported profile type: <x>` — only `TencentCloud` and `Kubernetes`
+- `unsupported profile type: <x>` — only `TencentCloud`, `AliESA`, and `Kubernetes`
   exist under `[Profile]`.
 - `http main server url is empty` — set `Http.MainServer.url` when in HTTP mode.
 - `grpc main server url is empty` — set `GRPC.MainServer.server` when in gRPC mode.

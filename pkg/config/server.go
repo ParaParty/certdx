@@ -68,6 +68,10 @@ func (c *ServerConfig) Validate() error {
 		ret = append(ret, err)
 	}
 
+	if !c.HttpServer.Enabled && !c.GRPCSDSServer.Enabled {
+		ret = append(ret, fmt.Errorf("no server mode enabled"))
+	}
+
 	if c.needsMTLS() {
 		if err := c.MTLS.Validate(); err != nil {
 			ret = append(ret, err)
@@ -184,6 +188,11 @@ type DnsProvider struct {
 	// tencentcloud
 	SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
 	SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
+
+	// alidns
+	AccessKeyID     string `toml:"accessKeyId" json:"access_key_id,omitempty"`
+	AccessKeySecret string `toml:"accessKeySecret" json:"access_key_secret,omitempty"`
+	SecurityToken   string `toml:"securityToken" json:"security_token,omitempty"`
 }
 
 func (p *DnsProvider) Validate() error {
@@ -209,6 +218,10 @@ func (p *DnsProvider) Validate() error {
 	case DnsProviderTypeTencentCloud:
 		if p.SecretID == "" || p.SecretKey == "" {
 			return fmt.Errorf("DnsProvider TencentCloud: empty SecretID or SecretKey")
+		}
+	case DnsProviderTypeAliDNS:
+		if p.AccessKeyID == "" || p.AccessKeySecret == "" {
+			return fmt.Errorf("DnsProvider AliDNS: accessKeyId and accessKeySecret are required")
 		}
 	default:
 		return fmt.Errorf("unknown DnsProvider: %s", p.Type)

@@ -53,6 +53,21 @@ func TestTencentCloudProfileValidate(t *testing.T) {
 	}
 }
 
+func TestAliESAProfileValidate(t *testing.T) {
+	for _, p := range []AliESAProfile{
+		{},
+		{Name: "prod", AccessKeyID: "id"},
+		{Name: "prod", AccessKeySecret: "secret"},
+	} {
+		if err := p.Validate(); err == nil {
+			t.Fatal("expected invalid Ali ESA profile to be rejected")
+		}
+	}
+	if err := (&AliESAProfile{Name: "prod", AccessKeyID: "id", AccessKeySecret: "secret"}).Validate(); err != nil {
+		t.Fatalf("valid Ali ESA profile: %v", err)
+	}
+}
+
 func TestKubernetesProfileValidate(t *testing.T) {
 	if err := (&KubernetesProfile{}).Validate(); err == nil {
 		t.Fatal("expected error on missing name")
@@ -87,6 +102,10 @@ func TestClientProfilesRejectDuplicateNames(t *testing.T) {
 			{Name: "prod", SecretID: "id", SecretKey: "key"},
 			{Name: "prod", SecretID: "id2", SecretKey: "key2"},
 		},
+		AliESA: []AliESAProfile{
+			{Name: "prod", AccessKeyID: "id", AccessKeySecret: "secret"},
+			{Name: "prod", AccessKeyID: "id2", AccessKeySecret: "secret2"},
+		},
 		Kubernetes: []KubernetesProfile{
 			{Name: "cluster-a"},
 			{Name: "cluster-a"},
@@ -98,6 +117,9 @@ func TestClientProfilesRejectDuplicateNames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "duplicated tencentCloud profile name: prod") {
 		t.Errorf("missing tencentCloud duplicate error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "duplicated aliESA profile name: prod") {
+		t.Errorf("missing aliESA duplicate error: %v", err)
 	}
 	if !strings.Contains(err.Error(), "duplicated kubernetes profile name: cluster-a") {
 		t.Errorf("missing kubernetes duplicate error: %v", err)
@@ -151,6 +173,14 @@ name = "prod"
 secretID = "id"
 secretKey = "key"
 
+[[Profile.AliESA]]
+name = "esa-prod"
+accessKeyId = "ali-id"
+accessKeySecret = "ali-secret"
+securityToken = "ali-token"
+regionId = "ap-southeast-1"
+endpoint = "esa-vpc.ap-southeast-1.aliyuncs.com"
+
 [[Profile.Kubernetes]]
 name = "cluster-a"
 kubeConfig = ""
@@ -158,6 +188,12 @@ kubeConfig = ""
 
 	if len(c.Profiles.TencentCloud) != 1 || c.Profiles.TencentCloud[0].Name != "prod" {
 		t.Fatalf("tencentCloud profiles decoded as %+v", c.Profiles.TencentCloud)
+	}
+	if len(c.Profiles.AliESA) != 1 || c.Profiles.AliESA[0].Name != "esa-prod" ||
+		c.Profiles.AliESA[0].SecurityToken != "ali-token" ||
+		c.Profiles.AliESA[0].RegionID != "ap-southeast-1" ||
+		c.Profiles.AliESA[0].Endpoint != "esa-vpc.ap-southeast-1.aliyuncs.com" {
+		t.Fatal("Ali ESA profile was not decoded")
 	}
 	if len(c.Profiles.Kubernetes) != 1 || c.Profiles.Kubernetes[0].Name != "cluster-a" {
 		t.Fatalf("kubernetes profiles decoded as %+v", c.Profiles.Kubernetes)

@@ -277,6 +277,7 @@ func (c *ClientCertificate) FileAction() (*FileAction, bool) {
 // update actions reference by name. Names are scoped per profile type.
 type ClientProfiles struct {
 	TencentCloud []TencentCloudProfile `toml:"TencentCloud" json:"tencent_cloud,omitempty"`
+	AliESA       []AliESAProfile       `toml:"AliESA" json:"ali_esa,omitempty"`
 	Kubernetes   []KubernetesProfile   `toml:"Kubernetes" json:"kubernetes,omitempty"`
 }
 
@@ -294,6 +295,19 @@ func (p *ClientProfiles) Validate() error {
 			continue
 		}
 		tencentCloudNames[it.Name] = struct{}{}
+	}
+
+	aliESANames := make(map[string]struct{}, len(p.AliESA))
+	for _, it := range p.AliESA {
+		if err := it.Validate(); err != nil {
+			ret = append(ret, err)
+			continue
+		}
+		if _, dup := aliESANames[it.Name]; dup {
+			ret = append(ret, fmt.Errorf("duplicated aliESA profile name: %s", it.Name))
+			continue
+		}
+		aliESANames[it.Name] = struct{}{}
 	}
 
 	kubernetesNames := make(map[string]struct{}, len(p.Kubernetes))
@@ -329,6 +343,25 @@ func (p *TencentCloudProfile) Validate() error {
 	return nil
 }
 
+type AliESAProfile struct {
+	Name            string `toml:"name" json:"name,omitempty"`
+	AccessKeyID     string `toml:"accessKeyId" json:"access_key_id,omitempty"`
+	AccessKeySecret string `toml:"accessKeySecret" json:"access_key_secret,omitempty"`
+	SecurityToken   string `toml:"securityToken" json:"security_token,omitempty"`
+	RegionID        string `toml:"regionId" json:"region_id,omitempty"`
+	Endpoint        string `toml:"endpoint" json:"endpoint,omitempty"`
+}
+
+func (p *AliESAProfile) Validate() error {
+	if p.Name == "" {
+		return fmt.Errorf("aliESA profile has no name")
+	}
+	if p.AccessKeyID == "" || p.AccessKeySecret == "" {
+		return fmt.Errorf("aliESA profile %s: accessKeyId and accessKeySecret are required", p.Name)
+	}
+	return nil
+}
+
 type KubernetesProfile struct {
 	// KubeConfig empty means in-cluster config, then the default client-go chain.
 	KubeConfig string `toml:"kubeConfig" json:"kube_config,omitempty"`
@@ -349,6 +382,15 @@ func (c *ClientConfig) FindTencentCloudProfile(name string) (*TencentCloudProfil
 	for i := range c.Profiles.TencentCloud {
 		if c.Profiles.TencentCloud[i].Name == name {
 			return &c.Profiles.TencentCloud[i], true
+		}
+	}
+	return nil, false
+}
+
+func (c *ClientConfig) FindAliESAProfile(name string) (*AliESAProfile, bool) {
+	for i := range c.Profiles.AliESA {
+		if c.Profiles.AliESA[i].Name == name {
+			return &c.Profiles.AliESA[i], true
 		}
 	}
 	return nil, false
