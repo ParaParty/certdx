@@ -173,7 +173,7 @@ func (a *Action) cleanup(ctx context.Context, currentID string) error {
 	if !seen {
 		return fmt.Errorf("ESA certificate %s is not visible in site %d list after confirmation", currentID, a.cfg.SiteID)
 	}
-	if _, err := a.deleteOldest(ctx, entries, managed-a.cfg.CertificateRetainCount(), currentID); err != nil {
+	if _, err := a.deleteOldestBestEffort(ctx, entries, managed-a.cfg.CertificateRetainCount(), currentID); err != nil {
 		return fmt.Errorf("retain ESA certificates at site %d: %w", a.cfg.SiteID, err)
 	}
 	return nil
@@ -186,6 +186,16 @@ func (a *Action) isManaged(entry *esa.ListCertificatesResponseBodyResult) bool {
 
 func (a *Action) deleteOldest(ctx context.Context, entries []*esa.ListCertificatesResponseBodyResult,
 	count int, protectedID string) ([]string, error) {
+	return a.deleteOldestWithPolicy(ctx, entries, count, protectedID, false)
+}
+
+func (a *Action) deleteOldestBestEffort(ctx context.Context, entries []*esa.ListCertificatesResponseBodyResult,
+	count int, protectedID string) ([]string, error) {
+	return a.deleteOldestWithPolicy(ctx, entries, count, protectedID, true)
+}
+
+func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.ListCertificatesResponseBodyResult,
+	count int, protectedID string, partial bool) ([]string, error) {
 	if count <= 0 {
 		return nil, nil
 	}
@@ -229,7 +239,12 @@ func (a *Action) deleteOldest(ctx context.Context, entries []*esa.ListCertificat
 		}
 	}
 	if len(candidates) < count {
-		return nil, fmt.Errorf("need to delete %d certdx certificates, but only %d old versions can be retired safely", count, len(candidates))
+		if !partial {
+			return nil, fmt.Errorf("need to delete %d certdx certificates, but only %d old versions can be retired safely", count, len(candidates))
+		}
+		logging.Warn("Ali ESA site %d has %d certdx uploads above retainCount, but only %d old versions can be retired safely; keeping the protected latest upload for each SAN set",
+			a.cfg.SiteID, count, len(candidates))
+		count = len(candidates)
 	}
 	var deleted []string
 	for _, old := range candidates[:count] {

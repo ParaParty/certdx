@@ -467,6 +467,27 @@ func TestConfiguredRetainCount(t *testing.T) {
 	}
 }
 
+func TestCleanupKeepsLatestUploadForEachSANSetWhenGroupsExceedRetainCount(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	other := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("other-domain"), Type: ptr("upload"), Name: ptr("certdx-123-other-domain"),
+		SAN: ptr("other.example.com"), CreateTime: ptr("2025-01-01 00:00:00"),
+	}
+	api.entries = append(api.entries, other)
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("confirmed upload should succeed when safe candidates are fewer than retain target: %v", err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old-1" {
+		t.Fatalf("deleted %s, want only the old version of the updated SAN set", got)
+	}
+	if !slices.Contains(api.entries, other) {
+		t.Fatal("the latest certificate for another SAN set was deleted")
+	}
+}
+
 func TestNonQuotaUploadFailureDoesNotDelete(t *testing.T) {
 	api, fullchain, key := managedEntries(t, 5)
 	api.setErr = errors.New("upload failed")
