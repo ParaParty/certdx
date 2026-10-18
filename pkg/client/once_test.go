@@ -26,6 +26,18 @@ func onceTestCert(t *testing.T) (chain, key []byte) {
 	return chain, key
 }
 
+func TestRunOnceRejectsGRPC(t *testing.T) {
+	daemon := MakeCertDXClientDaemon()
+	daemon.Config.Common.Mode = config.CLIENT_MODE_GRPC
+	daemon.Config.Certificates = []config.ClientCertificate{{
+		Name: "web", Domains: []string{"example.com"},
+		Actions: []config.UpdateActionConfig{&config.FileAction{SavePath: t.TempDir()}},
+	}}
+	if err := daemon.RunOnce(); err == nil || !strings.Contains(err.Error(), "not supported with grpc") {
+		t.Fatalf("RunOnce error = %v, want grpc rejection", err)
+	}
+}
+
 func TestRunOnceWritesFileAndExits(t *testing.T) {
 	chain, key := onceTestCert(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

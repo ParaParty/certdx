@@ -70,6 +70,9 @@ func init() {
 	if err := certDXDaemon.LoadConfigurationAndValidate(confPath); err != nil {
 		logging.Fatal("Invalid config: %s", err)
 	}
+	if *quit && certDXDaemon.Config.Common.Mode == config.CLIENT_MODE_GRPC {
+		logging.Fatal("--quit is not supported in grpc mode")
+	}
 	logging.Debug("Reconnect duration is: %s", certDXDaemon.Config.Common.ReconnectDuration)
 
 	if err := certDXDaemon.ClientInit(); err != nil {

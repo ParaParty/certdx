@@ -19,7 +19,7 @@ certdx_client [flags]
 | `-l`, `--log` | *(stderr)* | Path to a log file. |
 | `-d`, `--debug` | `false` | Enable debug logging. |
 | `-t`, `--test` | `false` | Test mode: skip TLS verification on the HTTP server. |
-| `--quit` | `false` | When every configured action is one-shot, fetch each certificate once, wait for all actions, then exit with status 0 on success or 1 on failure. |
+| `--quit` | `false` | HTTP mode only. When every configured action is one-shot, fetch each certificate once, wait for all actions, then exit with status 0 on success or 1 on failure. |
 | `-h`, `--help` | | Print help. |
 | `-v`, `--version` | | Print build version. |
 
@@ -39,7 +39,7 @@ Top-level sections:
 | --- | --- | --- | --- |
 | `retryCount` | int | `5` | Update actions: retries after a failed run, so an action runs at most `retryCount + 1` times. Servers: failed requests (HTTP) or connections (gRPC) to one server before switching to the next. |
 | `mode` | string | `"http"` | `http` or `grpc`. |
-| `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. With `--quit`, this bounds the wait for the first certificate from each configured entry. |
+| `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. |
 
 ### `[Http.MainServer]` / `[Http.StandbyServer]`
 
@@ -92,7 +92,7 @@ material. Actions for one certificate run concurrently, each on its own
 goroutine, retried `Common.retryCount` times; a failing action never
 stops the others or the daemon.
 
-With `--quit`, the client fetches each configured certificate once, waits for
+With HTTP `--quit`, the client fetches each configured certificate once, waits for
 all its update actions, and exits. `file`, `tencentCloud`, `aliESA`, and `kubernetes`
 are all one-shot actions. Certificate fetches and actions must all succeed
 for exit status 0.

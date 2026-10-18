@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"pkg.para.party/certdx/pkg/config"
 )
@@ -85,6 +84,9 @@ func (r *CertDXClientDaemon) RunOnce() error {
 	if r.Config.Common.Mode != config.CLIENT_MODE_HTTP && r.Config.Common.Mode != config.CLIENT_MODE_GRPC {
 		return fmt.Errorf("unsupported mode: %s", r.Config.Common.Mode)
 	}
+	if r.Config.Common.Mode == config.CLIENT_MODE_GRPC {
+		return fmt.Errorf("one-shot mode is not supported with grpc")
+	}
 	if len(r.certs) == 0 {
 		return fmt.Errorf("client has no initialized certificates")
 	}
@@ -105,12 +107,6 @@ func (r *CertDXClientDaemon) RunOnce() error {
 		<-daemonDone
 	}()
 
-	var fetchTimeout <-chan time.Time
-	if r.Config.Common.Mode == config.CLIENT_MODE_GRPC {
-		timer := time.NewTimer(r.Config.Common.ReconnectDuration)
-		defer timer.Stop()
-		fetchTimeout = timer.C
-	}
 	select {
 	case <-r.once.fetched:
 	case <-daemonDone:
@@ -118,8 +114,6 @@ func (r *CertDXClientDaemon) RunOnce() error {
 			daemonErr = fmt.Errorf("client stopped before the first fetch completed")
 		}
 		return errors.Join(r.once.result(), daemonErr)
-	case <-fetchTimeout:
-		return errors.Join(r.once.result(), fmt.Errorf("timed out waiting for certificates from gRPC server"))
 	case <-r.rootCtx.Done():
 		return errors.Join(r.once.result(), r.rootCtx.Err())
 	}
