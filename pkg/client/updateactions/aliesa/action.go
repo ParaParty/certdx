@@ -303,9 +303,19 @@ func (a *Action) listCertificates(ctx context.Context) ([]*esa.ListCertificatesR
 		if resp == nil || resp.Body == nil {
 			return nil, fmt.Errorf("ListCertificates returned no body")
 		}
-		entries = append(entries, resp.Body.Result...)
-		if int64(len(resp.Body.Result)) < pageSize ||
-			(resp.Body.TotalCount != nil && page*pageSize >= *resp.Body.TotalCount) {
+		result := resp.Body.Result
+		entries = append(entries, result...)
+		if len(result) == 0 {
+			return entries, nil
+		}
+		if resp.Body.TotalCount != nil && int64(len(entries)) >= *resp.Body.TotalCount {
+			return entries, nil
+		}
+		responsePageSize := pageSize
+		if resp.Body.PageSize != nil && *resp.Body.PageSize > 0 {
+			responsePageSize = *resp.Body.PageSize
+		}
+		if resp.Body.TotalCount == nil && int64(len(result)) < responsePageSize {
 			return entries, nil
 		}
 	}

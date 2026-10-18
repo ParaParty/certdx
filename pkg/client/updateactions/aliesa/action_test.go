@@ -24,24 +24,43 @@ import (
 )
 
 type fakeESA struct {
-	entries     []*esa.ListCertificatesResponseBodyResult
-	certs       map[string]string
-	status      string
-	outerStatus bool
-	sets        []*esa.SetCertificateRequest
-	deletes     []string
-	events      []string
-	setErr      error
-	deleteErr   error
-	quota       int
-	quotaCode   string
+	entries      []*esa.ListCertificatesResponseBodyResult
+	certs        map[string]string
+	status       string
+	outerStatus  bool
+	sets         []*esa.SetCertificateRequest
+	deletes      []string
+	events       []string
+	setErr       error
+	deleteErr    error
+	quota        int
+	quotaCode    string
+	listPageSize int64
+	listPages    []int64
 }
 
 func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, _ *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &esa.ListCertificatesResponse{Body: &esa.ListCertificatesResponseBody{Result: f.entries}}, nil
+	if f.listPageSize <= 0 {
+		return &esa.ListCertificatesResponse{Body: &esa.ListCertificatesResponseBody{Result: f.entries}}, nil
+	}
+	page := int64(1)
+	if req.PageNumber != nil && *req.PageNumber > 0 {
+		page = *req.PageNumber
+	}
+	f.listPages = append(f.listPages, page)
+	start := (page - 1) * f.listPageSize
+	if start >= int64(len(f.entries)) {
+		return &esa.ListCertificatesResponse{Body: &esa.ListCertificatesResponseBody{
+			Result: nil, PageNumber: ptrInt64(page), PageSize: ptrInt64(f.listPageSize), TotalCount: ptrInt64(int64(len(f.entries))),
+		}}, nil
+	}
+	end := min(start+f.listPageSize, int64(len(f.entries)))
+	return &esa.ListCertificatesResponse{Body: &esa.ListCertificatesResponseBody{
+		Result: f.entries[start:end], PageNumber: ptrInt64(page), PageSize: ptrInt64(f.listPageSize), TotalCount: ptrInt64(int64(len(f.entries))),
+	}}, nil
 }
 
 func (f *fakeESA) GetCertificateWithContext(ctx context.Context, req *esa.GetCertificateRequest, _ *dara.RuntimeOptions) (*esa.GetCertificateResponse, error) {
@@ -124,6 +143,8 @@ func (f *fakeESA) DeleteCertificateWithContext(ctx context.Context, req *esa.Del
 }
 
 func ptr(s string) *string { return &s }
+
+func ptrInt64(n int64) *int64 { return &n }
 
 func testMaterial(t *testing.T, expires time.Time) ([]byte, []byte, *x509.Certificate) {
 	t.Helper()
@@ -227,6 +248,24 @@ func TestUploadNewCertificate(t *testing.T) {
 	if len(api.sets) != 1 || api.sets[0].Id != nil || *api.sets[0].SiteId != 123 ||
 		*api.sets[0].Type != "upload" || *api.sets[0].Name != "certdx-123-"+fingerprint(leaf)[:12] {
 		t.Fatalf("unexpected SetCertificate request: %+v", api.sets)
+	}
+}
+
+func TestListCertificatesFollowsServerPageSize(t *testing.T) {
+	api := &fakeESA{listPageSize: 2}
+	for i := 0; i < 5; i++ {
+		api.entries = append(api.entries, &esa.ListCertificatesResponseBodyResult{Id: ptr(fmt.Sprintf("cert-%d", i))})
+	}
+
+	entries, err := testAction(api).listCertificates(context.Background())
+	if err != nil {
+		t.Fatalf("listCertificates: %v", err)
+	}
+	if len(entries) != len(api.entries) {
+		t.Fatalf("got %d entries, want %d", len(entries), len(api.entries))
+	}
+	if got := fmt.Sprint(api.listPages); got != "[1 2 3]" {
+		t.Fatalf("requested pages %s, want [1 2 3]", got)
 	}
 }
 
