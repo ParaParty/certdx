@@ -19,6 +19,7 @@ import (
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/utils"
 	esa "github.com/alibabacloud-go/esa-20240910/v2/client"
 	"github.com/alibabacloud-go/tea/dara"
+	"github.com/alibabacloud-go/tea/tea"
 
 	"pkg.para.party/certdx/pkg/config"
 	"pkg.para.party/certdx/pkg/domain"
@@ -140,10 +141,17 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 
 func isCertificateQuotaError(err error) bool {
 	var apiErr dara.BaseError
-	if !errors.As(err, &apiErr) {
-		return false
+	if errors.As(err, &apiErr) {
+		if isCertificateQuotaCode(apiErr.GetCode()) {
+			return true
+		}
 	}
-	code := apiErr.GetCode()
+
+	var sdkErr *tea.SDKError
+	return errors.As(err, &sdkErr) && isCertificateQuotaCode(sdkErr.Code)
+}
+
+func isCertificateQuotaCode(code *string) bool {
 	return code != nil && (*code == "CertQuotaCheckFailed" || *code == "QuotaExceeded")
 }
 

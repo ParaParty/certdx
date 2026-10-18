@@ -18,6 +18,7 @@ import (
 
 	esa "github.com/alibabacloud-go/esa-20240910/v2/client"
 	"github.com/alibabacloud-go/tea/dara"
+	"github.com/alibabacloud-go/tea/tea"
 
 	"pkg.para.party/certdx/pkg/config"
 )
@@ -87,7 +88,7 @@ func (f *fakeESA) SetCertificateWithContext(ctx context.Context, req *esa.SetCer
 		if code == "" {
 			code = "CertQuotaCheckFailed"
 		}
-		return nil, fmt.Errorf("ESA request: %w", &dara.SDKError{Code: ptr(code), Message: ptr("custom certificate quota exceeded")})
+		return nil, fmt.Errorf("ESA request: %w", &tea.SDKError{Code: ptr(code), Message: ptr("custom certificate quota exceeded")})
 	}
 	f.sets = append(f.sets, req)
 	id := fmt.Sprintf("new-cert-%d", len(f.sets))
@@ -480,7 +481,7 @@ func TestNonQuotaUploadFailureDoesNotDelete(t *testing.T) {
 
 func TestOtherQuotaErrorDoesNotDelete(t *testing.T) {
 	api, fullchain, key := managedEntries(t, 5)
-	api.setErr = &dara.SDKError{Code: ptr("QuotaNotExist"), Message: ptr("plan is not active")}
+	api.setErr = &tea.SDKError{Code: ptr("QuotaNotExist"), Message: ptr("plan is not active")}
 	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
 	if err == nil || !strings.Contains(err.Error(), "QuotaNotExist") {
 		t.Fatalf("expected original API error, got %v", err)
