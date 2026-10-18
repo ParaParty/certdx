@@ -203,6 +203,7 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		id      string
 		group   string
 		created time.Time
+		healthy bool
 	}
 	var managed []candidate
 	for _, entry := range entries {
@@ -220,7 +221,12 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		if stringValue(entry.SAN) != "" {
 			group = strings.Join(domain.Canonical(strings.Split(*entry.SAN, ",")), "\x00")
 		}
-		managed = append(managed, candidate{id: *entry.Id, group: group, created: created})
+		managed = append(managed, candidate{
+			id:      *entry.Id,
+			group:   group,
+			created: created,
+			healthy: isHealthyCertificateStatus(stringValue(entry.Status)),
+		})
 	}
 	sort.Slice(managed, func(i, j int) bool {
 		if managed[i].created.Equal(managed[j].created) {
@@ -228,9 +234,23 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		}
 		return managed[i].created.Before(managed[j].created)
 	})
-	latest := make(map[string]string)
+	latestAny := make(map[string]string)
+	latestHealthy := make(map[string]string)
 	for _, cert := range managed {
-		latest[cert.group] = cert.id
+		latestAny[cert.group] = cert.id
+		if cert.healthy {
+			latestHealthy[cert.group] = cert.id
+		}
+	}
+	latest := make(map[string]string, len(latestAny))
+	for group, id := range latestAny {
+		if healthyID := latestHealthy[group]; healthyID != "" {
+			latest[group] = healthyID
+		} else {
+			// If ESA has not supplied a usable status for a SAN group, retain
+			// its newest upload rather than deleting the only known version.
+			latest[group] = id
+		}
 	}
 	var candidates []candidate
 	for _, cert := range managed {
@@ -260,6 +280,10 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		logging.Info("Ali ESA site %d deleted old certdx certificate %s", a.cfg.SiteID, old.id)
 	}
 	return deleted, nil
+}
+
+func isHealthyCertificateStatus(status string) bool {
+	return status == "OK" || status == "Expiring"
 }
 
 func (a *Action) listCertificates(ctx context.Context) ([]*esa.ListCertificatesResponseBodyResult, error) {

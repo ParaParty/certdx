@@ -160,6 +160,7 @@ func testEntry(id string, leaf *x509.Certificate) *esa.ListCertificatesResponseB
 		Type:              ptr("upload"),
 		SAN:               ptr(strings.Join(leaf.DNSNames, ",")),
 		FingerprintSha256: ptr(fingerprint(leaf)),
+		Status:            ptr("OK"),
 	}
 }
 
@@ -485,6 +486,26 @@ func TestCleanupKeepsLatestUploadForEachSANSetWhenGroupsExceedRetainCount(t *tes
 	}
 	if !slices.Contains(api.entries, other) {
 		t.Fatal("the latest certificate for another SAN set was deleted")
+	}
+}
+
+func TestCleanupProtectsLatestHealthyCertificateWhenNewerUploadFailed(t *testing.T) {
+	api := &fakeESA{certs: make(map[string]string), status: "OK"}
+	old := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("working"), Type: ptr("upload"), Name: ptr("certdx-123-web-old"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-01 00:00:00"),
+	}
+	failed := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("failed"), Type: ptr("upload"), Name: ptr("certdx-123-web-new"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("ApplyFailed"), CreateTime: ptr("2026-01-02 00:00:00"),
+	}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{old, failed}
+
+	if _, err := testAction(api).deleteOldest(context.Background(), api.entries, 1, ""); err != nil {
+		t.Fatalf("deleteOldest: %v", err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "failed" {
+		t.Fatalf("deleted %s, want the failed newest upload", got)
 	}
 }
 
