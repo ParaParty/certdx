@@ -13,7 +13,8 @@ term enters the codebase.
 - **certdx_client**: a standalone daemon that pulls certificates from a
   `certdx_server` and runs one or more **update actions** per certificate:
   writing them to disk with an optional reload command, patching annotated
-  Kubernetes TLS secrets, or re-binding Tencent Cloud resources.
+  Kubernetes TLS secrets, re-binding Tencent Cloud resources, or uploading
+  certificates to Alibaba Cloud ESA sites.
 - **Caddy plugin** (`exec/caddytls`): a Caddy module that consumes
   `certdx_server` directly via Caddy's `get_certificate` extension
   point, with no `certdx_client` daemon in between.

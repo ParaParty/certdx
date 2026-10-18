@@ -30,7 +30,7 @@ Top-level sections:
 - `[Common]` — operating mode and retry/reconnect tuning.
 - `[Http.MainServer]` / `[Http.StandbyServer]` — used when `Common.mode = "http"`.
 - `[GRPC.MainServer]` / `[GRPC.StandbyServer]` — used when `Common.mode = "grpc"`.
-- `[[Profile.TencentCloud]]` / `[[Profile.Kubernetes]]` — named credentials for update actions.
+- `[[Profile.TencentCloud]]` / `[[Profile.AliESA]]` / `[[Profile.Kubernetes]]` — named credentials for update actions.
 - `[[Certificate]]` — one entry per certificate to fetch, each with its update actions.
 
 ### `[Common]`
@@ -145,7 +145,9 @@ Uploads a new certificate version at an Alibaba Cloud ESA site using ESA's
 `SetCertificate` API. The action matches certificates by the exact SAN set,
 reuses material already stored at the site, and refuses to upload an older
 certificate over a newer one. It names uploads `certdx-<siteId>-<fingerprint prefix>` and
-caps certdx uploads across that site at `retainCount`. If ESA rejects an
+targets a soft cap of certdx uploads across that site at `retainCount`; when
+multiple SAN groups each need a protected latest upload, the site can remain
+above that target. If ESA rejects an
 upload because the plan's custom-certificate quota is full, it deletes one
 safe older certdx version and retries, repeating only as needed. It never
 deletes non-certdx uploads or the latest certdx upload for another SAN set.
@@ -159,11 +161,15 @@ separately when deploying to production.
 | --- | --- | --- |
 | `profile` | string | Name of a `[[Profile.AliESA]]` entry. |
 | `siteId` | integer | ESA site ID returned by `ListSites`. Must be positive. |
-| `retainCount` | integer | Maximum number of recent certdx uploads to retain across the site. Defaults to `3`; any positive value is accepted. |
+| `retainCount` | integer | Target number of recent certdx uploads to retain across the site. Defaults to `3`; `0` also selects the default, and positive values override it. The latest healthy upload for each SAN set remains protected. |
 
-The [custom-certificate quota](https://help.aliyun.com/en/edge-security-acceleration/esa/user-guide/ssl-tls-overview)
-depends on the ESA plan. If no older certdx version can be retired safely,
-the action reports the quota error without deleting another certificate.
+ESA exposes the action in the `cn-hangzhou` and `ap-southeast-1` regions;
+use one of those `regionId` values unless an explicit endpoint is configured.
+The [custom-certificate quota](https://help.aliyun.com/zh/edge-security-acceleration/esa/user-guide/configure-edge-certificates)
+depends on the ESA plan. The Free plan allows two custom certificates, so the
+default `retainCount = 3` is above that quota. If no older certdx version can
+be retired safely, the action reports a warning after a confirmed upload and
+keeps the protected certificates.
 
 #### `type = "kubernetes"`
 
@@ -219,8 +225,8 @@ share a name.
 | | `endpoint` | Optional, defaults to `ssl.tencentcloudapi.com`. |
 | `[[Profile.AliESA]]` | `name` | Referenced by `profile` in an `aliESA` action. |
 | | `accessKeyId` / `accessKeySecret` | Alibaba Cloud credentials. Both required. |
-| | `securityToken` | Optional temporary credential token. |
-| | `regionId` | ESA API region. Defaults to `cn-hangzhou`. |
+| | `securityToken` | Optional temporary credential token; static tokens are suitable only for short-lived processes. |
+| | `regionId` | ESA API region: `cn-hangzhou` or `ap-southeast-1`; defaults to `cn-hangzhou`. |
 | | `endpoint` | ESA API host. Defaults to `esa.<regionId>.aliyuncs.com`; set this explicitly for a VPC endpoint. |
 | `[[Profile.Kubernetes]]` | `name` | Referenced by `profile` in a `kubernetes` action. |
 | | `kubeConfig` | Path to a kubeconfig. Empty means in-cluster, then `$KUBECONFIG`, then `~/.kube/config`. |

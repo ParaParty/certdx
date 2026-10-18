@@ -123,6 +123,9 @@ mount the directory they write to and make sure `65532` can write to it
 — the reload command runs inside the container, so a container-local
 nginx reload is rarely what you want. Containerised clients usually use
 the `kubernetes` or `tencentCloud` update actions instead.
+The client can also upload renewals to Alibaba Cloud ESA with the `aliESA`
+update action; its credentials and site configuration stay in the mounted
+client TOML file.
 
 ## Running the tools
 

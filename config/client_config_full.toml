@@ -39,8 +39,8 @@ pem = "/path/to/mtls/client-bundle.pem"
 
 # [[Profile.AliESA]]
 # name = "esa-prod"
-# accessKeyId = ""
-# accessKeySecret = ""
+# accessKeyId = "your-aliyun-access-key-id"
+# accessKeySecret = "your-aliyun-access-key-secret"
 # securityToken = "" # optional for temporary credentials
 # regionId = "cn-hangzhou" # optional; defaults to cn-hangzhou
 # endpoint = "esa.cn-hangzhou.aliyuncs.com" # optional; defaults to the public endpoint for regionId
@@ -84,7 +84,7 @@ reloadCommand = "bash /opt/acme/reload.sh"
 # type = "aliESA"
 # profile = "esa-prod"
 # siteId = 1234567890123
-# retainCount = 3 # optional; default 3, any positive count
+# retainCount = 3 # optional; default 3; 0 also selects the default
 
 # Patch kubernetes.io/tls secrets annotated with
 # party.para.certdx/domains whose domains this certificate covers.

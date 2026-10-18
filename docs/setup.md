@@ -16,8 +16,8 @@ Reference pages with every option:
 `certdx_server` is the only component that talks to the ACME CA. Everything
 else — `certdx_client`, the Caddy plugin, Envoy via SDS — is a consumer that
 pulls finished certificates from the server. Pushing certificates on to
-Kubernetes secrets or Tencent Cloud resources is done by the client's
-update actions.
+Kubernetes secrets, Tencent Cloud resources, or Alibaba Cloud ESA sites is
+done by the client's update actions.
 
 ## 1. Pick the ACME provider
 

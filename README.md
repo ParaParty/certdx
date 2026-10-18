@@ -26,6 +26,8 @@ APIs, or rate limits.
     `kubernetes.io/tls` secrets on every renewal.
   - **Tencent Cloud** resources re-bound to the renewed certificate on
     CLB / CDN / WAF / TEO and friends.
+  - **Alibaba Cloud ESA** certificates uploaded with safe per-SAN retention.
+  - **Alibaba Cloud DNS** supports access keys or refreshable ECS RAM roles.
 - **Auth that fits the deployment** — shared bearer token over HTTPS for
   simple setups, mTLS or gRPC SDS for everything else.
 - **Resilient by design** — clients support a standby server with
@@ -48,7 +50,7 @@ a consumer.
 
 | Client | How it works |
 | --- | --- |
-| **certdx client** | Standalone daemon. Runs an update action per certificate: write cert/key files and run a reload command, patch annotated Kubernetes TLS secrets, or re-bind Tencent Cloud resources. |
+| **certdx client** | Standalone daemon. Runs an update action per certificate: write cert/key files and run a reload command, patch annotated Kubernetes TLS secrets, re-bind Tencent Cloud resources, or upload certificates to Alibaba Cloud ESA. |
 | **Caddy plugin** | Caddy [`get_certificate`](https://caddyserver.com/docs/caddyfile/directives/tls#get_certificate) module — certificates stay in memory, no files. |
 | **Envoy (gRPC SDS)** | Envoy connects to the server's SDS endpoint directly; certificates are hot-swapped with no restart. |
 | **certdx tools** | General-purpose CLI: inspect the cache, generate mTLS material, register Google ACME accounts, and more. |
