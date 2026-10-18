@@ -24,20 +24,21 @@ import (
 )
 
 type fakeESA struct {
-	entries      []*esa.ListCertificatesResponseBodyResult
-	certs        map[string]string
-	status       string
-	outerStatus  bool
-	sets         []*esa.SetCertificateRequest
-	deletes      []string
-	events       []string
-	setErr       error
-	setErrs      []error
-	deleteErr    error
-	quota        int
-	quotaCode    string
-	listPageSize int64
-	listPages    []int64
+	entries           []*esa.ListCertificatesResponseBodyResult
+	certs             map[string]string
+	status            string
+	outerStatus       bool
+	sets              []*esa.SetCertificateRequest
+	deletes           []string
+	events            []string
+	setErr            error
+	setErrs           []error
+	setAfterStoreErrs []error
+	deleteErr         error
+	quota             int
+	quotaCode         string
+	listPageSize      int64
+	listPages         []int64
 }
 
 func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, _ *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
@@ -104,6 +105,11 @@ func (f *fakeESA) SetCertificateWithContext(ctx context.Context, req *esa.SetCer
 	if f.setErr != nil {
 		return nil, f.setErr
 	}
+	for _, entry := range f.entries {
+		if stringValue(entry.Name) == stringValue(req.Name) {
+			return nil, &tea.SDKError{Code: ptr("Certificate.Duplicated"), Message: ptr("certificate already exists")}
+		}
+	}
 	quota := f.quota
 	if quota == 0 {
 		quota = 5
@@ -126,6 +132,11 @@ func (f *fakeESA) SetCertificateWithContext(ctx context.Context, req *esa.SetCer
 	entry.Name = req.Name
 	entry.CreateTime = ptr(time.Now().UTC().Format("2006-01-02 15:04:05"))
 	f.entries = append(f.entries, entry)
+	if len(f.setAfterStoreErrs) > 0 {
+		err := f.setAfterStoreErrs[0]
+		f.setAfterStoreErrs = f.setAfterStoreErrs[1:]
+		return nil, err
+	}
 	return &esa.SetCertificateResponse{Body: &esa.SetCertificateResponseBody{Id: &id}}, nil
 }
 
@@ -601,6 +612,26 @@ func TestSetCertificateRetriesTransientErrors(t *testing.T) {
 	}
 }
 
+func TestDuplicateUploadAfterLostResponseIsConfirmed(t *testing.T) {
+	oldBackoff := transientBackoff
+	transientBackoff = 0
+	t.Cleanup(func() { transientBackoff = oldBackoff })
+
+	api := &fakeESA{
+		certs: map[string]string{}, status: "OK",
+		setAfterStoreErrs: []error{
+			&tea.SDKError{Code: ptr("InternalException"), Message: ptr("response lost")},
+		},
+	}
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("stored upload should be recovered after duplicate response: %v", err)
+	}
+	if len(api.sets) != 1 || len(api.events) != 2 {
+		t.Fatalf("SetCertificate calls = %d, events = %v; want one stored upload and one duplicate retry", len(api.sets), api.events)
+	}
+}
+
 func TestOtherQuotaErrorDoesNotDelete(t *testing.T) {
 	api, fullchain, key := managedEntries(t, 5)
 	api.setErr = &tea.SDKError{Code: ptr("QuotaNotExist"), Message: ptr("plan is not active")}
@@ -610,6 +641,15 @@ func TestOtherQuotaErrorDoesNotDelete(t *testing.T) {
 	}
 	if got := strings.Join(api.events, ","); got != "set" {
 		t.Fatalf("unexpected operations after non-capacity error: %s", got)
+	}
+}
+
+func TestSetCertificateErrorHasOneOperationPrefix(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	api.setErr = &tea.SDKError{Code: ptr("AuthFailure"), Message: ptr("denied")}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || strings.Count(err.Error(), "SetCertificate") != 1 {
+		t.Fatalf("error = %v, want one SetCertificate prefix", err)
 	}
 }
 

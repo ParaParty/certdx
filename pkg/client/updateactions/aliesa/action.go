@@ -125,6 +125,23 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 		if err == nil {
 			break
 		}
+		if isCertificateDuplicatedError(err) {
+			var listErr error
+			var findErr error
+			entries, listErr = a.listCertificates(ctx)
+			if listErr != nil {
+				return fmt.Errorf("SetCertificate at ESA site %d: duplicate upload lookup: %w", a.cfg.SiteID, listErr)
+			}
+			stored, findErr = a.findCertificate(ctx, entries, leaf)
+			if findErr != nil {
+				return fmt.Errorf("SetCertificate at ESA site %d: duplicate upload lookup: %w", a.cfg.SiteID, findErr)
+			}
+			if stored == nil || stored.Id == nil || *stored.Id == "" {
+				return fmt.Errorf("SetCertificate at ESA site %d reported a duplicate, but the uploaded certificate was not found", a.cfg.SiteID)
+			}
+			resp = &esa.SetCertificateResponse{Body: &esa.SetCertificateResponseBody{Id: stored.Id}}
+			break
+		}
 		if !isCertificateQuotaError(err) {
 			return fmt.Errorf("SetCertificate at ESA site %d: %w", a.cfg.SiteID, err)
 		}
@@ -163,6 +180,10 @@ func isCertificateQuotaCode(code *string) bool {
 	return code != nil && (*code == "CertQuotaCheckFailed" || *code == "QuotaExceeded")
 }
 
+func isCertificateDuplicatedError(err error) bool {
+	return esaErrorCode(err) == "Certificate.Duplicated"
+}
+
 func esaErrorCode(err error) string {
 	var apiErr dara.BaseError
 	if errors.As(err, &apiErr) && apiErr.GetCode() != nil {
@@ -191,10 +212,10 @@ func callESAAPI(ctx context.Context, what string, work func() error) error {
 			return nil
 		}
 		if ctx.Err() != nil {
-			return fmt.Errorf("%s: %w", what, ctx.Err())
+			return ctx.Err()
 		}
 		if !isTransientESAError(err) || attempt >= transientRetryCount {
-			return fmt.Errorf("%s: %w", what, err)
+			return err
 		}
 
 		wait := min(transientBackoff<<attempt, retry.Interval)
@@ -202,7 +223,7 @@ func callESAAPI(ctx context.Context, what string, work func() error) error {
 		select {
 		case <-time.After(wait):
 		case <-ctx.Done():
-			return fmt.Errorf("%s: %w", what, ctx.Err())
+			return ctx.Err()
 		}
 	}
 }
