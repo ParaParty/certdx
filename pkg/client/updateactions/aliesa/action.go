@@ -210,7 +210,8 @@ func callESAAPI(ctx context.Context, what string, work func() error) error {
 func (a *Action) cleanup(ctx context.Context, currentID string) error {
 	entries, err := a.listCertificates(ctx)
 	if err != nil {
-		return fmt.Errorf("list ESA certificates for cleanup: %w", err)
+		logging.Warn("Ali ESA site %d certificate cleanup skipped after confirmation: %s", a.cfg.SiteID, err)
+		return nil
 	}
 	seen := false
 	managed := 0
@@ -223,10 +224,11 @@ func (a *Action) cleanup(ctx context.Context, currentID string) error {
 		}
 	}
 	if !seen {
-		return fmt.Errorf("ESA certificate %s is not visible in site %d list after confirmation", currentID, a.cfg.SiteID)
+		logging.Warn("Ali ESA certificate %s is not visible in site %d list after confirmation; cleanup skipped", currentID, a.cfg.SiteID)
+		return nil
 	}
 	if _, err := a.deleteOldestBestEffort(ctx, entries, managed-a.cfg.CertificateRetainCount(), currentID); err != nil {
-		return fmt.Errorf("retain ESA certificates at site %d: %w", a.cfg.SiteID, err)
+		logging.Warn("Ali ESA site %d certificate cleanup skipped after confirmation: %s", a.cfg.SiteID, err)
 	}
 	return nil
 }

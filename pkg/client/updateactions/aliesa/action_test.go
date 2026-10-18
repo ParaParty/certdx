@@ -554,6 +554,20 @@ func TestCleanupProtectsLatestHealthyCertificateWhenNewerUploadFailed(t *testing
 	}
 }
 
+func TestCleanupDeleteFailureDoesNotFailConfirmedUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 2)
+	api.deleteErr = errors.New("cleanup permission denied")
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("confirmed upload should succeed when cleanup delete fails: %v", err)
+	}
+	if len(api.sets) != 1 {
+		t.Fatalf("SetCertificate attempts = %d, want one successful upload", len(api.sets))
+	}
+}
+
 func TestNonQuotaUploadFailureDoesNotDelete(t *testing.T) {
 	api, fullchain, key := managedEntries(t, 5)
 	api.setErr = errors.New("upload failed")
