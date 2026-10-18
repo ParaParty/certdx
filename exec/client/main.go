@@ -82,7 +82,10 @@ func init() {
 
 func main() {
 	go cli.WaitForShutdown(certDXDaemon.Stop, shutdownTimeout)
-	if *quit && certDXDaemon.Config.AllActionsOneShot() {
+	if *quit {
+		if !certDXDaemon.Config.AllActionsOneShot() {
+			logging.Fatal("--quit requires all update actions to be one-shot")
+		}
 		if err := certDXDaemon.RunOnce(); err != nil {
 			logging.Error("One-shot run failed: %s", err)
 			os.Exit(1)
