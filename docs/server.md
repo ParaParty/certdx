@@ -91,8 +91,9 @@ block is in `config/server_config_full.toml`.
 | `email`, `apiKey` | string | Cloudflare global API key auth. |
 | `authToken`, `zoneToken` | string | Cloudflare scoped token auth (alternative to global). |
 | `secretID`, `secretKey` | string | Tencent Cloud credentials. |
-| `accessKeyId`, `accessKeySecret` | string | Alibaba Cloud DNS credentials. |
-| `securityToken` | string | Optional Alibaba Cloud temporary credential token. |
+| `accessKeyId`, `accessKeySecret` | string | Alibaba Cloud DNS credentials; required unless `ramRole` is set. |
+| `securityToken` | string | Optional Alibaba Cloud temporary credential token. Static tokens expire, so use `ramRole` for a long-running server. |
+| `ramRole` | string | Optional ECS instance RAM role. Uses refreshable instance-role credentials instead of access key credentials. |
 
 Exactly one credential set must be configured for the chosen `type`.
 

@@ -11,5 +11,6 @@ func New(p config.DnsProvider) (challenge.Provider, error) {
 	aliDNSConfig.APIKey = p.AccessKeyID
 	aliDNSConfig.SecretKey = p.AccessKeySecret
 	aliDNSConfig.SecurityToken = p.SecurityToken
+	aliDNSConfig.RAMRole = p.RAMRole
 	return legoAliDNS.NewDNSProviderConfig(aliDNSConfig)
 }

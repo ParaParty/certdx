@@ -149,13 +149,14 @@ type = "alidns"
 accessKeyId = "test-id"
 accessKeySecret = "test-secret"
 securityToken = "test-token"
+ramRole = ""
 `), &c)
 	if err != nil {
 		t.Fatalf("unmarshal config: %v", err)
 	}
 	if c.DnsProvider == nil || c.DnsProvider.Type != DnsProviderTypeAliDNS ||
 		c.DnsProvider.AccessKeyID != "test-id" || c.DnsProvider.AccessKeySecret != "test-secret" ||
-		c.DnsProvider.SecurityToken != "test-token" {
+		c.DnsProvider.SecurityToken != "test-token" || c.DnsProvider.RAMRole != "" {
 		t.Fatal("AliDNS credentials were not decoded")
 	}
 	if err := c.DnsProvider.Validate(); err != nil {
@@ -172,6 +173,12 @@ func TestDnsProviderValidateAliDNSMissingCredentials(t *testing.T) {
 		if err := p.Validate(); err == nil {
 			t.Fatal("expected error for missing AliDNS credentials")
 		}
+	}
+}
+
+func TestDnsProviderValidateAliDNSRAMRole(t *testing.T) {
+	if err := (&DnsProvider{Type: DnsProviderTypeAliDNS, RAMRole: "certdx-ecs-role"}).Validate(); err != nil {
+		t.Fatalf("RAM role should replace static credentials: %v", err)
 	}
 }
 

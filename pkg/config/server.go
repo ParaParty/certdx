@@ -193,6 +193,7 @@ type DnsProvider struct {
 	AccessKeyID     string `toml:"accessKeyId" json:"access_key_id,omitempty"`
 	AccessKeySecret string `toml:"accessKeySecret" json:"access_key_secret,omitempty"`
 	SecurityToken   string `toml:"securityToken" json:"security_token,omitempty"`
+	RAMRole         string `toml:"ramRole" json:"ram_role,omitempty"`
 }
 
 func (p *DnsProvider) Validate() error {
@@ -220,7 +221,7 @@ func (p *DnsProvider) Validate() error {
 			return fmt.Errorf("DnsProvider TencentCloud: empty SecretID or SecretKey")
 		}
 	case DnsProviderTypeAliDNS:
-		if p.AccessKeyID == "" || p.AccessKeySecret == "" {
+		if p.RAMRole == "" && (p.AccessKeyID == "" || p.AccessKeySecret == "") {
 			return fmt.Errorf("DnsProvider AliDNS: accessKeyId and accessKeySecret are required")
 		}
 	default:

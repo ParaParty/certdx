@@ -88,4 +88,11 @@ func TestGetChallengerAliDNS(t *testing.T) {
 			t.Fatalf("unexpected challenger: type=%q provider=%T", typ, provider)
 		}
 	}
+	cfg := &config.ServerConfig{
+		ACME:        config.ACMEConfig{ChallengeType: config.ChallengeTypeDns01},
+		DnsProvider: &config.DnsProvider{Type: config.DnsProviderTypeAliDNS, RAMRole: "certdx-ecs-role"},
+	}
+	if typ, provider, err := getChallenger(&lego.Config{}, cfg); err != nil || typ != config.ChallengeTypeDns01 || provider == nil {
+		t.Fatalf("construct AliDNS RAM role provider: type=%q provider=%T err=%v", typ, provider, err)
+	}
 }

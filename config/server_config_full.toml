@@ -64,6 +64,7 @@ apiKey = ""
 # accessKeyId = ""
 # accessKeySecret = ""
 # securityToken = "" # optional for temporary credentials
+# ramRole = "" # optional ECS instance RAM role; refreshes credentials automatically
 
 [HttpProvider]
 type = "s3"
