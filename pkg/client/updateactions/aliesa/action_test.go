@@ -32,6 +32,7 @@ type fakeESA struct {
 	deletes      []string
 	events       []string
 	setErr       error
+	setErrs      []error
 	deleteErr    error
 	quota        int
 	quotaCode    string
@@ -95,6 +96,11 @@ func (f *fakeESA) SetCertificateWithContext(ctx context.Context, req *esa.SetCer
 		return nil, err
 	}
 	f.events = append(f.events, "set")
+	if len(f.setErrs) > 0 {
+		err := f.setErrs[0]
+		f.setErrs = f.setErrs[1:]
+		return nil, err
+	}
 	if f.setErr != nil {
 		return nil, f.setErr
 	}
@@ -557,6 +563,27 @@ func TestNonQuotaUploadFailureDoesNotDelete(t *testing.T) {
 	}
 	if got := strings.Join(api.events, ","); got != "set" {
 		t.Fatalf("unexpected operations after upload failure: %s", got)
+	}
+}
+
+func TestSetCertificateRetriesTransientErrors(t *testing.T) {
+	oldBackoff := transientBackoff
+	transientBackoff = 0
+	t.Cleanup(func() { transientBackoff = oldBackoff })
+
+	api := &fakeESA{
+		certs: map[string]string{}, status: "OK",
+		setErrs: []error{
+			&tea.SDKError{Code: ptr("LockFailed"), Message: ptr("site is locked")},
+			&tea.SDKError{Code: ptr("InternalException"), Message: ptr("try again")},
+		},
+	}
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("transient SetCertificate errors should be retried: %v", err)
+	}
+	if len(api.sets) != 1 || len(api.events) != 3 {
+		t.Fatalf("SetCertificate attempts = %d, events = %v; want 3 attempts and one successful upload", len(api.sets), api.events)
 	}
 }
 

@@ -28,11 +28,14 @@ import (
 )
 
 const (
-	defaultRegionID = "cn-hangzhou"
-	pageSize        = int64(100)
-	confirmTimeout  = 2 * time.Minute
-	confirmEvery    = 3 * time.Second
+	defaultRegionID     = "cn-hangzhou"
+	pageSize            = int64(100)
+	confirmTimeout      = 2 * time.Minute
+	confirmEvery        = 3 * time.Second
+	transientRetryCount = 3
 )
+
+var transientBackoff = 2 * time.Second
 
 type esaAPI interface {
 	ListCertificatesWithContext(context.Context, *esa.ListCertificatesRequest, *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error)
@@ -113,7 +116,12 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		resp, err = a.client.SetCertificateWithContext(ctx, req, apiOptions())
+		resp = nil
+		err = callESAAPI(ctx, "SetCertificate", func() error {
+			var callErr error
+			resp, callErr = a.client.SetCertificateWithContext(ctx, req, apiOptions())
+			return callErr
+		})
 		if err == nil {
 			break
 		}
@@ -153,6 +161,50 @@ func isCertificateQuotaError(err error) bool {
 
 func isCertificateQuotaCode(code *string) bool {
 	return code != nil && (*code == "CertQuotaCheckFailed" || *code == "QuotaExceeded")
+}
+
+func esaErrorCode(err error) string {
+	var apiErr dara.BaseError
+	if errors.As(err, &apiErr) && apiErr.GetCode() != nil {
+		return *apiErr.GetCode()
+	}
+	var sdkErr *tea.SDKError
+	if errors.As(err, &sdkErr) && sdkErr.Code != nil {
+		return *sdkErr.Code
+	}
+	return ""
+}
+
+func isTransientESAError(err error) bool {
+	switch esaErrorCode(err) {
+	case "LockFailed", "InternalException":
+		return true
+	default:
+		return false
+	}
+}
+
+func callESAAPI(ctx context.Context, what string, work func() error) error {
+	for attempt := 0; ; attempt++ {
+		err := work()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s: %w", what, ctx.Err())
+		}
+		if !isTransientESAError(err) || attempt >= transientRetryCount {
+			return fmt.Errorf("%s: %w", what, err)
+		}
+
+		wait := min(transientBackoff<<attempt, retry.Interval)
+		logging.Warn("%s failed transiently, retry %d/%d in %s: %s", what, attempt+1, transientRetryCount, wait, err)
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return fmt.Errorf("%s: %w", what, ctx.Err())
+		}
+	}
 }
 
 func (a *Action) cleanup(ctx context.Context, currentID string) error {
