@@ -464,3 +464,15 @@ func TestServerConfigSetDefault(t *testing.T) {
 		t.Errorf("default grpc listen: got %s want :10002", c.GRPCSDSServer.Listen)
 	}
 }
+
+func TestServerConfigRequiresServerMode(t *testing.T) {
+	c := &ServerConfig{}
+	c.SetDefault()
+	c.ACME.Provider = "mock"
+	c.ACME.AllowedDomains = []string{"example.com"}
+
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "no server mode enabled") {
+		t.Fatalf("Validate error = %v, want no-server-mode validation", err)
+	}
+}

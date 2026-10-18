@@ -21,6 +21,7 @@ import (
 	"github.com/alibabacloud-go/tea/tea"
 
 	"pkg.para.party/certdx/pkg/config"
+	"pkg.para.party/certdx/pkg/retry"
 )
 
 type fakeESA struct {
@@ -380,7 +381,7 @@ func TestCertificateFailureIsReported(t *testing.T) {
 	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
 	api := &fakeESA{certs: map[string]string{}, status: "ApplyFailed"}
 	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
-	if err == nil || !strings.Contains(err.Error(), "ApplyFailed") {
+	if err == nil || !strings.Contains(err.Error(), "ApplyFailed") || !retry.IsPermanent(err) {
 		t.Fatalf("expected failed ESA status, got %v", err)
 	}
 }
@@ -562,6 +563,31 @@ func TestCleanupProtectsLatestHealthyCertificateWhenNewerUploadFailed(t *testing
 	}
 	if got := strings.Join(api.deletes, ","); got != "failed" {
 		t.Fatalf("deleted %s, want the failed newest upload", got)
+	}
+}
+
+func TestCleanupNeverDeletesProtectedCertificate(t *testing.T) {
+	api := &fakeESA{certs: make(map[string]string), status: "OK"}
+	old := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("old"), Type: ptr("upload"), Name: ptr("certdx-123-web-old"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-01 00:00:00"),
+	}
+	protected := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("z-current"), Type: ptr("upload"), Name: ptr("certdx-123-web-current"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-02 00:00:00"),
+	}
+	latestSibling := &esa.ListCertificatesResponseBodyResult{
+		Id: ptr("a-sibling"), Type: ptr("upload"), Name: ptr("certdx-123-web-sibling"),
+		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-02 00:00:00"),
+	}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{old, protected, latestSibling}
+
+	deleted, err := testAction(api).deleteOldestBestEffort(context.Background(), api.entries, 2, "z-current")
+	if err != nil {
+		t.Fatalf("deleteOldestBestEffort: %v", err)
+	}
+	if !slices.Equal(deleted, []string{"old", "a-sibling"}) || slices.Contains(api.deletes, "z-current") {
+		t.Fatalf("deleted %v, want old and a-sibling while never deleting protected z-current", deleted)
 	}
 }
 
