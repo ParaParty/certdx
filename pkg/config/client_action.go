@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -86,9 +87,22 @@ func undecodedProfileKeys(md toml.MetaData) []error {
 			continue
 		}
 		seen[key[1]] = struct{}{}
+		if isKnownProfileType(key[1]) && len(key) > 2 {
+			ret = append(ret, fmt.Errorf("unsupported key in profile %s: %s", key[1], strings.Join(key[2:], ".")))
+			continue
+		}
 		ret = append(ret, fmt.Errorf("unsupported profile type: %s", key[1]))
 	}
 	return ret
+}
+
+func isKnownProfileType(name string) bool {
+	switch name {
+	case "TencentCloud", "AliESA", "Kubernetes":
+		return true
+	default:
+		return false
+	}
 }
 
 // FileAction writes the certificate to disk and optionally runs a reload command.

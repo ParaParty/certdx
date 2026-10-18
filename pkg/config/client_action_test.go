@@ -144,6 +144,23 @@ name = "prod"
 	}
 }
 
+func TestDecodeActionsReportsUnknownKeyInsideKnownProfile(t *testing.T) {
+	_, err := decodeAndResolve(t, `
+[[Profile.AliESA]]
+name = "prod"
+accessKeyIdentifier = "typo"
+`)
+	if err == nil {
+		t.Fatal("expected error on unknown AliESA profile key")
+	}
+	if !strings.Contains(err.Error(), "unsupported key in profile AliESA: accessKeyIdentifier") {
+		t.Fatalf("error should identify the profile key, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "unsupported profile type: AliESA") {
+		t.Fatalf("error misidentified known profile type: %v", err)
+	}
+}
+
 func TestFileActionValidate(t *testing.T) {
 	if err := (&FileAction{}).Validate(nil); err == nil {
 		t.Fatal("expected error on empty savePath")

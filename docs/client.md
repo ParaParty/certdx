@@ -289,6 +289,8 @@ yet up.
   not match any entry of the matching profile type.
 - `unsupported profile type: <x>` — only `TencentCloud`, `AliESA`, and `Kubernetes`
   exist under `[Profile]`.
+- `unsupported key in profile <type>: <key>` — check the spelling of a
+  field inside a known `[[Profile.<type>]]` table.
 - `http main server url is empty` — set `Http.MainServer.url` when in HTTP mode.
 - `grpc main server url is empty` — set `GRPC.MainServer.server` when in gRPC mode.
 - `file not found: <path>` — an mTLS path does not exist.
