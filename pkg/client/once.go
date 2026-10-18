@@ -81,11 +81,8 @@ func (r *CertDXClientDaemon) RunOnce() error {
 	if !r.Config.AllActionsOneShot() {
 		return fmt.Errorf("one-shot run requires only one-shot update actions")
 	}
-	if r.Config.Common.Mode != config.CLIENT_MODE_HTTP && r.Config.Common.Mode != config.CLIENT_MODE_GRPC {
-		return fmt.Errorf("unsupported mode: %s", r.Config.Common.Mode)
-	}
-	if r.Config.Common.Mode == config.CLIENT_MODE_GRPC {
-		return fmt.Errorf("one-shot mode is not supported with grpc")
+	if r.Config.Common.Mode != config.CLIENT_MODE_HTTP {
+		return fmt.Errorf("one-shot mode is not supported with %s", r.Config.Common.Mode)
 	}
 	if len(r.certs) == 0 {
 		return fmt.Errorf("client has no initialized certificates")
