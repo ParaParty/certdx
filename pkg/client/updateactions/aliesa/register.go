@@ -7,6 +7,8 @@ import (
 	"pkg.para.party/certdx/pkg/config"
 )
 
+// Import this package for its side effect to link the aliESA update action
+// into a binary.
 func init() {
 	client.RegisterUpdateAction(config.UPDATE_ACTION_ALI_ESA,
 		func(cfg config.UpdateActionConfig, cc *config.ClientConfig) (client.UpdateAction, error) {

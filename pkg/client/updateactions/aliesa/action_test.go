@@ -45,6 +45,8 @@ type fakeESA struct {
 	quotaCode         string
 	listPageSize      int64
 	listPages         []int64
+	omitTotalCount    bool
+	wrongFingerprint  bool
 }
 
 func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, _ *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
@@ -69,9 +71,13 @@ func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.List
 		}}, nil
 	}
 	end := min(start+f.listPageSize, int64(len(f.entries)))
-	return &esa.ListCertificatesResponse{Body: &esa.ListCertificatesResponseBody{
+	body := &esa.ListCertificatesResponseBody{
 		Result: f.entries[start:end], PageNumber: ptrInt64(page), PageSize: ptrInt64(f.listPageSize), TotalCount: ptrInt64(int64(len(f.entries))),
-	}}, nil
+	}
+	if f.omitTotalCount {
+		body.TotalCount = nil
+	}
+	return &esa.ListCertificatesResponse{Body: body}, nil
 }
 
 func (f *fakeESA) GetCertificateWithContext(ctx context.Context, req *esa.GetCertificateRequest, _ *dara.RuntimeOptions) (*esa.GetCertificateResponse, error) {
@@ -98,6 +104,9 @@ func (f *fakeESA) GetCertificateWithContext(ctx context.Context, req *esa.GetCer
 		Result: &esa.GetCertificateResponseBodyResult{
 			FingerprintSha256: ptr(fingerprint(leaf)),
 		},
+	}
+	if f.wrongFingerprint {
+		body.Result.FingerprintSha256 = ptr("00" + fingerprint(leaf)[2:])
 	}
 	if f.outerStatus {
 		body.Status = ptr(f.status)
@@ -998,5 +1007,194 @@ func TestConfirmStopsOnPermanentGetError(t *testing.T) {
 	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
 	if err == nil || !strings.Contains(err.Error(), "Forbidden") {
 		t.Fatalf("Update error = %v, want the Get failure", err)
+	}
+}
+
+func TestFailedConfirmDoesNotPruneOldVersions(t *testing.T) {
+	fastESARetries(t)
+	storedEntry := func(t *testing.T) (*fakeESA, []byte, []byte) {
+		api, _, _ := managedEntries(t, 3)
+		fullchain, key, leaf := testMaterial(t, time.Now().Add(48*time.Hour))
+		entry := testEntry("stored", leaf)
+		entry.Name = ptr("certdx-123-stored")
+		entry.CreateTime = ptr("2026-02-01 00:00:00")
+		api.entries = append(api.entries, entry)
+		api.certs["stored"] = string(fullchain)
+		return api, fullchain, key
+	}
+	for name, setup := range map[string]func(*testing.T) (*fakeESA, []byte, []byte){
+		"new upload": func(t *testing.T) (*fakeESA, []byte, []byte) { return managedEntries(t, 3) },
+		"stored":     storedEntry,
+	} {
+		t.Run(name, func(t *testing.T) {
+			api, fullchain, key := setup(t)
+			api.status = "ApplyFailed"
+			action := testAction(api)
+			action.cfg.RetainCount = 1
+			err := action.Update(context.Background(), fullchain, key, testCertificate())
+			if err == nil || !retry.IsPermanent(err) {
+				t.Fatalf("Update error = %v, want a permanent failure", err)
+			}
+			if len(api.deletes) != 0 {
+				t.Fatalf("deleted %v after a failed confirm", api.deletes)
+			}
+		})
+	}
+}
+
+func TestConfirmRejectsDifferentFingerprint(t *testing.T) {
+	fastESARetries(t)
+	api, fullchain, key := managedEntries(t, 3)
+	api.wrongFingerprint = true
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+	// Sibling reads use the fake's real certificates, so only confirm sees the
+	// mismatch once the upload's ID is polled.
+	err := action.Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "timed out confirming") || !retry.IsPermanent(err) {
+		t.Fatalf("Update error = %v, want a permanent confirm timeout", err)
+	}
+	if len(api.deletes) != 0 {
+		t.Fatalf("deleted %v without confirming the upload", api.deletes)
+	}
+}
+
+func TestConfirmStatusHandling(t *testing.T) {
+	fastESARetries(t)
+	for status, wantErr := range map[string]bool{
+		"OK": false, "Expiring": false, "Expired": true, "ApplyFailed": true, "Canceled": true,
+	} {
+		t.Run(status, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 0)
+			api.status = status
+			err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+			if wantErr != (err != nil) {
+				t.Fatalf("Update error = %v, want error: %v", err, wantErr)
+			}
+			if wantErr && (!strings.Contains(err.Error(), status) || !retry.IsPermanent(err)) {
+				t.Fatalf("Update error = %v, want a permanent %s failure", err, status)
+			}
+		})
+	}
+}
+
+func TestUpdateRejectsUnusableMaterial(t *testing.T) {
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	expired, expiredKey, _ := testMaterial(t, time.Now().Add(-time.Minute))
+	otherDomains := &config.ClientCertificate{Name: "web", Domains: []string{"other.example.com"}}
+	for name, tc := range map[string]struct {
+		chain, key []byte
+		cert       *config.ClientCertificate
+		want       string
+	}{
+		"SAN mismatch": {fullchain, key, otherDomains, "do not match"},
+		"expired":      {expired, expiredKey, testCertificate(), "has expired"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := &fakeESA{certs: map[string]string{}, status: "OK"}
+			err := testAction(api).Update(context.Background(), tc.chain, tc.key, tc.cert)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Update error = %v, want %q", err, tc.want)
+			}
+			if len(api.events) != 0 {
+				t.Fatalf("unexpected API writes: %v", api.events)
+			}
+		})
+	}
+}
+
+func TestRefuseEqualExpirySibling(t *testing.T) {
+	expires := time.Now().Add(48 * time.Hour)
+	siblingPEM, _, sibling := testMaterial(t, expires)
+	fullchain, key, _ := testMaterial(t, expires)
+	entry := testEntry("sibling", sibling)
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{entry},
+		certs:   map[string]string{"sibling": string(siblingPEM)},
+		status:  "OK",
+	}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "expires no earlier") || len(api.sets) != 0 {
+		t.Fatalf("Update error = %v, uploads = %d; want a refused upload", err, len(api.sets))
+	}
+}
+
+func TestCloudCertificateDoesNotTriggerDowngradeGuard(t *testing.T) {
+	cloudPEM, _, cloudLeaf := testMaterial(t, time.Now().Add(72*time.Hour))
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	cloud := testEntry("cloud-cert", cloudLeaf)
+	cloud.Type = ptr("cas")
+	api := &fakeESA{
+		entries: []*esa.ListCertificatesResponseBodyResult{cloud},
+		certs:   map[string]string{"cloud-cert": string(cloudPEM)},
+		status:  "OK",
+	}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("a later-expiring cas certificate should not block the upload: %v", err)
+	}
+}
+
+func TestRetentionManagesOnlyThisSitesUploads(t *testing.T) {
+	cloud := retentionEntry("cloud", "a.example.com", "OK", "2026-01-01 00:00:00")
+	cloud.Type = ptr("cas")
+	otherSite := retentionEntry("other-site", "a.example.com", "OK", "2026-01-01 00:00:01")
+	otherSite.Name = ptr("certdx-999-other-site")
+	api := &fakeESA{certs: map[string]string{}, status: "OK"}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{
+		cloud, otherSite,
+		retentionEntry("old", "a.example.com", "OK", "2026-01-02 00:00:00"),
+		retentionEntry("current", "a.example.com", "OK", "2026-01-03 00:00:00"),
+	}
+	action := testAction(api)
+	action.cfg.RetainCount = 1
+	if err := action.cleanup(context.Background(), "current"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "old" {
+		t.Fatalf("deleted %s, want only this site's old upload", got)
+	}
+}
+
+func TestCleanupIsBestEffort(t *testing.T) {
+	entries := func() []*esa.ListCertificatesResponseBodyResult {
+		return []*esa.ListCertificatesResponseBodyResult{
+			retentionEntry("old", "a.example.com", "OK", "2026-01-01 00:00:00"),
+			retentionEntry("latest", "a.example.com", "OK", "2026-01-02 00:00:00"),
+		}
+	}
+	t.Run("list failure", func(t *testing.T) {
+		api := &fakeESA{certs: map[string]string{}, entries: entries()}
+		api.listErrs = []error{errors.New("list failed")}
+		action := testAction(api)
+		action.cfg.RetainCount = 1
+		if err := action.cleanup(context.Background(), "latest"); err != nil {
+			t.Fatalf("cleanup should not fail a confirmed upload: %v", err)
+		}
+		if len(api.deletes) != 0 {
+			t.Fatalf("deleted %v without a listing", api.deletes)
+		}
+	})
+	t.Run("current upload not listed", func(t *testing.T) {
+		api := &fakeESA{certs: map[string]string{}, entries: entries()}
+		action := testAction(api)
+		action.cfg.RetainCount = 1
+		if err := action.cleanup(context.Background(), "missing"); err != nil {
+			t.Fatalf("cleanup should not fail a confirmed upload: %v", err)
+		}
+		if len(api.deletes) != 0 {
+			t.Fatalf("deleted %v though the current upload is not listed", api.deletes)
+		}
+	})
+}
+
+func TestListCertificatesWithoutTotalCountFollowsServerPageSize(t *testing.T) {
+	api, _, _ := managedEntries(t, 5)
+	api.listPageSize, api.omitTotalCount = 2, true
+	entries, err := testAction(api).listCertificates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("listed %d entries from pages %v, want 5", len(entries), api.listPages)
 	}
 }
