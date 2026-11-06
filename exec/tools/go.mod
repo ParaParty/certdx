@@ -7,7 +7,7 @@ replace pkg.para.party/certdx => ../..
 require (
 	github.com/spf13/pflag v1.1.0
 	golang.org/x/term v0.47.0
-	pkg.para.party/certdx v0.7.0
+	pkg.para.party/certdx v0.8.0
 )
 
 require (
