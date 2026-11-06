@@ -278,7 +278,7 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		id      string
 		group   string
 		created time.Time
-		healthy bool
+		status  string
 	}
 	var managed []candidate
 	for _, entry := range entries {
@@ -300,7 +300,7 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 			id:      *entry.Id,
 			group:   group,
 			created: created,
-			healthy: isHealthyCertificateStatus(stringValue(entry.Status)),
+			status:  stringValue(entry.Status),
 		})
 	}
 	sort.Slice(managed, func(i, j int) bool {
@@ -309,30 +309,33 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		}
 		return managed[i].created.Before(managed[j].created)
 	})
-	latestAny := make(map[string]string)
+	// Each SAN group keeps its newest healthy upload, plus any newer upload
+	// whose status is unknown or still in progress, since another action may
+	// be waiting to confirm it. Uploads in a terminal status can never serve,
+	// so they get no protection even when they are the group's only version.
 	latestHealthy := make(map[string]string)
+	latestInProgress := make(map[string]string)
 	for _, cert := range managed {
-		latestAny[cert.group] = cert.id
-		if cert.healthy {
+		switch {
+		case isHealthyCertificateStatus(cert.status):
 			latestHealthy[cert.group] = cert.id
+			delete(latestInProgress, cert.group)
+		case !isTerminalCertificateStatus(cert.status):
+			latestInProgress[cert.group] = cert.id
 		}
 	}
-	latest := make(map[string]string, len(latestAny))
-	for group, id := range latestAny {
-		if healthyID := latestHealthy[group]; healthyID != "" {
-			latest[group] = healthyID
-		} else {
-			// If ESA has not supplied a usable status for a SAN group, retain
-			// its newest upload rather than deleting the only known version.
-			latest[group] = id
-		}
-	}
-	var candidates []candidate
+	// Retire dead uploads before usable rollback versions.
+	var terminal, rollback []candidate
 	for _, cert := range managed {
-		if cert.id != protectedID && cert.id != latest[cert.group] {
-			candidates = append(candidates, cert)
+		switch {
+		case cert.id == protectedID || cert.id == latestHealthy[cert.group] || cert.id == latestInProgress[cert.group]:
+		case isTerminalCertificateStatus(cert.status):
+			terminal = append(terminal, cert)
+		default:
+			rollback = append(rollback, cert)
 		}
 	}
+	candidates := append(terminal, rollback...)
 	if len(candidates) < count {
 		if !partial {
 			return nil, fmt.Errorf("need to delete %d certdx certificates, but only %d old versions can be retired safely", count, len(candidates))
@@ -359,6 +362,10 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 
 func isHealthyCertificateStatus(status string) bool {
 	return status == "OK" || status == "Expiring"
+}
+
+func isTerminalCertificateStatus(status string) bool {
+	return status == "Expired" || status == "ApplyFailed" || status == "Canceled"
 }
 
 func (a *Action) listCertificates(ctx context.Context) ([]*esa.ListCertificatesResponseBodyResult, error) {
@@ -471,11 +478,11 @@ func (a *Action) confirm(ctx context.Context, id string, leaf *x509.Certificate)
 			if status == "" {
 				status = stringValue(body.Status)
 			}
-			if status == "OK" || status == "Expiring" {
+			if isHealthyCertificateStatus(status) {
 				logging.Info("Ali ESA certificate %s is registered and valid at site %d", id, a.cfg.SiteID)
 				return nil
 			}
-			if status == "Expired" || status == "ApplyFailed" || status == "Canceled" {
+			if isTerminalCertificateStatus(status) {
 				return retry.Permanent(fmt.Errorf("ESA certificate %s reached status %s", id, status))
 			}
 		}

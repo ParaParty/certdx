@@ -573,21 +573,108 @@ func TestCleanupNeverDeletesProtectedCertificate(t *testing.T) {
 		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-01 00:00:00"),
 	}
 	protected := &esa.ListCertificatesResponseBodyResult{
-		Id: ptr("z-current"), Type: ptr("upload"), Name: ptr("certdx-123-web-current"),
+		Id: ptr("a-current"), Type: ptr("upload"), Name: ptr("certdx-123-web-current"),
 		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-02 00:00:00"),
 	}
+	// The sibling sorts after the protected upload, so it is the group's latest
+	// and only the protected ID can keep the current upload from being deleted.
 	latestSibling := &esa.ListCertificatesResponseBodyResult{
-		Id: ptr("a-sibling"), Type: ptr("upload"), Name: ptr("certdx-123-web-sibling"),
+		Id: ptr("z-sibling"), Type: ptr("upload"), Name: ptr("certdx-123-web-sibling"),
 		SAN: ptr("example.com,*.example.com"), Status: ptr("OK"), CreateTime: ptr("2026-01-02 00:00:00"),
 	}
 	api.entries = []*esa.ListCertificatesResponseBodyResult{old, protected, latestSibling}
 
-	deleted, err := testAction(api).deleteOldestBestEffort(context.Background(), api.entries, 2, "z-current")
+	deleted, err := testAction(api).deleteOldestBestEffort(context.Background(), api.entries, 2, "a-current")
 	if err != nil {
 		t.Fatalf("deleteOldestBestEffort: %v", err)
 	}
-	if !slices.Equal(deleted, []string{"old", "a-sibling"}) || slices.Contains(api.deletes, "z-current") {
-		t.Fatalf("deleted %v, want old and a-sibling while never deleting protected z-current", deleted)
+	if !slices.Equal(deleted, []string{"old"}) {
+		t.Fatalf("deleted %v, want only old while keeping protected a-current and latest z-sibling", deleted)
+	}
+}
+
+func retentionEntry(id, san, status, created string) *esa.ListCertificatesResponseBodyResult {
+	return &esa.ListCertificatesResponseBodyResult{
+		Id: ptr(id), Type: ptr("upload"), Name: ptr("certdx-123-" + id),
+		SAN: ptr(san), Status: ptr(status), CreateTime: ptr(created),
+	}
+}
+
+func TestCleanupKeepsInProgressUploadOfAnotherSANSet(t *testing.T) {
+	for _, status := range []string{"Applying", ""} {
+		t.Run("status="+status, func(t *testing.T) {
+			api := &fakeESA{certs: map[string]string{}, status: "OK"}
+			api.entries = []*esa.ListCertificatesResponseBodyResult{
+				retentionEntry("a-old", "a.example.com", "OK", "2026-01-01 00:00:00"),
+				retentionEntry("b-old", "b.example.com", "OK", "2026-01-01 00:00:01"),
+				retentionEntry("a-new", "a.example.com", status, "2026-02-01 00:00:00"),
+				retentionEntry("b-new", "b.example.com", "OK", "2026-02-01 00:00:01"),
+			}
+			action := testAction(api)
+			action.cfg.RetainCount = 1
+			if err := action.cleanup(context.Background(), "b-new"); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "b-old" {
+				t.Fatalf("deleted %s, want only b-old", got)
+			}
+		})
+	}
+}
+
+func TestCleanupRetiresDeadUploadsBeforeRollbackVersions(t *testing.T) {
+	api := &fakeESA{certs: map[string]string{}, status: "OK"}
+	api.entries = []*esa.ListCertificatesResponseBodyResult{
+		retentionEntry("rollback", "a.example.com", "OK", "2026-01-01 00:00:00"),
+		retentionEntry("latest", "a.example.com", "OK", "2026-01-02 00:00:00"),
+		retentionEntry("failed", "a.example.com", "ApplyFailed", "2026-01-03 00:00:00"),
+	}
+	if _, err := testAction(api).deleteOldest(context.Background(), api.entries, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(api.deletes, ","); got != "failed" {
+		t.Fatalf("deleted %s, want the failed upload rather than the usable rollback", got)
+	}
+}
+
+func TestQuotaRetiresTerminalUploadWithoutNewerVersion(t *testing.T) {
+	for _, status := range []string{"Expired", "ApplyFailed", "Canceled"} {
+		t.Run("same SAN set "+status, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 1)
+			api.entries[0].Status = ptr(status)
+			api.entries = append(api.entries, retentionEntry("other", "other.example.com", "OK", "2026-02-01 00:00:00"))
+			api.quota = 2
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "old-1" {
+				t.Fatalf("deleted %s, want only the %s upload", got, status)
+			}
+		})
+		t.Run("retired SAN set "+status, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 1)
+			api.entries = append(api.entries, retentionEntry("retired", "retired.example.com", status, "2026-02-01 00:00:00"))
+			api.quota = 2
+			if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "retired" {
+				t.Fatalf("deleted %s, want only the %s upload", got, status)
+			}
+		})
+	}
+}
+
+func TestQuotaFailsWhenEveryUploadIsTheHealthyLatestOfItsSANSet(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	api.entries = append(api.entries, retentionEntry("other", "other.example.com", "OK", "2026-02-01 00:00:00"))
+	api.quota = 2
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "cannot free ESA upload slot") {
+		t.Fatalf("Update error = %v, want a quota failure", err)
+	}
+	if len(api.deletes) != 0 || len(api.sets) != 0 {
+		t.Fatalf("deletes = %v, uploads = %d; want neither", api.deletes, len(api.sets))
 	}
 }
 
