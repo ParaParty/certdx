@@ -31,12 +31,14 @@ import (
 const (
 	defaultRegionID     = "cn-hangzhou"
 	pageSize            = int64(100)
-	confirmTimeout      = 2 * time.Minute
-	confirmEvery        = 3 * time.Second
 	transientRetryCount = 3
 )
 
-var transientBackoff = 2 * time.Second
+var (
+	confirmTimeout   = 2 * time.Minute
+	confirmEvery     = 3 * time.Second
+	transientBackoff = 2 * time.Second
+)
 
 // siteLocks holds one lock per ESA site. Quota recovery and retention work
 // from a listing of the whole site, so concurrent actions on one site would
@@ -222,12 +224,16 @@ func esaErrorCode(err error) string {
 }
 
 func isTransientESAError(err error) bool {
-	switch esaErrorCode(err) {
-	case "LockFailed", "InternalException":
+	code := esaErrorCode(err)
+	switch code {
+	case "LockFailed", "InternalException", "InternalError", "ServiceUnavailable":
 		return true
-	default:
-		return false
 	}
+	if strings.HasPrefix(code, "Throttling") {
+		return true
+	}
+	var sdkErr *tea.SDKError
+	return errors.As(err, &sdkErr) && sdkErr.StatusCode != nil && *sdkErr.StatusCode >= 500
 }
 
 func callESAAPI(ctx context.Context, what string, work func() error) error {
@@ -374,8 +380,11 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		if err := ctx.Err(); err != nil {
 			return deleted, err
 		}
-		_, err := a.client.DeleteCertificateWithContext(ctx,
-			new(esa.DeleteCertificateRequest).SetSiteId(a.cfg.SiteID).SetId(old.id), apiOptions())
+		err := callESAAPI(ctx, "DeleteCertificate", func() error {
+			_, callErr := a.client.DeleteCertificateWithContext(ctx,
+				new(esa.DeleteCertificateRequest).SetSiteId(a.cfg.SiteID).SetId(old.id), apiOptions())
+			return callErr
+		})
 		if err != nil && !isCertificateNotFoundError(err) {
 			return deleted, fmt.Errorf("DeleteCertificate %s: %w", old.id, err)
 		}
@@ -407,7 +416,12 @@ func (a *Action) listCertificates(ctx context.Context) ([]*esa.ListCertificatesR
 			SetSiteId(a.cfg.SiteID).
 			SetPageNumber(page).
 			SetPageSize(pageSize)
-		resp, err := a.client.ListCertificatesWithContext(ctx, req, apiOptions())
+		var resp *esa.ListCertificatesResponse
+		err := callESAAPI(ctx, "ListCertificates", func() error {
+			var callErr error
+			resp, callErr = a.client.ListCertificatesWithContext(ctx, req, apiOptions())
+			return callErr
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -449,7 +463,12 @@ func (a *Action) findCertificate(ctx context.Context, entries []*esa.ListCertifi
 	}
 	var firstErr error
 	for _, entry := range matching {
-		current, getErr := a.getCertificate(ctx, *entry.Id)
+		var current *esa.GetCertificateResponseBody
+		getErr := callESAAPI(ctx, "GetCertificate", func() error {
+			var callErr error
+			current, callErr = a.getCertificate(ctx, *entry.Id)
+			return callErr
+		})
 		if isCertificateNotFoundError(getErr) {
 			// Deleted since the listing, so it cannot be newer than the renewal.
 			continue
@@ -504,9 +523,12 @@ func (a *Action) confirm(ctx context.Context, id string, leaf *x509.Certificate)
 	for {
 		body, err := a.getCertificate(ctx, id)
 		if err != nil {
-			return fmt.Errorf("confirm ESA certificate %s: %w", id, err)
-		}
-		if body.Result != nil && normalizeFingerprint(body.Result.FingerprintSha256) == fingerprint(leaf) {
+			if !isTransientESAError(err) {
+				return fmt.Errorf("confirm ESA certificate %s: %w", id, err)
+			}
+			// The upload is stored, so keep polling rather than report a failure.
+			logging.Warn("Confirming ESA certificate %s failed transiently, still polling: %s", id, err)
+		} else if body.Result != nil && normalizeFingerprint(body.Result.FingerprintSha256) == fingerprint(leaf) {
 			status := stringValue(body.Result.Status)
 			if status == "" {
 				status = stringValue(body.Status)

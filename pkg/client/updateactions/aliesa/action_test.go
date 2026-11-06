@@ -37,6 +37,9 @@ type fakeESA struct {
 	setErr            error
 	setErrs           []error
 	setAfterStoreErrs []error
+	listErrs          []error
+	getErrs           []error
+	deleteErrs        []error
 	deleteErr         error
 	quota             int
 	quotaCode         string
@@ -46,6 +49,9 @@ type fakeESA struct {
 
 func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, _ *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := popErr(&f.listErrs); err != nil {
 		return nil, err
 	}
 	if f.listPageSize <= 0 {
@@ -70,6 +76,9 @@ func (f *fakeESA) ListCertificatesWithContext(ctx context.Context, req *esa.List
 
 func (f *fakeESA) GetCertificateWithContext(ctx context.Context, req *esa.GetCertificateRequest, _ *dara.RuntimeOptions) (*esa.GetCertificateResponse, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := popErr(&f.getErrs); err != nil {
 		return nil, err
 	}
 	certPEM, stored := f.certs[*req.Id]
@@ -150,6 +159,9 @@ func (f *fakeESA) DeleteCertificateWithContext(ctx context.Context, req *esa.Del
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := popErr(&f.deleteErrs); err != nil {
+		return nil, err
+	}
 	if f.deleteErr != nil {
 		return nil, f.deleteErr
 	}
@@ -164,6 +176,15 @@ func (f *fakeESA) DeleteCertificateWithContext(ctx context.Context, req *esa.Del
 	f.entries = slices.Delete(slices.Clone(f.entries), index, index+1)
 	delete(f.certs, *req.Id)
 	return &esa.DeleteCertificateResponse{Body: &esa.DeleteCertificateResponseBody{Id: req.Id}}, nil
+}
+
+func popErr(errs *[]error) error {
+	if len(*errs) == 0 {
+		return nil
+	}
+	err := (*errs)[0]
+	*errs = (*errs)[1:]
+	return err
 }
 
 func certificateNotFound() error {
@@ -899,5 +920,83 @@ func TestWaitingForSiteLockHonorsContext(t *testing.T) {
 	cancel()
 	if _, err := lockSite(ctx, 987); !errors.Is(err, context.Canceled) {
 		t.Fatalf("lockSite error = %v, want context.Canceled", err)
+	}
+}
+
+func fastESARetries(t *testing.T) {
+	t.Helper()
+	backoff, every, timeout := transientBackoff, confirmEvery, confirmTimeout
+	transientBackoff, confirmEvery, confirmTimeout = 0, time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { transientBackoff, confirmEvery, confirmTimeout = backoff, every, timeout })
+}
+
+func TestTransientErrorsAreRetriedOnEveryAPICall(t *testing.T) {
+	fastESARetries(t)
+	throttled := &tea.SDKError{Code: ptr("Throttling.User"), Message: ptr("slow down")}
+	cases := map[string]func(*fakeESA){
+		"ListCertificates":  func(f *fakeESA) { f.listErrs = []error{throttled} },
+		"GetCertificate":    func(f *fakeESA) { f.getErrs = []error{throttled} },
+		"DeleteCertificate": func(f *fakeESA) { f.deleteErrs = []error{throttled} },
+	}
+	for name, inject := range cases {
+		t.Run(name, func(t *testing.T) {
+			api, fullchain, key := managedEntries(t, 2)
+			action := testAction(api)
+			action.cfg.RetainCount = 1
+			inject(api)
+			if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+				t.Fatalf("one throttled %s call should be retried: %v", name, err)
+			}
+			if got := strings.Join(api.deletes, ","); got != "old-1,old-2" {
+				t.Fatalf("deleted %s, want old-1,old-2", got)
+			}
+		})
+	}
+}
+
+func TestIsTransientESAError(t *testing.T) {
+	status := func(code int) *int { return &code }
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"lock", &tea.SDKError{Code: ptr("LockFailed")}, true},
+		{"internal exception", &tea.SDKError{Code: ptr("InternalException")}, true},
+		{"internal error", &tea.SDKError{Code: ptr("InternalError")}, true},
+		{"unavailable", &tea.SDKError{Code: ptr("ServiceUnavailable")}, true},
+		{"throttling", &tea.SDKError{Code: ptr("Throttling")}, true},
+		{"throttling api", &tea.SDKError{Code: ptr("Throttling.Api")}, true},
+		{"wrapped 503", fmt.Errorf("call: %w", &tea.SDKError{Code: ptr("Other"), StatusCode: status(503)}), true},
+		{"client error", &tea.SDKError{Code: ptr("Forbidden"), StatusCode: status(403)}, false},
+		{"not found", certificateNotFound(), false},
+		{"plain error", errors.New("boom"), false},
+	} {
+		if got := isTransientESAError(tc.err); got != tc.want {
+			t.Errorf("%s: isTransientESAError = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestConfirmKeepsPollingThroughTransientErrors(t *testing.T) {
+	fastESARetries(t)
+	api, fullchain, key := managedEntries(t, 0)
+	busy := &tea.SDKError{Code: ptr("InternalException"), Message: ptr("try later")}
+	api.getErrs = []error{busy, busy}
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("confirm should outlast transient errors: %v", err)
+	}
+	if len(api.getErrs) != 0 {
+		t.Fatalf("%d injected errors were not consumed", len(api.getErrs))
+	}
+}
+
+func TestConfirmStopsOnPermanentGetError(t *testing.T) {
+	fastESARetries(t)
+	api, fullchain, key := managedEntries(t, 0)
+	api.getErrs = []error{&tea.SDKError{Code: ptr("Forbidden"), Message: ptr("denied")}}
+	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
+	if err == nil || !strings.Contains(err.Error(), "Forbidden") {
+		t.Fatalf("Update error = %v, want the Get failure", err)
 	}
 }
