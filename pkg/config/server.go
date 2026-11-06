@@ -214,15 +214,20 @@ func (p *DnsProvider) Validate() error {
 	switch p.Type {
 	case DnsProviderTypeCloudflare:
 		if (p.Email == "" || p.APIKey == "") && (p.AuthToken == "" || p.ZoneToken == "") {
-			return fmt.Errorf("DnsProvider Cloudflare: empty Email or APIKey")
+			return fmt.Errorf("DnsProvider Cloudflare: set email and apiKey, or authToken and zoneToken")
 		}
 	case DnsProviderTypeTencentCloud:
 		if p.SecretID == "" || p.SecretKey == "" {
 			return fmt.Errorf("DnsProvider TencentCloud: empty SecretID or SecretKey")
 		}
 	case DnsProviderTypeAliDNS:
-		if p.RAMRole == "" && (p.AccessKeyID == "" || p.AccessKeySecret == "") {
-			return fmt.Errorf("DnsProvider AliDNS: accessKeyId and accessKeySecret are required")
+		if p.RAMRole != "" {
+			// lego prefers the role and would silently ignore the keys.
+			if p.AccessKeyID != "" || p.AccessKeySecret != "" || p.SecurityToken != "" {
+				return fmt.Errorf("DnsProvider AliDNS: set either ramRole or access key credentials, not both")
+			}
+		} else if p.AccessKeyID == "" || p.AccessKeySecret == "" {
+			return fmt.Errorf("DnsProvider AliDNS: set accessKeyId and accessKeySecret, or ramRole")
 		}
 	default:
 		return fmt.Errorf("unknown DnsProvider: %s", p.Type)

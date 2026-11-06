@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -358,6 +359,9 @@ func (p *AliESAProfile) Validate() error {
 	}
 	if p.AccessKeyID == "" || p.AccessKeySecret == "" {
 		return fmt.Errorf("aliESA profile %s: accessKeyId and accessKeySecret are required", p.Name)
+	}
+	if strings.Contains(p.Endpoint, "/") {
+		return fmt.Errorf("aliESA profile %s: endpoint must be a bare host name, got %q", p.Name, p.Endpoint)
 	}
 	return nil
 }

@@ -199,3 +199,16 @@ kubeConfig = ""
 		t.Fatalf("kubernetes profiles decoded as %+v", c.Profiles.Kubernetes)
 	}
 }
+
+func TestAliESAProfileRejectsEndpointWithSchemeOrPath(t *testing.T) {
+	for _, endpoint := range []string{"https://esa.cn-hangzhou.aliyuncs.com", "esa.cn-hangzhou.aliyuncs.com/"} {
+		p := AliESAProfile{Name: "prod", AccessKeyID: "id", AccessKeySecret: "secret", Endpoint: endpoint}
+		if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "bare host name") {
+			t.Fatalf("endpoint %q: Validate = %v, want it rejected", endpoint, err)
+		}
+	}
+	p := AliESAProfile{Name: "prod", AccessKeyID: "id", AccessKeySecret: "secret", Endpoint: "esa-vpc.cn-hangzhou.aliyuncs.com"}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("bare host endpoint: %v", err)
+	}
+}

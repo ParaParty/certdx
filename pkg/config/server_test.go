@@ -476,3 +476,15 @@ func TestServerConfigRequiresServerMode(t *testing.T) {
 		t.Fatalf("Validate error = %v, want no-server-mode validation", err)
 	}
 }
+
+func TestDnsProviderValidateAliDNSRejectsRAMRoleWithKeys(t *testing.T) {
+	for _, p := range []DnsProvider{
+		{Type: DnsProviderTypeAliDNS, RAMRole: "role", AccessKeyID: "id", AccessKeySecret: "secret"},
+		{Type: DnsProviderTypeAliDNS, RAMRole: "role", AccessKeyID: "id"},
+		{Type: DnsProviderTypeAliDNS, RAMRole: "role", SecurityToken: "token"},
+	} {
+		if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "not both") {
+			t.Fatalf("Validate(%+v) = %v, want the combination rejected", p, err)
+		}
+	}
+}
