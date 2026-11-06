@@ -473,9 +473,10 @@ rules:
   verbs: ["list", "get", "update"]
 ```
 
-Because the client is a long-running process, run it as a Deployment
-rather than a CronJob; secrets are re-listed on every renewal, so ones
-created later are picked up without a restart. In-cluster it uses the
+Run the client as a Deployment; secrets are re-listed on every renewal, so
+ones created later are picked up without a restart. A CronJob also works in
+HTTP mode with [`--quit`](client.md#certificateupdateaction), given a schedule
+short enough for the renewal window. In-cluster it uses the
 pod's service account automatically; outside the cluster set
 `kubeConfig` on the profile. Ready-to-adapt manifests live in
 `config/kubernetes/`.

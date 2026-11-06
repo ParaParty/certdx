@@ -101,6 +101,12 @@ certificate with the previous one: every run delivers to every action, so
 the `file` action rewrites its files and runs `reloadCommand` each time. Use
 a reload that is safe to repeat at the schedule's frequency.
 
+Schedule `--quit` at least every `ACME.renewTimeLeft` of the server, ideally
+every quarter of it as the daemon does. Without a subscriber the server renews
+only when asked, so with a longer gap a certificate can expire between runs
+while every run still exits 0. An action that finds nothing to update, such as
+a `kubernetes` action with no matching secret, also counts as success.
+
 #### `type = "file"`
 
 | Key | Type | Notes |
