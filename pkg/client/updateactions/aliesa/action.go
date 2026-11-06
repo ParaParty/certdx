@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/utils"
@@ -36,6 +37,22 @@ const (
 )
 
 var transientBackoff = 2 * time.Second
+
+// siteLocks holds one lock per ESA site. Quota recovery and retention work
+// from a listing of the whole site, so concurrent actions on one site would
+// otherwise pick the same certificates to delete.
+var siteLocks sync.Map // int64 site ID -> chan struct{}
+
+func lockSite(ctx context.Context, siteID int64) (unlock func(), err error) {
+	value, _ := siteLocks.LoadOrStore(siteID, make(chan struct{}, 1))
+	lock := value.(chan struct{})
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 type esaAPI interface {
 	ListCertificatesWithContext(context.Context, *esa.ListCertificatesRequest, *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error)
@@ -89,6 +106,12 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 		return fmt.Errorf("renewed certificate for %q has expired", cert.Name)
 	}
 
+	unlock, err := lockSite(ctx, a.cfg.SiteID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	entries, err := a.listCertificates(ctx)
 	if err != nil {
 		return fmt.Errorf("list ESA site certificates: %w", err)
@@ -112,6 +135,7 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 		SetCertificate(strings.TrimSpace(string(fullchain))).
 		SetPrivateKey(strings.TrimSpace(string(key)))
 	var resp *esa.SetCertificateResponse
+	var retired []string
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -150,8 +174,16 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 			return errors.Join(fmt.Errorf("SetCertificate at ESA site %d: %w", a.cfg.SiteID, err),
 				fmt.Errorf("cannot free ESA upload slot: %w", deleteErr))
 		}
+		retired = append(retired, deleted...)
+		// Another host may have changed the site meanwhile, so choose the next
+		// candidate from a fresh listing. Dropping what was already retired
+		// keeps the loop finite if the listing lags behind the deletes.
+		entries, err = a.listCertificates(ctx)
+		if err != nil {
+			return fmt.Errorf("list ESA site certificates after freeing an upload slot: %w", err)
+		}
 		entries = slices.DeleteFunc(entries, func(entry *esa.ListCertificatesResponseBodyResult) bool {
-			return entry != nil && stringValue(entry.Id) == deleted[0]
+			return entry != nil && slices.Contains(retired, stringValue(entry.Id))
 		})
 	}
 	if resp == nil || resp.Body == nil || resp.Body.Id == nil || *resp.Body.Id == "" {
@@ -165,19 +197,12 @@ func (a *Action) Update(ctx context.Context, fullchain, key []byte, cert *config
 }
 
 func isCertificateQuotaError(err error) bool {
-	var apiErr dara.BaseError
-	if errors.As(err, &apiErr) {
-		if isCertificateQuotaCode(apiErr.GetCode()) {
-			return true
-		}
-	}
-
-	var sdkErr *tea.SDKError
-	return errors.As(err, &sdkErr) && isCertificateQuotaCode(sdkErr.Code)
+	code := esaErrorCode(err)
+	return code == "CertQuotaCheckFailed" || code == "QuotaExceeded"
 }
 
-func isCertificateQuotaCode(code *string) bool {
-	return code != nil && (*code == "CertQuotaCheckFailed" || *code == "QuotaExceeded")
+func isCertificateNotFoundError(err error) bool {
+	return esaErrorCode(err) == "Certificate.NotFound"
 }
 
 func isCertificateDuplicatedError(err error) bool {
@@ -351,10 +376,14 @@ func (a *Action) deleteOldestWithPolicy(ctx context.Context, entries []*esa.List
 		}
 		_, err := a.client.DeleteCertificateWithContext(ctx,
 			new(esa.DeleteCertificateRequest).SetSiteId(a.cfg.SiteID).SetId(old.id), apiOptions())
-		if err != nil {
+		if err != nil && !isCertificateNotFoundError(err) {
 			return deleted, fmt.Errorf("DeleteCertificate %s: %w", old.id, err)
 		}
 		deleted = append(deleted, old.id)
+		if err != nil {
+			logging.Info("Ali ESA site %d certificate %s was already deleted", a.cfg.SiteID, old.id)
+			continue
+		}
 		logging.Info("Ali ESA site %d deleted old certdx certificate %s", a.cfg.SiteID, old.id)
 	}
 	return deleted, nil
@@ -421,6 +450,10 @@ func (a *Action) findCertificate(ctx context.Context, entries []*esa.ListCertifi
 	var firstErr error
 	for _, entry := range matching {
 		current, getErr := a.getCertificate(ctx, *entry.Id)
+		if isCertificateNotFoundError(getErr) {
+			// Deleted since the listing, so it cannot be newer than the renewal.
+			continue
+		}
 		if getErr != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("read matching ESA certificate %s: %w", *entry.Id, getErr)

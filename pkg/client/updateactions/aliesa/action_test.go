@@ -13,6 +13,8 @@ import (
 	"math/big"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,7 +72,10 @@ func (f *fakeESA) GetCertificateWithContext(ctx context.Context, req *esa.GetCer
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	certPEM := f.certs[*req.Id]
+	certPEM, stored := f.certs[*req.Id]
+	if !stored {
+		return nil, certificateNotFound()
+	}
 	block, _ := pem.Decode([]byte(certPEM))
 	if block == nil {
 		return &esa.GetCertificateResponse{Body: &esa.GetCertificateResponseBody{}}, nil
@@ -148,16 +153,21 @@ func (f *fakeESA) DeleteCertificateWithContext(ctx context.Context, req *esa.Del
 	if f.deleteErr != nil {
 		return nil, f.deleteErr
 	}
+	index := slices.IndexFunc(f.entries, func(entry *esa.ListCertificatesResponseBodyResult) bool {
+		return stringValue(entry.Id) == *req.Id
+	})
+	if index < 0 {
+		return nil, certificateNotFound()
+	}
 	f.deletes = append(f.deletes, *req.Id)
 	f.events = append(f.events, "delete:"+*req.Id)
-	for i, entry := range f.entries {
-		if stringValue(entry.Id) == *req.Id {
-			f.entries = append(f.entries[:i], f.entries[i+1:]...)
-			break
-		}
-	}
+	f.entries = slices.Delete(slices.Clone(f.entries), index, index+1)
 	delete(f.certs, *req.Id)
 	return &esa.DeleteCertificateResponse{Body: &esa.DeleteCertificateResponseBody{Id: req.Id}}, nil
+}
+
+func certificateNotFound() error {
+	return &tea.SDKError{Code: ptr("Certificate.NotFound"), Message: ptr("certificate not found")}
 }
 
 func ptr(s string) *string { return &s }
@@ -788,5 +798,106 @@ func TestDeleteFailureStopsUpload(t *testing.T) {
 	err := testAction(api).Update(context.Background(), fullchain, key, testCertificate())
 	if err == nil || !strings.Contains(err.Error(), "permission denied") || len(api.sets) != 0 {
 		t.Fatalf("expected deletion error before upload, got err=%v sets=%d", err, len(api.sets))
+	}
+}
+
+// peerDeletesDuringUpload simulates another host retiring a certificate after
+// this action listed the site: the certificate is gone by the time the action
+// tries to delete it.
+type peerDeletesDuringUpload struct {
+	*fakeESA
+	id   string
+	done bool
+}
+
+func (p *peerDeletesDuringUpload) SetCertificateWithContext(ctx context.Context, req *esa.SetCertificateRequest, opts *dara.RuntimeOptions) (*esa.SetCertificateResponse, error) {
+	resp, err := p.fakeESA.SetCertificateWithContext(ctx, req, opts)
+	if !p.done {
+		p.done = true
+		p.entries = slices.DeleteFunc(slices.Clone(p.entries), func(entry *esa.ListCertificatesResponseBodyResult) bool {
+			return stringValue(entry.Id) == p.id
+		})
+		delete(p.certs, p.id)
+	}
+	return resp, err
+}
+
+func TestQuotaTreatsPeerDeletionAsFreedSlot(t *testing.T) {
+	fake, fullchain, key := managedEntries(t, 3)
+	fake.quota = 3
+	api := &peerDeletesDuringUpload{fakeESA: fake, id: "old-1"}
+	action := &Action{cfg: &config.AliESAAction{SiteID: 123}, client: api}
+	if err := action.Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("a certificate deleted by a peer should count as freed: %v", err)
+	}
+	if len(fake.sets) != 1 || len(fake.deletes) != 0 {
+		t.Fatalf("uploads = %d, deletes = %v; want one upload and no further deletes", len(fake.sets), fake.deletes)
+	}
+}
+
+func TestSiblingDeletedAfterListingDoesNotBlockUpload(t *testing.T) {
+	api, fullchain, key := managedEntries(t, 1)
+	delete(api.certs, "old-1")
+	if err := testAction(api).Update(context.Background(), fullchain, key, testCertificate()); err != nil {
+		t.Fatalf("a sibling that no longer exists should not block the upload: %v", err)
+	}
+	if len(api.sets) != 1 {
+		t.Fatalf("uploads = %d, want 1", len(api.sets))
+	}
+}
+
+// slowList widens the window in which unserialized actions would overlap.
+type slowList struct {
+	*fakeESA
+	active, peak atomic.Int32
+}
+
+func (s *slowList) ListCertificatesWithContext(ctx context.Context, req *esa.ListCertificatesRequest, opts *dara.RuntimeOptions) (*esa.ListCertificatesResponse, error) {
+	active := s.active.Add(1)
+	defer s.active.Add(-1)
+	for {
+		peak := s.peak.Load()
+		if active <= peak || s.peak.CompareAndSwap(peak, active) {
+			break
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	return s.fakeESA.ListCertificatesWithContext(ctx, req, opts)
+}
+
+func TestActionsOnOneSiteAreSerialized(t *testing.T) {
+	fake := &fakeESA{certs: map[string]string{}, status: "OK"}
+	api := &slowList{fakeESA: fake}
+	fullchain, key, _ := testMaterial(t, time.Now().Add(48*time.Hour))
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Go(func() {
+			action := &Action{cfg: &config.AliESAAction{SiteID: 123}, client: api}
+			errs[i] = action.Update(context.Background(), fullchain, key, testCertificate())
+		})
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
+	if peak := api.peak.Load(); peak != 1 {
+		t.Fatalf("%d actions used the site at once, want 1", peak)
+	}
+	if len(fake.sets) != 1 {
+		t.Fatalf("uploads = %d, want the second action to reuse the first upload", len(fake.sets))
+	}
+}
+
+func TestWaitingForSiteLockHonorsContext(t *testing.T) {
+	unlock, err := lockSite(context.Background(), 987)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := lockSite(ctx, 987); !errors.Is(err, context.Canceled) {
+		t.Fatalf("lockSite error = %v, want context.Canceled", err)
 	}
 }
