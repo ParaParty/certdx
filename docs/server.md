@@ -65,7 +65,7 @@ or a client request:
 | Failure | Wait before the next order |
 | --- | --- |
 | No response from the CA, the DNS provider API or S3 | 30s, doubling up to 30m |
-| The CA rejected the order, or the challenge or DNS propagation failed | 10m, doubling up to 1h |
+| The CA rejected the order, or the challenge or DNS propagation failed, including when AliDNS `ramRole` credentials cannot be fetched | 10m, doubling up to 1h |
 | The CA rate-limited the account | The CA's `Retry-After`, or 1h if it sent none |
 
 The log line of each failure names its kind and includes the CA's error type
@@ -93,9 +93,14 @@ block is in `config/server_config_full.toml`.
 | `secretID`, `secretKey` | string | Tencent Cloud credentials. |
 | `accessKeyId`, `accessKeySecret` | string | Alibaba Cloud DNS credentials; required unless `ramRole` is set. |
 | `securityToken` | string | Optional Alibaba Cloud temporary credential token. Static tokens expire, so use `ramRole` for a long-running server. |
-| `ramRole` | string | Optional ECS instance RAM role. Uses refreshable instance-role credentials instead of access key credentials. |
+| `ramRole` | string | Optional ECS instance RAM role. Uses refreshable instance-role credentials instead of access key credentials. If `HTTP_PROXY` is set, also set `NO_PROXY=100.100.100.200`; otherwise the credential lookup goes through the proxy in cleartext. |
 
 Exactly one credential set must be configured for the chosen `type`.
+
+When an order finishes, the `alidns` provider deletes every TXT record at its
+`_acme-challenge` name. That includes a record kept there by hand, and the
+record of another order for the same name still in progress; that order then
+fails and is retried after the wait above.
 
 ### `[HttpProvider]` and `[HttpProvider.S3]`
 
@@ -180,5 +185,8 @@ The config is checked on startup; any failure aborts the process.
 - `challenge type: <x> not supported` — must be `dns` or `http`.
 - `ACME provider not supported: <x>` — see the table above.
 - `secure http server with no name` — set `HttpServer.names` when `secure = true`.
-- `DnsProvider Cloudflare: empty Email or APIKey` — provide either the
-  global key pair or the auth/zone token pair.
+- `no server mode enabled` — enable `HttpServer` or `GRPCSDSServer`.
+- `DnsProvider Cloudflare: set email and apiKey, or authToken and zoneToken` —
+  provide either the global key pair or the auth/zone token pair.
+- `DnsProvider AliDNS: set either ramRole or access key credentials, not both`
+  — remove whichever you do not use.

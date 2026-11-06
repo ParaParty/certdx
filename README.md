@@ -13,8 +13,8 @@ APIs, or rate limits.
 - **One issuer, many consumers** — `certdx_server` is the only thing that
   talks to Let's Encrypt or Google Trust Services. Every other host pulls
   finished certificates from it.
-- **Wildcards out of the box** — DNS-01 challenges via Cloudflare or Tencent
-  Cloud, including `*.example.com`. One wildcard certificate is shared across
+- **Wildcards out of the box** — DNS-01 challenges via Cloudflare, Tencent
+  Cloud or Alibaba Cloud DNS, including `*.example.com`. One wildcard certificate is shared across
   all consumers, so you never hit CA rate limits no matter how many hosts or
   services need it.
 - **Drop-in for what you already run:**
@@ -26,8 +26,8 @@ APIs, or rate limits.
     `kubernetes.io/tls` secrets on every renewal.
   - **Tencent Cloud** resources re-bound to the renewed certificate on
     CLB / CDN / WAF / TEO and friends.
-  - **Alibaba Cloud ESA** certificates uploaded with safe per-SAN retention.
-  - **Alibaba Cloud DNS** supports access keys or refreshable ECS RAM roles.
+  - **Alibaba Cloud ESA** certificates uploaded with site-wide retention that
+    protects the latest healthy upload of each SAN set.
 - **Auth that fits the deployment** — shared bearer token over HTTPS for
   simple setups, mTLS or gRPC SDS for everything else.
 - **Resilient by design** — clients support a standby server with

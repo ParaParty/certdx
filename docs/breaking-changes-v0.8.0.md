@@ -15,6 +15,9 @@ later at runtime:
   example a URL such as `udp://8.8.8.8`, an empty entry, or an invalid port.
 - `[HttpProvider.S3]` without `bucket`, `url`, `accessKeyId` or
   `accessKeySecret`.
+- Neither `[HttpServer]` nor `[GRPCSDSServer]` enabled. Such a server served
+  nothing and never renewed anything; it now exits with
+  `no server mode enabled`.
 
 ## `[ACME].retryCount` removed
 
@@ -38,3 +41,11 @@ from `[ACME]`.
 
 A certificate whose domains are all blank (`""` or `"."`) is also rejected,
 and the Caddy plugin refuses to start with such a certificate.
+
+## Failed `reloadCommand` fails the `file` action
+
+A `reloadCommand` that exits nonzero used to be logged while the action still
+reported success. The action now fails, so logs show `Update action file
+failed` instead of `succeeded`; update any alerts built on those lines. The
+daemon keeps running and does not run the command again until the certificate
+changes.

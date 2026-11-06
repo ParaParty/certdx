@@ -89,20 +89,24 @@ actions together and do not interleave two certificates.
 
 Every action carries a `type` key selecting what to do with the renewed
 material. Actions for one certificate run concurrently, each on its own
-goroutine, retried `Common.retryCount` times; a failing action never
-stops the others or the daemon.
+goroutine, retried up to `Common.retryCount` times; a failing action never
+stops the others or the daemon. An attempt that fails in under a second, or
+with a final verdict such as a failed reload command, is not retried.
 
 With HTTP `--quit`, the client fetches each configured certificate once, waits for
 all its update actions, and exits. `file`, `tencentCloud`, `aliESA`, and `kubernetes`
 are all one-shot actions. Certificate fetches and actions must all succeed
-for exit status 0.
+for exit status 0. Unlike the daemon, `--quit` does not compare the fetched
+certificate with the previous one: every run delivers to every action, so
+the `file` action rewrites its files and runs `reloadCommand` each time. Use
+a reload that is safe to repeat at the schedule's frequency.
 
 #### `type = "file"`
 
 | Key | Type | Notes |
 | --- | --- | --- |
 | `savePath` | path | Output directory. The certificate is written to `<savePath>/<name>.pem` and the private key to `<savePath>/<name>.key`. |
-| `reloadCommand` | string | Shell command executed after a successful write. A nonzero exit fails the action; commands running longer than 5 minutes are killed. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
+| `reloadCommand` | string | Command executed after a successful write, unless this write created the files. It is split on whitespace and run directly, not through a shell, so quotes, `&&` and variables are not interpreted; put anything more complex in a script. A nonzero exit fails the action and is not retried; commands running longer than 5 minutes are killed. Typical values: `systemctl reload nginx`, `bash /opt/acme/reload.sh`. |
 
 #### `type = "tencentCloud"`
 
@@ -149,8 +153,11 @@ targets a soft cap of certdx uploads across that site at `retainCount`; when
 multiple SAN groups each need a protected latest upload, the site can remain
 above that target. If ESA rejects an
 upload because the plan's custom-certificate quota is full, it deletes one
-safe older certdx version and retries, repeating only as needed. It never
-deletes non-certdx uploads or the latest certdx upload for another SAN set.
+safe older certdx version and retries, repeating only as needed. Uploads with
+status `Expired`, `ApplyFailed` or `Canceled` are deleted first. It never
+deletes non-certdx uploads, the latest healthy certdx upload for a SAN set, or
+a newer upload of that set still being applied. Actions on the same site in
+one client run one at a time.
 After `GetCertificate` reports the new fingerprint with status `OK` or
 `Expiring`, it prunes excess
 older certdx uploads. This confirms ESA's certificate record, not which
@@ -161,15 +168,24 @@ separately when deploying to production.
 | --- | --- | --- |
 | `profile` | string | Name of a `[[Profile.AliESA]]` entry. |
 | `siteId` | integer | ESA site ID returned by `ListSites`. Must be positive. |
-| `retainCount` | integer | Target number of recent certdx uploads to retain across the site. Defaults to `3`; `0` also selects the default, and positive values override it. The latest healthy upload for each SAN set remains protected. |
+| `retainCount` | integer | Target number of recent certdx uploads to retain across the site. Defaults to `3`; `0` also selects the default, and positive values override it. The latest healthy upload for each SAN set remains protected. Each action applies its own value to the whole site, so the smallest value on a site takes effect. |
 
 ESA exposes the action in the `cn-hangzhou` and `ap-southeast-1` regions;
 use one of those `regionId` values unless an explicit endpoint is configured.
 The [custom-certificate quota](https://help.aliyun.com/zh/edge-security-acceleration/esa/user-guide/configure-edge-certificates)
 depends on the ESA plan. The Free plan allows two custom certificates, so the
-default `retainCount = 3` is above that quota. If no older certdx version can
-be retired safely, the action reports a warning after a confirmed upload and
-keeps the protected certificates.
+default `retainCount = 3` is above that quota.
+
+Replacing a certificate needs a free slot, because the new version is uploaded
+before the old one is removed. If the quota is full and no older certdx version
+can be retired, the upload fails with an error and nothing changes, so keep one
+spare slot per SAN set. On the Free plan that means a single SAN set and no
+manual uploads. If cleanup after a confirmed upload cannot reach `retainCount`,
+the action only logs a warning.
+
+Setting `DEBUG=dara` makes the Alibaba Cloud SDK print request headers to
+stdout, including `x-acs-security-token` and the signed `Authorization`
+header. Do not leave it on where those logs are kept.
 
 #### `type = "kubernetes"`
 
@@ -227,7 +243,7 @@ share a name.
 | | `accessKeyId` / `accessKeySecret` | Alibaba Cloud credentials. Both required. |
 | | `securityToken` | Optional temporary credential token; static tokens are suitable only for short-lived processes. |
 | | `regionId` | ESA API region: `cn-hangzhou` or `ap-southeast-1`; defaults to `cn-hangzhou`. |
-| | `endpoint` | ESA API host. Defaults to `esa.<regionId>.aliyuncs.com`; set this explicitly for a VPC endpoint. |
+| | `endpoint` | ESA API host name, without a scheme or path. Defaults to `esa.<regionId>.aliyuncs.com`; set this explicitly for a VPC endpoint. |
 | `[[Profile.Kubernetes]]` | `name` | Referenced by `profile` in a `kubernetes` action. |
 | | `kubeConfig` | Path to a kubeconfig. Empty means in-cluster, then `$KUBECONFIG`, then `~/.kube/config`. |
 
