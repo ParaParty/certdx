@@ -43,6 +43,7 @@ type httpPoller struct {
 	retryWait time.Duration // wait before the next retry of servers[current]
 	interval  time.Duration // wait after a successful round
 	onceDone  bool          // the first fetch has finished in --quit mode
+	lastErrs  []error       // last failure of each server, for the --quit report
 }
 
 func (r *CertDXClientDaemon) newHttpPoller(cert *watchingCert, main, standby *CertDXHttpClient) *httpPoller {
@@ -56,6 +57,7 @@ func (r *CertDXClientDaemon) newHttpPoller(cert *watchingCert, main, standby *Ce
 	if standby != nil {
 		p.servers = append(p.servers, standby)
 	}
+	p.lastErrs = make([]error, len(p.servers))
 	return p
 }
 
@@ -102,6 +104,7 @@ func (p *httpPoller) poll() time.Duration {
 func (p *httpPoller) onFailure(err error) time.Duration {
 	attempts := max(p.daemon.Config.Common.RetryCount, 1)
 	p.failures++
+	p.lastErrs[p.current] = fmt.Errorf("%s: %w", p.serverName(), err)
 	logging.Warn("Failed to get cert %v from %s (%d/%d): %s", p.cert.Config.Domains, p.serverName(), p.failures, attempts, err)
 
 	if p.failures < attempts {
@@ -117,7 +120,7 @@ func (p *httpPoller) onFailure(err error) time.Duration {
 	}
 	p.current = 0
 	if p.daemon.once != nil {
-		p.failOnce(fmt.Errorf("all HTTP servers failed: %w", err))
+		p.failOnce(fmt.Errorf("all HTTP servers failed: %w", errors.Join(p.lastErrs...)))
 		return 0
 	}
 	logging.Error("All servers failed for cert %v, retrying in %s", p.cert.Config.Domains, pollIdleWait)

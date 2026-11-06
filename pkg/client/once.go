@@ -75,8 +75,8 @@ func (r *CertDXClientDaemon) deliverOnce(cert *watchingCert, data certData) erro
 	return errors.Join(results...)
 }
 
-// RunOnce uses the normal HTTP or gRPC client loop and stops it after all
-// first certificate fetches and their update actions have completed.
+// RunOnce uses the normal HTTP client loop and stops it after all first
+// certificate fetches and their update actions have completed.
 func (r *CertDXClientDaemon) RunOnce() error {
 	if !r.Config.AllActionsOneShot() {
 		return fmt.Errorf("one-shot run requires only one-shot update actions")
@@ -93,16 +93,18 @@ func (r *CertDXClientDaemon) RunOnce() error {
 	var daemonErr error
 	go func() {
 		defer close(daemonDone)
-		if r.Config.Common.Mode == config.CLIENT_MODE_HTTP {
-			daemonErr = r.HttpMain()
-		} else {
-			daemonErr = r.GRPCMain()
-		}
+		daemonErr = r.HttpMain()
 	}()
 	defer func() {
 		r.Stop()
 		<-daemonDone
 	}()
+	// In-flight actions record their errors as they finish, so a cancelled run
+	// waits for them before reading the result.
+	cancelled := func() error {
+		<-daemonDone
+		return errors.Join(r.once.result(), r.rootCtx.Err())
+	}
 
 	select {
 	case <-r.once.fetched:
@@ -112,13 +114,13 @@ func (r *CertDXClientDaemon) RunOnce() error {
 		}
 		return errors.Join(r.once.result(), daemonErr)
 	case <-r.rootCtx.Done():
-		return errors.Join(r.once.result(), r.rootCtx.Err())
+		return cancelled()
 	}
 
 	select {
 	case <-r.once.done:
 		return r.once.result()
 	case <-r.rootCtx.Done():
-		return errors.Join(r.once.result(), r.rootCtx.Err())
+		return cancelled()
 	}
 }

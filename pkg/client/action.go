@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"pkg.para.party/certdx/pkg/config"
@@ -110,10 +111,11 @@ func (r *actionRunner) deliver(ctx context.Context, cert certData) error {
 		return r.action.Update(ctx, cert.Fullchain, cert.Key, r.cert)
 	})
 	if err != nil {
-		if ctx.Err() != nil {
-			return err
+		// Shutdown cancelling the action is expected; anything else is a real
+		// failure even if it arrives while shutting down.
+		if ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+			logging.Error("Update action %s failed for cert %s: %s", r.action.Type(), r.cert.Name, err)
 		}
-		logging.Error("Update action %s failed for cert %s: %s", r.action.Type(), r.cert.Name, err)
 		return fmt.Errorf("certificate %s: update action %s: %w", r.cert.Name, r.action.Type(), err)
 	}
 
