@@ -8,7 +8,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.11.9
 	github.com/caddyserver/certmagic v0.25.6
 	go.uber.org/zap v1.28.0
-	pkg.para.party/certdx v0.9.0
+	pkg.para.party/certdx v0.9.1
 )
 
 require (
