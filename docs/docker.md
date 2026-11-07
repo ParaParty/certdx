@@ -3,6 +3,15 @@
 The published image carries all three binaries, so one image covers the
 server, the client and the operational tooling.
 
+Creating a GitHub release publishes `ghcr.io/paraparty/certdx:<release-tag>`
+(for example, `ghcr.io/paraparty/certdx:v0.9.0`) for Linux `amd64`, `arm64`,
+and ARM v7. Image publishing uses the same `release: created` trigger as the
+release archives and authenticates with the built-in `GITHUB_TOKEN`.
+
+```sh
+docker run --rm ghcr.io/paraparty/certdx:v0.9.0 certdx_client --version
+```
+
 ## What is in the image
 
 | | |
