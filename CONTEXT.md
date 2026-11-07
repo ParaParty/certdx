@@ -73,12 +73,14 @@ term enters the codebase.
   The e2e test suite uses it for hermetic test runs.
 - **Challenge provider**: the DNS-01 or HTTP-01 backend that satisfies
   the ACME challenge. Lives under `pkg/acme/challengeproviders/` —
-  `cloudflare`, `tencentcloud`, `alidns`, and `s3` (HTTP-01). The Google EAB
+  `cloudflare`, `tencentcloud`, `alidns`, `aliesa`, and `s3` (HTTP-01). The Google EAB
   helper sits separately under `pkg/acme/acmeproviders/google/`; it is
   not a challenge backend.
 
 ## Alibaba Cloud ESA
 
+- **aliesa**: the DNS-01 challenge provider that creates validation TXT
+  records in an ESA (Edge Security Acceleration) site's DNS.
 - **aliESA**: the update action type that uploads certificates to an ESA
   (Edge Security Acceleration) site.
 - **Managed upload**: an ESA upload named `certdx-<siteId>-<fingerprint prefix>`.

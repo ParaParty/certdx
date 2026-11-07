@@ -65,6 +65,7 @@ Required for wildcard certificates. Configure `[DnsProvider]`:
   `zoneToken` (scoped tokens).
 - `tencentcloud` — `secretID` + `secretKey`.
 - `alidns` — `accessKeyId` + `accessKeySecret`, or an ECS instance `ramRole`. A static `securityToken` is suitable only for a short-lived process because it expires.
+- `aliesa` — Alibaba Cloud ESA DNS, with the same credential options as `alidns`. Optional `regionId` defaults to `cn-hangzhou`; the ESA site is discovered automatically.
 
 Set `conservativeDnsCheck = true` to resolve every authoritative nameserver to
 all of its IPv4 and IPv6 addresses and require the DNS-01 TXT value from each

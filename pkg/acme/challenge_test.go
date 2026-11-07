@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/lego"
+	legoAliESA "github.com/go-acme/lego/v4/providers/dns/aliesa"
 	"pkg.para.party/certdx/pkg/config"
 )
 
@@ -66,6 +67,43 @@ func TestOverridePropagationTimeout(t *testing.T) {
 	}
 	if interval != 3*time.Second {
 		t.Fatalf("polling interval: got %s want %s", interval, 3*time.Second)
+	}
+}
+
+func TestGetChallengerAliESA(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider config.DnsProvider
+	}{
+		{name: "default region", provider: config.DnsProvider{AccessKeyID: "test-id", AccessKeySecret: "test-secret"}},
+		{name: "temporary credentials", provider: config.DnsProvider{AccessKeyID: "test-id", AccessKeySecret: "test-secret", SecurityToken: "test-token"}},
+		{name: "custom region", provider: config.DnsProvider{AccessKeyID: "test-id", AccessKeySecret: "test-secret", RegionID: "ap-southeast-1"}},
+		{name: "RAM role", provider: config.DnsProvider{RAMRole: "certdx-ecs-role"}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			testCase.provider.Type = config.DnsProviderTypeAliESA
+			cfg := &config.ServerConfig{
+				ACME:        config.ACMEConfig{ChallengeType: config.ChallengeTypeDns01},
+				DnsProvider: &testCase.provider,
+			}
+			typ, provider, err := getChallenger(&lego.Config{}, cfg)
+			if err != nil {
+				t.Fatalf("construct AliESA provider: %v", err)
+			}
+			if _, ok := provider.(*legoAliESA.DNSProvider); !ok || typ != config.ChallengeTypeDns01 {
+				t.Fatalf("unexpected challenger: type=%q provider=%T", typ, provider)
+			}
+			if _, ok := provider.(challenge.ProviderTimeout); !ok {
+				t.Fatal("AliESA provider does not implement challenge.ProviderTimeout")
+			}
+		})
+	}
+	if _, _, err := getChallenger(&lego.Config{}, &config.ServerConfig{
+		ACME:        config.ACMEConfig{ChallengeType: config.ChallengeTypeDns01},
+		DnsProvider: &config.DnsProvider{Type: config.DnsProviderTypeAliESA},
+	}); err == nil {
+		t.Fatal("expected an error for missing AliESA credentials")
 	}
 }
 

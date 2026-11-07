@@ -66,6 +66,14 @@ apiKey = ""
 # securityToken = "" # optional for temporary credentials
 # ramRole = "" # optional ECS instance RAM role; refreshes credentials automatically
 
+# or you can use Alibaba Cloud ESA DNS
+# type = "aliesa"
+# accessKeyId = ""
+# accessKeySecret = ""
+# securityToken = "" # optional for temporary credentials
+# ramRole = "" # alternative to access key credentials
+# regionId = "cn-hangzhou" # optional; defaults to cn-hangzhou
+
 [HttpProvider]
 type = "s3"
 

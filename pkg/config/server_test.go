@@ -182,6 +182,59 @@ func TestDnsProviderValidateAliDNSRAMRole(t *testing.T) {
 	}
 }
 
+func TestDnsProviderAliESATOML(t *testing.T) {
+	var cfg ServerConfig
+	err := toml.Unmarshal([]byte(`
+[DnsProvider]
+type = "aliesa"
+accessKeyId = "test-id"
+accessKeySecret = "test-secret"
+securityToken = "test-token"
+regionId = "ap-southeast-1"
+`), &cfg)
+	if err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if cfg.DnsProvider == nil || cfg.DnsProvider.Type != DnsProviderTypeAliESA ||
+		cfg.DnsProvider.AccessKeyID != "test-id" || cfg.DnsProvider.AccessKeySecret != "test-secret" ||
+		cfg.DnsProvider.SecurityToken != "test-token" || cfg.DnsProvider.RegionID != "ap-southeast-1" {
+		t.Fatal("AliESA configuration was not decoded")
+	}
+	if err := cfg.DnsProvider.Validate(); err != nil {
+		t.Fatalf("valid AliESA config: %v", err)
+	}
+}
+
+func TestDnsProviderValidateAliESA(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider DnsProvider
+		wantErr  bool
+	}{
+		{name: "access keys", provider: DnsProvider{AccessKeyID: "id", AccessKeySecret: "secret"}},
+		{name: "temporary credentials", provider: DnsProvider{AccessKeyID: "id", AccessKeySecret: "secret", SecurityToken: "token"}},
+		{name: "RAM role", provider: DnsProvider{RAMRole: "role"}},
+		{name: "missing credentials", wantErr: true},
+		{name: "missing secret", provider: DnsProvider{AccessKeyID: "id"}, wantErr: true},
+		{name: "missing key", provider: DnsProvider{AccessKeySecret: "secret"}, wantErr: true},
+		{name: "role with keys", provider: DnsProvider{RAMRole: "role", AccessKeyID: "id", AccessKeySecret: "secret"}, wantErr: true},
+		{name: "role with partial keys", provider: DnsProvider{RAMRole: "role", AccessKeyID: "id"}, wantErr: true},
+		{name: "role with token", provider: DnsProvider{RAMRole: "role", SecurityToken: "token"}, wantErr: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			testCase.provider.Type = DnsProviderTypeAliESA
+			err := testCase.provider.Validate()
+			if (err != nil) != testCase.wantErr {
+				t.Fatalf("Validate() = %v, wantErr %v", err, testCase.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "DnsProvider AliESA:") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestDnsProviderValidateDNSTimeout(t *testing.T) {
 	base := DnsProvider{Type: DnsProviderTypeCloudflare, Email: "a@b.com", APIKey: "key"}
 

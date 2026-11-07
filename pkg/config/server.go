@@ -189,11 +189,12 @@ type DnsProvider struct {
 	SecretID  string `toml:"secretID" json:"secret_id,omitempty"`
 	SecretKey string `toml:"secretKey" json:"secret_key,omitempty"`
 
-	// alidns
+	// alidns and aliesa
 	AccessKeyID     string `toml:"accessKeyId" json:"access_key_id,omitempty"`
 	AccessKeySecret string `toml:"accessKeySecret" json:"access_key_secret,omitempty"`
 	SecurityToken   string `toml:"securityToken" json:"security_token,omitempty"`
 	RAMRole         string `toml:"ramRole" json:"ram_role,omitempty"`
+	RegionID        string `toml:"regionId" json:"region_id,omitempty"`
 }
 
 func (p *DnsProvider) Validate() error {
@@ -220,14 +221,18 @@ func (p *DnsProvider) Validate() error {
 		if p.SecretID == "" || p.SecretKey == "" {
 			return fmt.Errorf("DnsProvider TencentCloud: empty SecretID or SecretKey")
 		}
-	case DnsProviderTypeAliDNS:
+	case DnsProviderTypeAliDNS, DnsProviderTypeAliESA:
+		providerName := "AliDNS"
+		if p.Type == DnsProviderTypeAliESA {
+			providerName = "AliESA"
+		}
 		if p.RAMRole != "" {
 			// lego prefers the role and would silently ignore the keys.
 			if p.AccessKeyID != "" || p.AccessKeySecret != "" || p.SecurityToken != "" {
-				return fmt.Errorf("DnsProvider AliDNS: set either ramRole or access key credentials, not both")
+				return fmt.Errorf("DnsProvider %s: set either ramRole or access key credentials, not both", providerName)
 			}
 		} else if p.AccessKeyID == "" || p.AccessKeySecret == "" {
-			return fmt.Errorf("DnsProvider AliDNS: set accessKeyId and accessKeySecret, or ramRole")
+			return fmt.Errorf("DnsProvider %s: set accessKeyId and accessKeySecret, or ramRole", providerName)
 		}
 	default:
 		return fmt.Errorf("unknown DnsProvider: %s", p.Type)

@@ -9,6 +9,7 @@ const (
 	DnsProviderTypeCloudflare   string = "cloudflare"
 	DnsProviderTypeTencentCloud string = "tencentcloud"
 	DnsProviderTypeAliDNS       string = "alidns"
+	DnsProviderTypeAliESA       string = "aliesa"
 
 	HttpProviderTypeS3    string = "s3"
 	HttpProviderTypeLocal string = "local"

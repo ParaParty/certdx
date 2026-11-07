@@ -83,7 +83,7 @@ block is in `config/server_config_full.toml`.
 
 | Key | Type | Notes |
 | --- | --- | --- |
-| `type` | string | `cloudflare`, `tencentcloud`, or `alidns`. |
+| `type` | string | `cloudflare`, `tencentcloud`, `alidns`, or `aliesa`. |
 | `disableCompletePropagationRequirement` | bool | Skip the lego "wait for full propagation" step. |
 | `conservativeDnsCheck` | bool | Resolve every authoritative NS to all A/AAAA addresses and require the challenge TXT value on each reachable address. Unreachable addresses are skipped, but at least one address must respond. Overrides `disableCompletePropagationRequirement` when enabled. |
 | `nameservers` | string list | Recursive DNS servers used for zone, NS, A, and AAAA discovery. Defaults to the system resolver configuration. |
@@ -91,11 +91,17 @@ block is in `config/server_config_full.toml`.
 | `email`, `apiKey` | string | Cloudflare global API key auth. |
 | `authToken`, `zoneToken` | string | Cloudflare scoped token auth (alternative to global). |
 | `secretID`, `secretKey` | string | Tencent Cloud credentials. |
-| `accessKeyId`, `accessKeySecret` | string | Alibaba Cloud DNS credentials; required unless `ramRole` is set. |
+| `accessKeyId`, `accessKeySecret` | string | Alibaba Cloud DNS / ESA credentials; required unless `ramRole` is set. |
 | `securityToken` | string | Optional Alibaba Cloud temporary credential token. Static tokens expire, so use `ramRole` for a long-running server. |
 | `ramRole` | string | Optional ECS instance RAM role. Uses refreshable instance-role credentials instead of access key credentials. If `HTTP_PROXY` is set, also set `NO_PROXY=100.100.100.200`; otherwise the credential lookup goes through the proxy in cleartext. |
+| `regionId` | string | ESA API region for `aliesa`; defaults to `cn-hangzhou`. |
 
 Exactly one credential set must be configured for the chosen `type`.
+
+The `aliesa` provider creates DNS-01 TXT records in Alibaba Cloud ESA and
+automatically discovers the site. Its credentials need `esa:ListSites`,
+`esa:CreateRecord`, and `esa:DeleteRecord` permissions. Cleanup deletes only
+the TXT record created for that challenge.
 
 When an order finishes, the `alidns` provider deletes every TXT record at its
 `_acme-challenge` name. That includes a record kept there by hand, and the

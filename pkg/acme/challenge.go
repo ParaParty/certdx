@@ -8,6 +8,7 @@ import (
 	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/lego"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/alidns"
+	"pkg.para.party/certdx/pkg/acme/challengeproviders/aliesa"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/cloudflare"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/s3"
 	"pkg.para.party/certdx/pkg/acme/challengeproviders/tencentcloud"
@@ -114,6 +115,8 @@ func getChallenger(legoCfg *lego.Config, p *config.ServerConfig) (string, challe
 			return makeTencentCloudProvider(legoCfg, *p.DnsProvider)
 		case config.DnsProviderTypeAliDNS:
 			return makeAliDNSProvider(legoCfg, *p.DnsProvider)
+		case config.DnsProviderTypeAliESA:
+			return makeAliESAProvider(legoCfg, *p.DnsProvider)
 		default:
 			return "", nil, fmt.Errorf("unknown dns provider type: %s", p.DnsProvider.Type)
 		}
@@ -141,6 +144,11 @@ func makeTencentCloudProvider(_ *lego.Config, p config.DnsProvider) (string, cha
 
 func makeAliDNSProvider(_ *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
 	c, err := alidns.New(p)
+	return config.ChallengeTypeDns01, c, err
+}
+
+func makeAliESAProvider(_ *lego.Config, p config.DnsProvider) (string, challenge.Provider, error) {
+	c, err := aliesa.New(p)
 	return config.ChallengeTypeDns01, c, err
 }
 
