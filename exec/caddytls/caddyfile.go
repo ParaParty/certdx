@@ -19,8 +19,9 @@ const (
 	dirGRPC              = "GRPC"
 	dirCertificate       = "certificate"
 
-	dirMainServer    = "main_server"
-	dirStandbyServer = "standby_server"
+	dirMainServer                  = "main_server"
+	dirStandbyServer               = "standby_server"
+	dirFailoverOnDomainsNotAllowed = "failover_on_domains_not_allowed"
 
 	dirURL        = "url"
 	dirAuthMethod = "authMethod"
@@ -113,6 +114,16 @@ func (c *CertDXCaddyDaemon) UnmarshalHttpBlock(d *caddyfile.Dispenser) error {
 	for d.Next() {
 		for d.NextBlock(0) {
 			switch d.Val() {
+			case dirFailoverOnDomainsNotAllowed:
+				value, err := expectArg1(d)
+				if err != nil {
+					return err
+				}
+				enabled, err := strconv.ParseBool(value)
+				if err != nil {
+					return d.Errf("invalid value for %s: %s", dirFailoverOnDomainsNotAllowed, value)
+				}
+				c.Http.FailoverOnDomainsNotAllowed = enabled
 			case dirMainServer:
 				if err := c.unmarshalHttpServerBlock(&c.Http.MainServer, d.NewFromNextSegment()); err != nil {
 					return err

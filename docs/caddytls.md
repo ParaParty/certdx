@@ -77,6 +77,7 @@ referenced per-site with `tls { get_certificate certdx <cert-id> }`. Use
         reconnect_interval 10m  # gRPC reconnect cadence
 
         http {
+            failover_on_domains_not_allowed false
             main_server { ... }
             standby_server { ... }   # optional
         }
@@ -105,6 +106,13 @@ Top-level directives:
 | `http` | block | HTTP transport options. |
 | `GRPC` | block | gRPC transport options. |
 | `certificate <id>` | block | Defines a certificate id and the SANs it should cover. Used by `get_certificate certdx <id>`. |
+
+### `http` block
+
+`failover_on_domains_not_allowed true` immediately tries the next server
+when a server returns `Domains not allowed`, without retrying that server.
+It defaults to `false`. If all configured servers refuse or fail, the client
+waits an hour before starting over from the main server.
 
 ### `http { main_server | standby_server }` block
 

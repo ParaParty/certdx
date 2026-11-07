@@ -80,10 +80,13 @@ func (p *httpPoller) poll() time.Duration {
 	if err != nil {
 		return p.onFailure(err)
 	}
+	if resp.Err == "Domains not allowed" && p.daemon.Config.Http.FailoverOnDomainsNotAllowed {
+		logging.Error("Server refused cert %v from %s: %s", domains, p.serverName(), resp.Err)
+		return p.nextServer(errors.New(resp.Err))
+	}
 	p.current, p.failures, p.retryWait = 0, 0, pollRetryMin
 
 	if resp.Err != "" {
-		// A refusal such as "domains not allowed" won't change soon.
 		logging.Error("Server refused cert %v: %s", domains, resp.Err)
 		p.failOnce(errors.New(resp.Err))
 		return p.interval
@@ -104,7 +107,6 @@ func (p *httpPoller) poll() time.Duration {
 func (p *httpPoller) onFailure(err error) time.Duration {
 	attempts := max(p.daemon.Config.Common.RetryCount, 1)
 	p.failures++
-	p.lastErrs[p.current] = fmt.Errorf("%s: %w", p.serverName(), err)
 	logging.Warn("Failed to get cert %v from %s (%d/%d): %s", p.cert.Config.Domains, p.serverName(), p.failures, attempts, err)
 
 	if p.failures < attempts {
@@ -113,6 +115,11 @@ func (p *httpPoller) onFailure(err error) time.Duration {
 		return wait
 	}
 
+	return p.nextServer(err)
+}
+
+func (p *httpPoller) nextServer(err error) time.Duration {
+	p.lastErrs[p.current] = fmt.Errorf("%s: %w", p.serverName(), err)
 	p.failures, p.retryWait = 0, pollRetryMin
 	if p.current+1 < len(p.servers) {
 		p.current++

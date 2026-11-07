@@ -194,6 +194,59 @@ func TestRunOnceUsesHTTPStandby(t *testing.T) {
 	}
 }
 
+func TestRunOnceDomainsNotAllowed(t *testing.T) {
+	chain, key := onceTestCert(t)
+	for _, standbyRefuses := range []bool{false, true} {
+		name := "standby succeeds"
+		if standbyRefuses {
+			name = "all servers refuse"
+		}
+		t.Run(name, func(t *testing.T) {
+			main := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(api.HttpCertResp{Err: "Domains not allowed"})
+			}))
+			defer main.Close()
+			standby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if standbyRefuses {
+					_ = json.NewEncoder(w).Encode(api.HttpCertResp{Err: "Domains not allowed"})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(api.HttpCertResp{FullChain: chain, Key: key})
+			}))
+			defer standby.Close()
+			dir := t.TempDir()
+			daemon := MakeCertDXClientDaemon()
+			daemon.Config.Common.RetryCount = 2
+			daemon.Config.Http.FailoverOnDomainsNotAllowed = true
+			daemon.Config.Http.MainServer.Url = main.URL
+			daemon.Config.Http.StandbyServer.Url = standby.URL
+			daemon.Config.Certificates = []config.ClientCertificate{{
+				Name: "web", Domains: []string{"example.com"},
+				Actions: []config.UpdateActionConfig{&config.FileAction{SavePath: dir}},
+			}}
+			if err := daemon.ClientInit(); err != nil {
+				t.Fatal(err)
+			}
+			err := daemon.RunOnce()
+			if standbyRefuses {
+				for _, want := range []string{"all HTTP servers failed", "MainServer: Domains not allowed", "StandbyServer: Domains not allowed"} {
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("RunOnce error = %v, want %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RunOnce with standby: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "web.pem"))
+			if err != nil || !bytes.Equal(got, chain) {
+				t.Fatalf("standby certificate = %q, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestRunOnceReportsHTTPClientInitFailure(t *testing.T) {
 	daemon := MakeCertDXClientDaemon()
 	daemon.Config.Http.MainServer.Url = "https://example.com"

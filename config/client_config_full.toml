@@ -8,6 +8,9 @@ mode = "http"
 # will retry connect to main server every reconnectInterval.
 reconnectInterval = "10m"
 
+[Http]
+failoverOnDomainsNotAllowed = false
+
 [Http.MainServer]
 url = "https://certdxserver.example.com:19198/1145141919810"
 authMethod = "token"

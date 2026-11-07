@@ -46,8 +46,9 @@ type CertDXCaddyConfig struct {
 	config.ClientCommonConfig
 
 	Http struct {
-		MainServer    config.ClientHttpServer `json:"main_server,omitempty"`
-		StandbyServer config.ClientHttpServer `json:"standby_server,omitempty"`
+		FailoverOnDomainsNotAllowed bool                    `json:"failover_on_domains_not_allowed,omitempty"`
+		MainServer                  config.ClientHttpServer `json:"main_server,omitempty"`
+		StandbyServer               config.ClientHttpServer `json:"standby_server,omitempty"`
 	} `json:"http,omitempty"`
 
 	GRPC struct {
@@ -96,6 +97,7 @@ func (m *CertDXCaddyDaemon) Provision(ctx caddy.Context) error {
 	m.certDXDaemon = client.MakeCertDXClientDaemon()
 	cfg := m.certDXDaemon.Config
 	cfg.Common = m.ClientCommonConfig
+	cfg.Http.FailoverOnDomainsNotAllowed = m.Http.FailoverOnDomainsNotAllowed
 	cfg.Http.MainServer = m.Http.MainServer
 	cfg.Http.StandbyServer = m.Http.StandbyServer
 	cfg.GRPC.MainServer = m.GRPC.MainServer

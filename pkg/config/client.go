@@ -17,8 +17,9 @@ type ClientConfig struct {
 	Common ClientCommonConfig `toml:"Common" json:"common,omitempty"`
 
 	Http struct {
-		MainServer    ClientHttpServer `toml:"MainServer" json:"main_server,omitempty"`
-		StandbyServer ClientHttpServer `toml:"StandbyServer" json:"standby_server,omitempty"`
+		FailoverOnDomainsNotAllowed bool             `toml:"failoverOnDomainsNotAllowed" json:"failover_on_domains_not_allowed,omitempty"`
+		MainServer                  ClientHttpServer `toml:"MainServer" json:"main_server,omitempty"`
+		StandbyServer               ClientHttpServer `toml:"StandbyServer" json:"standby_server,omitempty"`
 	} `toml:"Http" json:"http,omitempty"`
 
 	GRPC struct {

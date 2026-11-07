@@ -116,6 +116,83 @@ func TestHttpPollerFailover(t *testing.T) {
 	}
 }
 
+func TestHttpPollerDomainsNotAllowed(t *testing.T) {
+	for _, standbyResponse := range []string{"success", "refused", "unavailable", "absent", "disabled", "other refusal"} {
+		t.Run(standbyResponse, func(t *testing.T) {
+			mainSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if standbyResponse == "other refusal" {
+					_ = json.NewEncoder(w).Encode(api.HttpCertResp{Err: "certificate denied"})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(api.HttpCertResp{Err: "Domains not allowed"})
+			}))
+			defer mainSrv.Close()
+			daemon := MakeCertDXClientDaemon()
+			defer daemon.Stop()
+			daemon.Config.Common.RetryCount = 2
+			daemon.Config.Http.FailoverOnDomainsNotAllowed = standbyResponse != "disabled"
+			main := mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{Url: mainSrv.URL}))
+			var standby *CertDXHttpClient
+			if standbyResponse != "absent" {
+				standbySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					switch standbyResponse {
+					case "refused":
+						_ = json.NewEncoder(w).Encode(api.HttpCertResp{Err: "Domains not allowed"})
+					case "unavailable":
+						http.Error(w, "", http.StatusServiceUnavailable)
+					default:
+						_ = json.NewEncoder(w).Encode(api.HttpCertResp{FullChain: []byte("standby"), RenewTimeLeft: 24 * time.Hour})
+					}
+				}))
+				defer standbySrv.Close()
+				standby = mustMakeClient(t, WithCertDXServerInfo(&config.ClientHttpServer{Url: standbySrv.URL}))
+			}
+			cert := &watchingCert{
+				Config:     config.ClientCertificate{Name: "x", Domains: []string{"example.com"}},
+				UpdateChan: make(chan certData, 1),
+			}
+			poller := daemon.newHttpPoller(cert, main, standby)
+			if standbyResponse == "absent" || standbyResponse == "disabled" || standbyResponse == "other refusal" {
+				if got := poller.poll(); got != pollIdleWait {
+					t.Fatalf("%s: wait %s, want %s", standbyResponse, got, pollIdleWait)
+				}
+				return
+			}
+			if got := poller.poll(); got != 0 {
+				t.Fatalf("main refusal: wait %s, want immediate failover", got)
+			}
+			switch standbyResponse {
+			case "success":
+				if got := poller.poll(); got != 6*time.Hour {
+					t.Fatalf("standby success: wait %s, want 6h", got)
+				}
+				select {
+				case got := <-cert.UpdateChan:
+					if string(got.Fullchain) != "standby" {
+						t.Fatalf("delivered %q, want standby", got.Fullchain)
+					}
+				default:
+					t.Fatal("standby certificate was not delivered")
+				}
+			case "refused":
+				if got := poller.poll(); got != pollIdleWait {
+					t.Fatalf("all refused: wait %s, want %s", got, pollIdleWait)
+				}
+			case "unavailable":
+				if got := poller.poll(); got != pollRetryMin {
+					t.Fatalf("standby failure: wait %s, want %s", got, pollRetryMin)
+				}
+				if got := poller.poll(); got != pollIdleWait {
+					t.Fatalf("standby exhausted: wait %s, want %s", got, pollIdleWait)
+				}
+			}
+			if poller.current != 0 {
+				t.Fatal("poller did not return to the main server")
+			}
+		})
+	}
+}
+
 func TestMakeCertDXHttpClientDefaults(t *testing.T) {
 	c := mustMakeClient(t)
 	if c.HttpClient == nil {

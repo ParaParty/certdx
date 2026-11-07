@@ -28,7 +28,7 @@ certdx_client [flags]
 Top-level sections:
 
 - `[Common]` — operating mode and retry/reconnect tuning.
-- `[Http.MainServer]` / `[Http.StandbyServer]` — used when `Common.mode = "http"`.
+- `[Http]` / `[Http.MainServer]` / `[Http.StandbyServer]` — used when `Common.mode = "http"`.
 - `[GRPC.MainServer]` / `[GRPC.StandbyServer]` — used when `Common.mode = "grpc"`.
 - `[[Profile.TencentCloud]]` / `[[Profile.AliESA]]` / `[[Profile.Kubernetes]]` — named credentials for update actions.
 - `[[Certificate]]` — one entry per certificate to fetch, each with its update actions.
@@ -40,6 +40,12 @@ Top-level sections:
 | `retryCount` | int | `5` | Update actions: retries after a failed run, so an action runs at most `retryCount + 1` times. Servers: failed requests (HTTP) or connections (gRPC) to one server before switching to the next. |
 | `mode` | string | `"http"` | `http` or `grpc`. |
 | `reconnectInterval` | duration string | `"10m"` | gRPC only. Reconnect to the server every interval if disconnected; also used to retry the main server while running on the standby. |
+
+### `[Http]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `failoverOnDomainsNotAllowed` | bool | `false` | Immediately try the next server when a server returns `Domains not allowed`, without retrying the refusing server. |
 
 ### `[Http.MainServer]` / `[Http.StandbyServer]`
 
@@ -290,6 +296,13 @@ seconds. Only then does it try the standby server the same way, so a main and
 a standby server issuing from different CAs don't alternate. If the standby
 fails too, the client waits an hour and starts over from the main server.
 After any successful request the next round starts with the main server.
+
+With `Http.failoverOnDomainsNotAllowed = true`, a `Domains not allowed`
+response skips that server immediately. If all configured servers refuse or
+fail, the client waits an hour before starting over; `--quit` reports failure
+instead. The default is `false`: a refusal waits for the current polling
+interval without trying the standby. Other error strings keep this default
+behavior regardless of the setting.
 
 The file action's writes are atomic via a temp-file-and-rename, so a
 downstream service reading the cert mid-update never observes a torn or
