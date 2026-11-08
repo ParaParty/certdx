@@ -14,7 +14,6 @@ StandardError=journal
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/certdx
 StateDirectory=certdx
